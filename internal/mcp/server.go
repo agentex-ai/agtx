@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,7 +38,11 @@ type rpcRequest struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
-type toolArguments map[string]json.RawMessage
+type toolArguments struct {
+	values  map[string]json.RawMessage
+	tool    string
+	allowed map[string]struct{}
+}
 
 func Run(service *core.Service, stdin io.Reader, stdout, stderr io.Writer) int {
 	s := &server{service: service, in: stdin, out: stdout, errOut: stderr}
@@ -69,6 +74,9 @@ func (s *server) loop() error {
 }
 
 func readMessage(reader *bufio.Reader) ([]byte, bool, error) {
+	if err := discardMessageWhitespace(reader); err != nil {
+		return nil, false, err
+	}
 	first, err := reader.Peek(1)
 	if err != nil {
 		return nil, false, err
@@ -111,6 +119,23 @@ func readMessage(reader *bufio.Reader) ([]byte, bool, error) {
 	return body, true, nil
 }
 
+func discardMessageWhitespace(reader *bufio.Reader) error {
+	for {
+		next, err := reader.Peek(1)
+		if err != nil {
+			return err
+		}
+		switch next[0] {
+		case ' ', '\t', '\r', '\n':
+			if _, err := reader.ReadByte(); err != nil {
+				return err
+			}
+		default:
+			return nil
+		}
+	}
+}
+
 func readLineLimited(reader *bufio.Reader, limit int) ([]byte, error) {
 	var buffer bytes.Buffer
 	for {
@@ -144,15 +169,15 @@ func (s *server) handleLine(line []byte) error {
 	}
 	id := request.ID
 	hasID := len(id) > 0
-	if err := validateRequest(request); err != nil {
+	if data, ok := validateRequest(request); !ok {
 		if hasID {
-			return s.writeError(id, -32600, "invalid request", err.Error())
+			return s.writeError(id, -32600, "invalid request", data)
 		}
-		return s.writeError(nil, -32600, "invalid request", err.Error())
+		return s.writeError(nil, -32600, "invalid request", data)
 	}
 	if strings.TrimSpace(request.Method) == "" {
 		if hasID {
-			return s.writeError(id, -32600, "invalid request", "missing method")
+			return s.writeError(id, -32600, "invalid request", map[string]any{"error": "missing method", "supported_methods": supportedMethods()})
 		}
 		return nil
 	}
@@ -190,26 +215,43 @@ func (s *server) handleLine(line []byte) error {
 		return s.writeResult(id, result)
 	default:
 		if hasID {
-			return s.writeError(id, -32601, "method not found", request.Method)
+			return s.writeError(id, -32601, "method not found", map[string]any{"method": request.Method, "supported_methods": supportedMethods()})
 		}
 		return nil
 	}
 }
 
-func validateRequest(request rpcRequest) error {
+func supportedMethods() []string {
+	return []string{"initialize", "notifications/initialized", "tools/list", "tools/call"}
+}
+
+func validateRequest(request rpcRequest) (any, bool) {
 	if request.JSONRPC != "2.0" {
-		return fmt.Errorf("jsonrpc must be 2.0")
+		return map[string]any{
+			"error":    "jsonrpc must be 2.0",
+			"field":    "jsonrpc",
+			"expected": "2.0",
+			"actual":   request.JSONRPC,
+		}, false
 	}
 	if len(request.ID) > 0 && !isValidRequestID(request.ID) {
-		return fmt.Errorf("id must be string, number, or null")
+		return map[string]any{
+			"error":    "id must be string, number, or null",
+			"field":    "id",
+			"expected": []string{"string", "number", "null"},
+		}, false
 	}
 	if len(request.Params) > 0 {
 		trimmed := bytes.TrimSpace(request.Params)
 		if len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) && trimmed[0] != '{' {
-			return fmt.Errorf("params must be an object or null")
+			return map[string]any{
+				"error":    "params must be an object or null",
+				"field":    "params",
+				"expected": []string{"object", "null"},
+			}, false
 		}
 	}
-	return nil
+	return nil, true
 }
 
 func isValidRequestID(raw json.RawMessage) bool {
@@ -232,17 +274,17 @@ func isValidRequestID(raw json.RawMessage) bool {
 func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 	var request toolCallRequest
 	if err := decodeJSONStrict(params, &request); err != nil {
-		return nil, core.NewError(core.CodeInvalidArgument, "invalid tools/call params", err.Error())
+		return nil, invalidToolCallParamsError(err)
 	}
 	request.Name = strings.TrimSpace(request.Name)
 	if request.Name == "" {
-		return nil, core.NewError(core.CodeInvalidArgument, "tool name is required", nil)
+		return nil, core.NewError(core.CodeInvalidArgument, "tool name is required", map[string]any{"supported_tools": toolNames()})
 	}
 	allowed, ok := allowedToolArguments(request.Name)
 	if !ok {
-		return nil, core.NewError(core.CodeNotFound, "unknown tool", map[string]any{"tool": request.Name})
+		return nil, unknownToolError(request.Name)
 	}
-	args, err := parseToolArguments(request.Arguments, allowed)
+	args, err := parseToolArguments(request.Name, request.Arguments, allowed)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +296,7 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		if strings.TrimSpace(query) == "" {
-			return nil, core.NewError(core.CodeInvalidArgument, "query is required", nil)
+			return nil, args.missingRequiredArgument("query", "non_empty_string")
 		}
 		limit, err := args.PositiveInt("limit", 10)
 		if err != nil {
@@ -281,6 +323,8 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		return toolJSON(status), nil
+	case "list_config_keys":
+		return toolJSON(core.ConfigKeys()), nil
 	case "get_pro_status":
 		status, err := s.service.ProStatus(context.Background())
 		if err != nil {
@@ -305,7 +349,7 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		if strings.TrimSpace(callbackURI) == "" {
-			return nil, core.NewError(core.CodeInvalidArgument, "callback_uri is required", nil)
+			return nil, args.missingRequiredArgument("callback_uri", "non_empty_string")
 		}
 		result, err := s.service.ProCallback(context.Background(), callbackURI)
 		if err != nil {
@@ -324,14 +368,14 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		if strings.TrimSpace(device) == "" {
-			return nil, core.NewError(core.CodeInvalidArgument, "device_id is required", nil)
+			return nil, args.missingRequiredArgument("device_id", "non_empty_string")
 		}
 		yes, err := args.Bool("yes", false)
 		if err != nil {
 			return nil, err
 		}
 		if !yes {
-			return nil, core.NewError(core.CodeConfirmationRequired, "revoke_pro_device requires yes=true", map[string]any{"retry_with": map[string]any{"yes": true}})
+			return nil, args.confirmationRequired("revoke_pro_device requires yes=true")
 		}
 		result, err := s.service.ProRevokeDevice(context.Background(), device)
 		if err != nil {
@@ -360,11 +404,11 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		if strings.TrimSpace(target) == "" {
-			return nil, core.NewError(core.CodeInvalidArgument, "target is required", nil)
+			return nil, args.missingRequiredArgument("target", "non_empty_string")
 		}
 		info, ok := agent.LookupTarget(target)
 		if !ok {
-			return nil, core.NewError(core.CodeInvalidArgument, "unsupported agent target", map[string]any{"target": target, "supported_targets": agent.SupportedTargets()})
+			return nil, args.unsupportedValue("unsupported agent target", "target", target, "supported_targets", agent.SupportedTargets())
 		}
 		return toolJSON(info), nil
 	case "verify_skill":
@@ -373,7 +417,7 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		if strings.TrimSpace(skill) == "" {
-			return nil, core.NewError(core.CodeInvalidArgument, "skill is required", nil)
+			return nil, args.missingRequiredArgument("skill", "non_empty_string")
 		}
 		result, err := s.service.VerifySkill(skill)
 		if err != nil {
@@ -400,6 +444,9 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 				skills = []string{skill}
 			}
 		}
+		if len(skills) == 0 {
+			return nil, args.missingRequiredArguments("at least one skill name is required", []string{"skill", "skills"}, "non_empty_string_or_array_of_strings")
+		}
 		plan, err := s.service.PlanInstall(skills)
 		if err != nil {
 			return nil, err
@@ -411,14 +458,14 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		if strings.TrimSpace(skill) == "" {
-			return nil, core.NewError(core.CodeInvalidArgument, "skill is required", nil)
+			return nil, args.missingRequiredArgument("skill", "non_empty_string")
 		}
 		yes, err := args.Bool("yes", false)
 		if err != nil {
 			return nil, err
 		}
 		if !yes {
-			return nil, core.NewError(core.CodeConfirmationRequired, "install_skill requires yes=true", map[string]any{"retry_with": map[string]any{"yes": true}})
+			return nil, args.confirmationRequired("install_skill requires yes=true")
 		}
 		result, err := s.service.InstallSkills(context.Background(), []string{skill})
 		if err != nil {
@@ -450,7 +497,7 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		if !yes {
-			return nil, core.NewError(core.CodeConfirmationRequired, "upgrade_skill requires yes=true", map[string]any{"retry_with": map[string]any{"yes": true}})
+			return nil, args.confirmationRequired("upgrade_skill requires yes=true")
 		}
 		var names []string
 		if skill != "" {
@@ -467,7 +514,7 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		if strings.TrimSpace(skill) == "" {
-			return nil, core.NewError(core.CodeInvalidArgument, "skill is required", nil)
+			return nil, args.missingRequiredArgument("skill", "non_empty_string")
 		}
 		to, err := args.String("to")
 		if err != nil {
@@ -489,7 +536,7 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		if !yes {
-			return nil, core.NewError(core.CodeConfirmationRequired, "rollback_skill requires yes=true", map[string]any{"retry_with": map[string]any{"yes": true}})
+			return nil, args.confirmationRequired("rollback_skill requires yes=true")
 		}
 		result, err := s.service.RollbackSkill(skill, to)
 		if err != nil {
@@ -502,7 +549,7 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		if strings.TrimSpace(skill) == "" {
-			return nil, core.NewError(core.CodeInvalidArgument, "skill is required", nil)
+			return nil, args.missingRequiredArgument("skill", "non_empty_string")
 		}
 		allVersions, err := args.Bool("all_versions", false)
 		if err != nil {
@@ -524,7 +571,7 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		if !yes {
-			return nil, core.NewError(core.CodeConfirmationRequired, "uninstall_skill requires yes=true", map[string]any{"retry_with": map[string]any{"yes": true}})
+			return nil, args.confirmationRequired("uninstall_skill requires yes=true")
 		}
 		result, err := s.service.UninstallSkill(skill, allVersions)
 		if err != nil {
@@ -537,7 +584,7 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		if strings.TrimSpace(skill) == "" {
-			return nil, core.NewError(core.CodeInvalidArgument, "skill is required", nil)
+			return nil, args.missingRequiredArgument("skill", "non_empty_string")
 		}
 		skillArgs, err := args.StringSlice("args")
 		if err != nil {
@@ -566,7 +613,7 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 		}
 		return toolJSON(result), nil
 	}
-	return nil, core.NewError(core.CodeNotFound, "unknown tool", map[string]any{"tool": request.Name})
+	return nil, unknownToolError(request.Name)
 }
 
 func (s *server) writeResult(id json.RawMessage, result any) error {
@@ -655,6 +702,7 @@ func tools() []map[string]any {
 			nil,
 		), agentTargetSchema()),
 		tool("get_status", "Return local agtx status and paths.", objectSchema(nil, nil, nil), statusSchema()),
+		tool("list_config_keys", "List supported agtx config keys, value types, defaults, and allowed values.", objectSchema(nil, nil, nil), arraySchema(configKeyInfoSchema(), "Supported agtx config keys.")),
 		tool("get_pro_status", "Return local Pro authentication and subscription status.", objectSchema(nil, nil, nil), proStatusSchema()),
 		tool("get_pro_setup", "Return a no-side-effect Pro setup checklist and next actions for humans or agents.", objectSchema(nil, nil, nil), proSetupSchema()),
 		tool("start_pro_login", "Create a Pro login URL and pending PKCE state without opening a browser.", objectSchema(nil, nil, nil), proLoginStartSchema()),
@@ -747,6 +795,33 @@ func tools() []map[string]any {
 			nil,
 		), runResultSchema()),
 	}
+}
+
+func invalidToolCallParamsError(err error) *core.Error {
+	return core.NewError(core.CodeInvalidArgument, "invalid tools/call params", map[string]any{
+		"expected":         "object",
+		"error":            err.Error(),
+		"supported_params": []string{"name", "arguments"},
+	})
+}
+
+func toolNames() []string {
+	items := tools()
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		name, ok := item["name"].(string)
+		if ok && name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func unknownToolError(name string) *core.Error {
+	return core.NewError(core.CodeNotFound, "unknown tool", map[string]any{
+		"tool":            name,
+		"supported_tools": toolNames(),
+	})
 }
 
 func tool(name, description string, inputSchema, outputSchema map[string]any) map[string]any {
@@ -1016,6 +1091,21 @@ func statusSchema() map[string]any {
 			"telemetry":        stringSchema("Configured telemetry mode."),
 		},
 		nil,
+		nil,
+	)
+}
+
+func configKeyInfoSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"key":         nonEmptyStringSchema("Config key accepted by agtx config set/unset."),
+			"type":        nonEmptyStringSchema("Expected value type such as url, enum, string_list, or positive_integer."),
+			"default":     anySchema("Default value after config init or unset."),
+			"description": stringSchema("Human-readable summary of the setting."),
+			"allowed":     stringArraySchema("Allowed values for enum-like settings.", false),
+			"mutable":     booleanSchema("Whether this key can be changed with config set/unset."),
+		},
+		[]string{"key", "type", "description", "mutable"},
 		nil,
 	)
 }
@@ -1382,7 +1472,7 @@ func allowedToolArguments(name string) (map[string]struct{}, bool) {
 		return toolArgumentSet(), true
 	case "get_agent_target":
 		return toolArgumentSet("target"), true
-	case "get_status", "get_pro_status", "get_pro_setup", "start_pro_login", "list_pro_devices", "logout_pro", "register_pro_scheme", "doctor", "refresh_registry":
+	case "get_status", "list_config_keys", "get_pro_status", "get_pro_setup", "start_pro_login", "list_pro_devices", "logout_pro", "register_pro_scheme", "doctor", "refresh_registry":
 		return toolArgumentSet(), true
 	case "complete_pro_login":
 		return toolArgumentSet("callback_uri"), true
@@ -1415,94 +1505,162 @@ func toolArgumentSet(names ...string) map[string]struct{} {
 	return allowed
 }
 
-func parseToolArguments(raw json.RawMessage, allowed map[string]struct{}) (toolArguments, error) {
-	args := toolArguments{}
+func parseToolArguments(tool string, raw json.RawMessage, allowed map[string]struct{}) (toolArguments, error) {
+	args := toolArguments{values: map[string]json.RawMessage{}, tool: tool, allowed: allowed}
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return args, nil
 	}
-	if err := decodeJSONStrict(trimmed, &args); err != nil {
-		return nil, core.NewError(core.CodeInvalidArgument, "invalid tool arguments", err.Error())
+	if err := decodeJSONStrict(trimmed, &args.values); err != nil {
+		return toolArguments{}, core.NewError(core.CodeInvalidArgument, "invalid tool arguments", map[string]any{
+			"tool":                tool,
+			"expected":            "object",
+			"error":               err.Error(),
+			"supported_arguments": toolArgumentNames(allowed),
+		})
 	}
-	for name := range args {
+	for name := range args.values {
 		if _, ok := allowed[name]; !ok {
-			return nil, core.NewError(core.CodeInvalidArgument, "unknown tool argument", map[string]any{"argument": name})
+			return toolArguments{}, core.NewError(core.CodeInvalidArgument, "unknown tool argument", map[string]any{
+				"tool":                tool,
+				"argument":            name,
+				"supported_arguments": toolArgumentNames(allowed),
+			})
 		}
 	}
 	return args, nil
 }
 
+func toolArgumentNames(allowed map[string]struct{}) []string {
+	names := make([]string, 0, len(allowed))
+	for name := range allowed {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
 func (a toolArguments) String(name string) (string, error) {
-	raw, ok := a[name]
+	raw, ok := a.values[name]
 	if !ok {
 		return "", nil
 	}
 	var value string
 	if err := decodeJSONStrict(raw, &value); err != nil {
-		return "", invalidToolArgumentType(name, "string", err)
+		return "", a.invalidArgumentType(name, "string", err)
 	}
 	return value, nil
 }
 
 func (a toolArguments) StringSlice(name string) ([]string, error) {
-	raw, ok := a[name]
+	raw, ok := a.values[name]
 	if !ok {
 		return nil, nil
 	}
 	var value []string
 	if err := decodeJSONStrict(raw, &value); err != nil {
-		return nil, invalidToolArgumentType(name, "array of strings", err)
+		return nil, a.invalidArgumentType(name, "array of strings", err)
 	}
 	return value, nil
 }
 
 func (a toolArguments) Bool(name string, fallback bool) (bool, error) {
-	raw, ok := a[name]
+	raw, ok := a.values[name]
 	if !ok {
 		return fallback, nil
 	}
 	var value bool
 	if err := decodeJSONStrict(raw, &value); err != nil {
-		return false, invalidToolArgumentType(name, "boolean", err)
+		return false, a.invalidArgumentType(name, "boolean", err)
 	}
 	return value, nil
 }
 
 func (a toolArguments) PositiveInt(name string, fallback int) (int, error) {
-	raw, ok := a[name]
+	raw, ok := a.values[name]
 	if !ok {
 		return fallback, nil
 	}
 	var value int
 	if err := decodeJSONStrict(raw, &value); err != nil {
-		return 0, invalidToolArgumentType(name, "integer", err)
+		return 0, a.invalidArgumentType(name, "integer", err)
 	}
 	if value <= 0 {
-		return 0, core.NewError(core.CodeInvalidArgument, name+" must be a positive integer", map[string]any{"argument": name, "value": value})
+		return 0, a.invalidPositiveInteger(name, value)
 	}
 	return value, nil
 }
 
 func (a toolArguments) PositiveInt64(name string, fallback int64) (int64, error) {
-	raw, ok := a[name]
+	raw, ok := a.values[name]
 	if !ok {
 		return fallback, nil
 	}
 	var value int64
 	if err := decodeJSONStrict(raw, &value); err != nil {
-		return 0, invalidToolArgumentType(name, "integer", err)
+		return 0, a.invalidArgumentType(name, "integer", err)
 	}
 	if value <= 0 {
-		return 0, core.NewError(core.CodeInvalidArgument, name+" must be a positive integer", map[string]any{"argument": name, "value": value})
+		return 0, a.invalidPositiveInteger(name, value)
 	}
 	return value, nil
 }
 
-func invalidToolArgumentType(name, expected string, err error) error {
+func (a toolArguments) invalidArgumentType(name, expected string, err error) error {
 	return core.NewError(core.CodeInvalidArgument, "invalid tool argument type", map[string]any{
-		"argument": name,
-		"expected": expected,
-		"error":    err.Error(),
+		"tool":                a.tool,
+		"argument":            name,
+		"expected":            expected,
+		"error":               err.Error(),
+		"supported_arguments": toolArgumentNames(a.allowed),
+	})
+}
+
+func (a toolArguments) invalidPositiveInteger(name string, value any) error {
+	return core.NewError(core.CodeInvalidArgument, name+" must be a positive integer", map[string]any{
+		"tool":                a.tool,
+		"argument":            name,
+		"value":               value,
+		"expected":            "positive_integer",
+		"supported_arguments": toolArgumentNames(a.allowed),
+	})
+}
+
+func (a toolArguments) missingRequiredArgument(name, expected string) error {
+	return core.NewError(core.CodeInvalidArgument, name+" is required", map[string]any{
+		"tool":                a.tool,
+		"argument":            name,
+		"expected":            expected,
+		"supported_arguments": toolArgumentNames(a.allowed),
+	})
+}
+
+func (a toolArguments) missingRequiredArguments(message string, names []string, expected string) error {
+	return core.NewError(core.CodeInvalidArgument, message, map[string]any{
+		"tool":                a.tool,
+		"arguments":           append([]string{}, names...),
+		"expected":            expected,
+		"supported_arguments": toolArgumentNames(a.allowed),
+	})
+}
+
+func (a toolArguments) confirmationRequired(message string) error {
+	return core.NewError(core.CodeConfirmationRequired, message, map[string]any{
+		"tool":                a.tool,
+		"argument":            "yes",
+		"expected":            true,
+		"retry_with":          map[string]any{"yes": true},
+		"supported_arguments": toolArgumentNames(a.allowed),
+	})
+}
+
+func (a toolArguments) unsupportedValue(message, name string, value any, supportedName string, supported []string) error {
+	return core.NewError(core.CodeInvalidArgument, message, map[string]any{
+		"tool":                a.tool,
+		"argument":            name,
+		"value":               value,
+		supportedName:         append([]string{}, supported...),
+		"supported_arguments": toolArgumentNames(a.allowed),
 	})
 }
 

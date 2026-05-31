@@ -78,7 +78,11 @@ func TestMainConfigLoadFailureHonorsNDJSON(t *testing.T) {
 		Event string `json:"event"`
 		Data  struct {
 			Error struct {
-				Code string `json:"code"`
+				Code    string `json:"code"`
+				Details struct {
+					Flags          []string `json:"flags"`
+					SupportedFlags []string `json:"supported_flags"`
+				} `json:"details"`
 			} `json:"error"`
 		} `json:"data"`
 	}
@@ -123,7 +127,11 @@ func TestRunRejectsJSONAndNDJSONTogether(t *testing.T) {
 		Event string `json:"event"`
 		Data  struct {
 			Error struct {
-				Code string `json:"code"`
+				Code    string `json:"code"`
+				Details struct {
+					Flags          []string `json:"flags"`
+					SupportedFlags []string `json:"supported_flags"`
+				} `json:"details"`
 			} `json:"error"`
 		} `json:"data"`
 	}
@@ -132,6 +140,12 @@ func TestRunRejectsJSONAndNDJSONTogether(t *testing.T) {
 	}
 	if event.Event != "failed" || event.Data.Error.Code != "invalid_argument" {
 		t.Fatalf("unexpected event: %s", stdout.String())
+	}
+	if !containsString(event.Data.Error.Details.Flags, "--json") || !containsString(event.Data.Error.Details.Flags, "--ndjson") {
+		t.Fatalf("expected mutually exclusive flag details: %s", stdout.String())
+	}
+	if !containsString(event.Data.Error.Details.SupportedFlags, "--timeout-ms") {
+		t.Fatalf("expected supported flags in event: %s", stdout.String())
 	}
 }
 
@@ -196,6 +210,49 @@ func TestConfigInitAndRegistrySourcesJSON(t *testing.T) {
 	}
 }
 
+func TestConfigKeysJSONAndPlainText(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"config", "keys", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("config keys json failed code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var response struct {
+		OK   bool `json:"ok"`
+		Data []struct {
+			Key     string `json:"key"`
+			Type    string `json:"type"`
+			Mutable bool   `json:"mutable"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid config keys json: %v\n%s", err, stdout.String())
+	}
+	if !response.OK || len(response.Data) == 0 {
+		t.Fatalf("expected config key metadata: %s", stdout.String())
+	}
+	foundPackageMax := false
+	for _, item := range response.Data {
+		if item.Key == "package_max_bytes" {
+			foundPackageMax = item.Type == "positive_integer" && item.Mutable
+			break
+		}
+	}
+	if !foundPackageMax {
+		t.Fatalf("expected package_max_bytes metadata: %s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"config", "keys"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("config keys plain failed code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "registry_url\turl") || !strings.Contains(stdout.String(), "package_max_bytes\tpositive_integer") {
+		t.Fatalf("expected plain config keys table: %s", stdout.String())
+	}
+}
+
 func TestSearchRejectsInvalidLimit(t *testing.T) {
 	t.Setenv("AGTX_HOME", t.TempDir())
 	var stdout bytes.Buffer
@@ -206,6 +263,21 @@ func TestSearchRejectsInvalidLimit(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte(`"code": "invalid_argument"`)) {
 		t.Fatalf("expected invalid argument response: %s", stdout.String())
+	}
+	var response struct {
+		Error struct {
+			Details struct {
+				Flag           string   `json:"flag"`
+				Reason         string   `json:"reason"`
+				SupportedFlags []string `json:"supported_flags"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid search error json: %v\n%s", err, stdout.String())
+	}
+	if response.Error.Details.Flag != "--limit" || response.Error.Details.Reason != "invalid_positive_integer" || !containsString(response.Error.Details.SupportedFlags, "--limit") {
+		t.Fatalf("expected invalid limit details: %s", stdout.String())
 	}
 }
 
@@ -219,6 +291,21 @@ func TestRunRejectsMissingInputValue(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte(`"--input requires a value"`)) {
 		t.Fatalf("expected missing input error: %s", stdout.String())
+	}
+	var response struct {
+		Error struct {
+			Details struct {
+				Flag           string   `json:"flag"`
+				Reason         string   `json:"reason"`
+				SupportedFlags []string `json:"supported_flags"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid run error json: %v\n%s", err, stdout.String())
+	}
+	if response.Error.Details.Flag != "--input" || response.Error.Details.Reason != "missing_value" || !containsString(response.Error.Details.SupportedFlags, "--timeout-ms") {
+		t.Fatalf("expected missing input details: %s", stdout.String())
 	}
 }
 
@@ -258,6 +345,21 @@ func TestRollbackRejectsMissingToValue(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte(`"--to requires a value"`)) {
 		t.Fatalf("expected missing rollback target error: %s", stdout.String())
+	}
+	var response struct {
+		Error struct {
+			Details struct {
+				Flag           string   `json:"flag"`
+				Reason         string   `json:"reason"`
+				SupportedFlags []string `json:"supported_flags"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid rollback error json: %v\n%s", err, stdout.String())
+	}
+	if response.Error.Details.Flag != "--to" || response.Error.Details.Reason != "missing_value" || !containsString(response.Error.Details.SupportedFlags, "--plan") {
+		t.Fatalf("expected missing rollback details: %s", stdout.String())
 	}
 }
 
@@ -368,6 +470,83 @@ func TestConfigSetUnsetAndRegistryValidate(t *testing.T) {
 	}
 }
 
+func TestArgumentCountErrorsIncludeExpectedArgs(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string
+		expectedArg  string
+		supportedArg string
+	}{
+		{name: "config set", args: []string{"config", "set", "registry_url", "--json"}, expectedArg: "value", supportedArg: "--json"},
+		{name: "run", args: []string{"run", "--json"}, expectedArg: "skill", supportedArg: "--timeout-ms"},
+		{name: "registry validate", args: []string{"registry", "validate", "--json"}, expectedArg: "path", supportedArg: "--json"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("AGTX_HOME", t.TempDir())
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := Main(test.args, bytes.NewReader(nil), &stdout, &stderr)
+			if code == 0 {
+				t.Fatalf("expected argument count failure")
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("expected json error on stdout only, got stderr=%q", stderr.String())
+			}
+			var response struct {
+				Error struct {
+					Code    string `json:"code"`
+					Details struct {
+						ExpectedArgs   []string `json:"expected_args"`
+						SupportedFlags []string `json:"supported_flags"`
+					} `json:"details"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+				t.Fatalf("invalid argument count json: %v\n%s", err, stdout.String())
+			}
+			if response.Error.Code != "invalid_argument" || !containsString(response.Error.Details.ExpectedArgs, test.expectedArg) {
+				t.Fatalf("expected argument metadata: %s", stdout.String())
+			}
+			if !containsString(response.Error.Details.SupportedFlags, test.supportedArg) {
+				t.Fatalf("expected supported flags metadata: %s", stdout.String())
+			}
+		})
+	}
+}
+
+func TestConfigUnknownKeyJSONIncludesSupportedKeys(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"config", "set", "typo", "value", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected unknown key failure")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected json error on stdout only, got stderr=%q", stderr.String())
+	}
+	var response struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				Key           string   `json:"key"`
+				SupportedKeys []string `json:"supported_keys"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid unknown key json: %v\n%s", err, stdout.String())
+	}
+	if response.OK || response.Error.Code != "invalid_argument" || response.Error.Details.Key != "typo" {
+		t.Fatalf("unexpected unknown key response: %s", stdout.String())
+	}
+	if !containsString(response.Error.Details.SupportedKeys, "registry_url") || !containsString(response.Error.Details.SupportedKeys, "package_max_bytes") {
+		t.Fatalf("expected supported keys in response: %s", stdout.String())
+	}
+}
+
 func TestProLoginStartJSON(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGTX_HOME", root)
@@ -402,6 +581,48 @@ func TestProLoginRejectsUnexpectedArgument(t *testing.T) {
 	if !bytes.Contains(stdout.Bytes(), []byte(`"code": "invalid_argument"`)) {
 		t.Fatalf("expected invalid argument response: %s", stdout.String())
 	}
+	var response struct {
+		Error struct {
+			Details struct {
+				Args           []string `json:"args"`
+				SupportedFlags []string `json:"supported_flags"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid pro login error json: %v\n%s", err, stdout.String())
+	}
+	if !containsString(response.Error.Details.Args, "extra") || !containsString(response.Error.Details.SupportedFlags, "--open") {
+		t.Fatalf("expected unexpected argument details: %s", stdout.String())
+	}
+}
+
+func TestListRejectsUnexpectedArgumentWithSupportedFlags(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"list", "extra", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected unexpected argument failure")
+	}
+	var response struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				Args           []string `json:"args"`
+				SupportedFlags []string `json:"supported_flags"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid list error json: %v\n%s", err, stdout.String())
+	}
+	if response.Error.Code != "invalid_argument" || !containsString(response.Error.Details.Args, "extra") {
+		t.Fatalf("unexpected list error response: %s", stdout.String())
+	}
+	if !containsString(response.Error.Details.SupportedFlags, "--installed") || !containsString(response.Error.Details.SupportedFlags, "--available") {
+		t.Fatalf("expected list supported flags: %s", stdout.String())
+	}
 }
 
 func TestProSetupJSON(t *testing.T) {
@@ -422,9 +643,9 @@ func TestProSetupJSON(t *testing.T) {
 	var response struct {
 		OK   bool `json:"ok"`
 		Data struct {
-			Authenticated      bool `json:"authenticated"`
-			HasPendingLogin    bool `json:"has_pending_login"`
-			ProAPIURL          string `json:"pro_api_url"`
+			Authenticated      bool     `json:"authenticated"`
+			HasPendingLogin    bool     `json:"has_pending_login"`
+			ProAPIURL          string   `json:"pro_api_url"`
 			CurrentStatus      []string `json:"current_status"`
 			RecommendedActions []struct {
 				ID      string `json:"id"`
@@ -778,6 +999,218 @@ func TestAgentTargetsPlainText(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "codex\t") || !strings.Contains(stdout.String(), "claude-code") {
 		t.Fatalf("expected plain target listing: %s", stdout.String())
+	}
+}
+
+func TestAgentPlainErrorsShowUsage(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"agent"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected agent usage failure")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "usage: agtx agent init") || !strings.Contains(stderr.String(), "agtx agent targets") {
+		t.Fatalf("expected agent usage, got %q", stderr.String())
+	}
+}
+
+func TestNestedCommandErrorsHonorJSON(t *testing.T) {
+	tests := [][]string{
+		{"config", "--json"},
+		{"config", "unknown", "--json"},
+		{"registry", "--json"},
+		{"registry", "unknown", "--json"},
+		{"pro", "--json"},
+		{"pro", "unknown", "--json"},
+		{"agent", "--json"},
+		{"agent", "unknown", "--json"},
+	}
+	for _, args := range tests {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Setenv("AGTX_HOME", t.TempDir())
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := Main(args, bytes.NewReader(nil), &stdout, &stderr)
+			if code == 0 {
+				t.Fatalf("expected failure for %v", args)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("expected json error on stdout only, got stderr=%q", stderr.String())
+			}
+			var response struct {
+				OK    bool `json:"ok"`
+				Error struct {
+					Code    string `json:"code"`
+					Details struct {
+						SupportedSubcommands []string `json:"supported_subcommands"`
+					} `json:"details"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+				t.Fatalf("expected json error for %v: %v\nstdout=%s", args, err, stdout.String())
+			}
+			if response.OK || response.Error.Code != "invalid_argument" {
+				t.Fatalf("unexpected json error for %v: %s", args, stdout.String())
+			}
+			if len(response.Error.Details.SupportedSubcommands) == 0 {
+				t.Fatalf("expected supported_subcommands for %v: %s", args, stdout.String())
+			}
+		})
+	}
+}
+
+func TestUnknownCommandErrorsIncludeSupportedCommands(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "json", args: []string{"stats", "--json"}},
+		{name: "ndjson", args: []string{"stats", "--ndjson"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("AGTX_HOME", t.TempDir())
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := Main(test.args, bytes.NewReader(nil), &stdout, &stderr)
+			if code == 0 {
+				t.Fatalf("expected failure")
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("expected structured error on stdout only, got stderr=%q", stderr.String())
+			}
+			output := bytes.TrimSpace(stdout.Bytes())
+			if test.name == "ndjson" {
+				var event struct {
+					Event string `json:"event"`
+					Data  struct {
+						Error struct {
+							Code    string `json:"code"`
+							Details struct {
+								SupportedCommands []string `json:"supported_commands"`
+							} `json:"details"`
+						} `json:"error"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(output, &event); err != nil {
+					t.Fatalf("invalid ndjson error: %v\n%s", err, stdout.String())
+				}
+				if event.Event != "failed" || event.Data.Error.Code != "invalid_argument" || !containsString(event.Data.Error.Details.SupportedCommands, "status") {
+					t.Fatalf("unexpected ndjson error: %s", stdout.String())
+				}
+				return
+			}
+			var response struct {
+				OK    bool `json:"ok"`
+				Error struct {
+					Code    string `json:"code"`
+					Details struct {
+						SupportedCommands []string `json:"supported_commands"`
+					} `json:"details"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(output, &response); err != nil {
+				t.Fatalf("invalid json error: %v\n%s", err, stdout.String())
+			}
+			if response.OK || response.Error.Code != "invalid_argument" || !containsString(response.Error.Details.SupportedCommands, "status") {
+				t.Fatalf("unexpected json error: %s", stdout.String())
+			}
+		})
+	}
+}
+
+func TestOutputModeFlagsDoNotAcceptAssignments(t *testing.T) {
+	tests := [][]string{
+		{"status", "--json=false"},
+		{"run", "--ndjson=false", "pdf"},
+	}
+	for _, args := range tests {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Setenv("AGTX_HOME", t.TempDir())
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := Main(args, bytes.NewReader(nil), &stdout, &stderr)
+			if code == 0 {
+				t.Fatalf("expected failure for %v", args)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("expected plain error, got stdout=%q", stdout.String())
+			}
+			if strings.TrimSpace(stderr.String()) == "" {
+				t.Fatalf("expected plain stderr for %v", args)
+			}
+		})
+	}
+}
+
+func TestConfigLoadFailureDoesNotHonorAssignedJSONFlag(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	configDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), bytes.Repeat([]byte("x"), 1024*1024+1), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"status", "--json=false"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected config load failure")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected plain failure, got stdout=%q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "configured size limit") {
+		t.Fatalf("expected plain stderr size limit error, got %q", stderr.String())
+	}
+}
+
+func TestDiscoveryHelperListsAreStable(t *testing.T) {
+	lists := map[string][]string{
+		"commands":             supportedCommands(),
+		"config subcommands":   configSubcommands(),
+		"registry subcommands": registrySubcommands(),
+		"pro subcommands":      proSubcommands(),
+		"agent subcommands":    agentSubcommands(),
+		"search flags":         searchFlags(),
+		"install flags":        installFlags(),
+		"run flags":            runFlags(),
+		"uninstall flags":      uninstallFlags(),
+		"list flags":           listFlags(),
+		"rollback flags":       rollbackFlags(),
+		"config init flags":    configInitFlags(),
+		"pro login flags":      proLoginFlags(),
+		"agent init flags":     agentInitFlags(),
+		"json only flags":      jsonOnlyFlags(),
+	}
+	for name, values := range lists {
+		t.Run(name, func(t *testing.T) {
+			if len(values) == 0 {
+				t.Fatalf("%s must not be empty", name)
+			}
+			seen := map[string]bool{}
+			for _, value := range values {
+				if value == "" {
+					t.Fatalf("%s contains empty value: %#v", name, values)
+				}
+				if seen[value] {
+					t.Fatalf("%s contains duplicate value %s: %#v", name, value, values)
+				}
+				seen[value] = true
+			}
+		})
+	}
+	runSet := flagSet(runFlags())
+	for _, flag := range []string{"--json", "--ndjson", "--input", "--timeout-ms", "--output-limit-bytes"} {
+		if !runSet[flag] {
+			t.Fatalf("run flag set missing %s", flag)
+		}
 	}
 }
 

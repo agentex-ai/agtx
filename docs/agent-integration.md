@@ -17,6 +17,7 @@ Available tools:
 - `list_agent_targets`
 - `get_agent_target`
 - `get_status`
+- `list_config_keys`
 - `get_pro_status`
 - `get_pro_setup`
 - `start_pro_login`
@@ -42,10 +43,13 @@ Use `doctor` when an agent starts a session or detects a local failure. Use `ver
 Tool results include both text content and `structuredContent`. On tool failure, `isError=true` and `structuredContent` contains the same `ok/error/trace_id` envelope used by the JSON CLI.
 Some failing tools, such as `verify_skill` and `run_skill`, also include partial diagnostic or run data in `structuredContent.data`.
 MCP requests are bounded to avoid accidental large-message hangs; oversized requests terminate the server with a size-limit error.
-MCP tool arguments are strict: unknown fields, wrong JSON types, trailing JSON values, and non-positive integer limits return structured `invalid_argument` errors instead of silently falling back to defaults.
+MCP tool arguments are strict: non-object argument payloads, unknown fields, wrong JSON types, trailing JSON values, and non-positive integer limits return structured `invalid_argument` errors instead of silently falling back to defaults.
+Unknown MCP tool names include `supported_tools`, and argument-shape or argument-name errors include `supported_arguments`, so wrappers can retry after a spelling or schema mismatch without hard-coded tool lists.
+Confirmation errors from mutating MCP tools preserve `retry_with` and also include the tool name, `yes` argument, and `supported_arguments`, so wrappers can build confirmation prompts and resend the call without special-casing each mutation tool.
 `tools/list` publishes strict JSON Schema for each tool, including required fields, positive integer bounds, and `additionalProperties: false`, so agent clients can validate calls before sending them. For `list_agent_targets` and `get_agent_target`, the metadata now also declares output schema for `setup_steps`, `writes_files`, and `artifacts`, letting clients build setup UIs from discovery alone. The same now applies to skill, status, registry, Pro, diagnostic, and mutation tools, so wrappers can pre-wire result viewers, plan/confirm flows, and local-status panels before making the first call. Each tool now also advertises `errorOutputSchema`, which describes the shared failure envelope and any partial `data` payload preserved on errors.
-The JSON-RPC envelope is also strict: `jsonrpc` must be `2.0`, `id` must be string/number/null, `params` must be an object or null, and unknown top-level fields are rejected.
+The JSON-RPC envelope is also strict: `jsonrpc` must be `2.0`, `id` must be string/number/null, `params` must be an object or null, and unknown top-level fields are rejected. Envelope validation errors include `field` and `expected` details; unknown methods return `supported_methods`, and malformed `tools/call` params include `supported_params`.
 Agent-facing wrappers can self-bootstrap from MCP too: call `list_agent_targets` to discover supported targets, then `get_agent_target` to fetch structured snippets, aliases, and path hints for a specific integration.
+If `get_agent_target` is called with an unsupported target, the error includes both `supported_targets` and `supported_arguments` for the failed `target` argument.
 Pro-aware failures are now more actionable too: when a tool returns `unauthorized`, `subscription_required`, or `device_limit_exceeded`, inspect `structuredContent.error.details.pro_setup` and `structuredContent.error.details.next_actions` before asking the user what to do. This lets a wrapper branch directly into `start_pro_login`, `get_pro_status`, `list_pro_devices`, or `register_pro_scheme` without maintaining its own recovery matrix.
 
 ## JSON CLI Fallback
@@ -59,6 +63,7 @@ agtx install xlsx --yes --json
 agtx uninstall xlsx --plan --json
 agtx doctor --json
 agtx verify xlsx --json
+agtx config keys --json
 agtx registry validate ./registry.json --json
 agtx run xlsx --input input.json --json
 agtx pro status --json
@@ -74,6 +79,8 @@ Do not pass `--json` and `--ndjson` together. If initialization or input reading
 For large inputs, set `--output-limit-bytes`; CLI mode uses the same byte limit for captured stdout/stderr and `--input file|-` reads.
 If `run_skill` fails before execution, inspect the structured error: missing, directory, escaping, or non-executable entrypoints are reported as `invalid_argument` instead of raw process-launch errors.
 CLI value flags are strict: missing values for flags such as `--input`, `--to`, `--timeout-ms`, and `--output-limit-bytes` return structured `invalid_argument` errors instead of being ignored.
+Config key discovery is available through `agtx config keys --json` and MCP `list_config_keys`; unknown config-key errors include `supported_keys`.
+CLI recovery details mirror the MCP path: unknown top-level commands include `supported_commands`, unknown or missing nested subcommands include `supported_subcommands`, missing positional arguments include `expected_args`, and bad, mutually exclusive, or unexpected flags include `supported_flags` along with the offending `flag`, `flags`, or `args` where applicable.
 For `agtx run`, use `--` to stop agtx flag parsing before skill arguments when the skill itself expects `-x` or `--name` style flags. Output-mode flags only count before that separator, so `agtx run demo -- --json` passes `--json` to the skill instead of switching agtx into JSON mode.
 
 ## Config Snippets

@@ -39,6 +39,58 @@ func TestMCPToolsList(t *testing.T) {
 	}
 }
 
+func TestMCPToolDiscoveryMatchesArgumentAllowList(t *testing.T) {
+	discovered := map[string]bool{}
+	for _, item := range tools() {
+		name, ok := item["name"].(string)
+		if !ok || name == "" {
+			t.Fatalf("tool is missing name: %#v", item)
+		}
+		if discovered[name] {
+			t.Fatalf("duplicate tool name: %s", name)
+		}
+		discovered[name] = true
+		if _, ok := allowedToolArguments(name); !ok {
+			t.Fatalf("tool %s is discoverable but not callable", name)
+		}
+		inputSchema, ok := item["inputSchema"].(map[string]any)
+		if !ok {
+			t.Fatalf("tool %s is missing input schema: %#v", name, item)
+		}
+		properties, ok := inputSchema["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("tool %s is missing input schema properties: %#v", name, inputSchema)
+		}
+		allowed, _ := allowedToolArguments(name)
+		if len(properties) != len(allowed) {
+			t.Fatalf("tool %s schema/allow-list length mismatch: schema=%v allowed=%v", name, propertyNames(properties), toolArgumentNames(allowed))
+		}
+		for property := range properties {
+			if _, ok := allowed[property]; !ok {
+				t.Fatalf("tool %s schema exposes unsupported argument %s", name, property)
+			}
+		}
+		for argument := range allowed {
+			if _, ok := properties[argument]; !ok {
+				t.Fatalf("tool %s allow-list argument %s is missing from schema", name, argument)
+			}
+		}
+	}
+	for _, name := range toolNames() {
+		if !discovered[name] {
+			t.Fatalf("toolNames includes undiscovered tool: %s", name)
+		}
+	}
+}
+
+func propertyNames(properties map[string]any) []string {
+	names := make([]string, 0, len(properties))
+	for name := range properties {
+		names = append(names, name)
+	}
+	return names
+}
+
 func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	service := core.NewService(core.PathsForRoot(t.TempDir()))
 	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n")
@@ -71,6 +123,7 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	var runErrorSchema map[string]any
 	var searchSchema map[string]any
 	var listSchema map[string]any
+	var configKeysSchema map[string]any
 	var statusSchema map[string]any
 	var proStatusSchema map[string]any
 	var proSetupSchema map[string]any
@@ -94,6 +147,8 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 			searchSchema = tool.OutputSchema
 		case "list_skills":
 			listSchema = tool.OutputSchema
+		case "list_config_keys":
+			configKeysSchema = tool.OutputSchema
 		case "get_status":
 			statusSchema = tool.OutputSchema
 		case "get_pro_status":
@@ -139,7 +194,7 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 			verifyErrorSchema = tool.ErrorOutputSchema
 		}
 	}
-	if searchSchema == nil || listSchema == nil || statusSchema == nil || proStatusSchema == nil || proSetupSchema == nil || proLoginStartSchema == nil || proLoginCompleteSchema == nil || proDevicesSchema == nil || revokeProDeviceSchema == nil || logoutProSchema == nil || registerProSchemeSchema == nil || refreshSchema == nil || runSchema == nil || runOutputSchema == nil || runErrorSchema == nil || planSchema == nil || planOutputSchema == nil || installSchema == nil || installErrorSchema == nil || upgradeSchema == nil || rollbackSchema == nil || uninstallSchema == nil || agentSchema == nil || doctorSchema == nil || verifySchema == nil || verifyErrorSchema == nil {
+	if searchSchema == nil || listSchema == nil || configKeysSchema == nil || statusSchema == nil || proStatusSchema == nil || proSetupSchema == nil || proLoginStartSchema == nil || proLoginCompleteSchema == nil || proDevicesSchema == nil || revokeProDeviceSchema == nil || logoutProSchema == nil || registerProSchemeSchema == nil || refreshSchema == nil || runSchema == nil || runOutputSchema == nil || runErrorSchema == nil || planSchema == nil || planOutputSchema == nil || installSchema == nil || installErrorSchema == nil || upgradeSchema == nil || rollbackSchema == nil || uninstallSchema == nil || agentSchema == nil || doctorSchema == nil || verifySchema == nil || verifyErrorSchema == nil {
 		t.Fatalf("expected schemas for discovery metadata: %s", stdout.String())
 	}
 	if runSchema["additionalProperties"] != false {
@@ -185,6 +240,17 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	}
 	if _, ok := listProps["installed"].(map[string]any); !ok {
 		t.Fatalf("expected list_skills installed schema: %#v", listProps)
+	}
+	configKeysItems, ok := configKeysSchema["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected list_config_keys array schema: %#v", configKeysSchema)
+	}
+	configKeysProps, ok := configKeysItems["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected list_config_keys item properties: %#v", configKeysItems)
+	}
+	if _, ok := configKeysProps["default"].(map[string]any); !ok {
+		t.Fatalf("expected config key default schema: %#v", configKeysProps)
 	}
 	statusProps, ok := statusSchema["properties"].(map[string]any)
 	if !ok {
@@ -505,6 +571,43 @@ func TestMCPProStatusToolUnauthenticated(t *testing.T) {
 	}
 }
 
+func TestMCPListConfigKeysTool(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_config_keys","arguments":{}}}` + "\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	var response struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent []struct {
+				Key     string `json:"key"`
+				Type    string `json:"type"`
+				Mutable bool   `json:"mutable"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+	if response.Result.IsError || len(response.Result.StructuredContent) == 0 {
+		t.Fatalf("expected config keys result: %s", stdout.String())
+	}
+	foundRegistryURL := false
+	for _, item := range response.Result.StructuredContent {
+		if item.Key == "registry_url" {
+			foundRegistryURL = item.Type == "url" && item.Mutable
+			break
+		}
+	}
+	if !foundRegistryURL {
+		t.Fatalf("expected registry_url key metadata: %s", stdout.String())
+	}
+}
+
 func TestMCPProDeviceErrorIncludesRecoveryHints(t *testing.T) {
 	service := core.NewService(core.PathsForRoot(t.TempDir()))
 	service.Config.ProAPIURL = "https://pro.example.com"
@@ -570,11 +673,11 @@ func TestMCPGetProSetupTool(t *testing.T) {
 		Result struct {
 			IsError           bool `json:"isError"`
 			StructuredContent struct {
-				Authenticated     bool `json:"authenticated"`
-				HasPendingLogin   bool `json:"has_pending_login"`
-				CanRegisterScheme bool `json:"can_register_scheme"`
-				ProAPIURL         string `json:"pro_api_url"`
-				CurrentStatus     []string `json:"current_status"`
+				Authenticated      bool     `json:"authenticated"`
+				HasPendingLogin    bool     `json:"has_pending_login"`
+				CanRegisterScheme  bool     `json:"can_register_scheme"`
+				ProAPIURL          string   `json:"pro_api_url"`
+				CurrentStatus      []string `json:"current_status"`
 				RecommendedActions []struct {
 					ID      string `json:"id"`
 					Command string `json:"command"`
@@ -761,6 +864,7 @@ func TestMCPRevokeProDeviceRequiresYes(t *testing.T) {
 	if !strings.Contains(stdout.String(), "confirmation_required") {
 		t.Fatalf("expected confirmation error: %s", stdout.String())
 	}
+	assertMCPConfirmationDetails(t, stdout.Bytes(), "revoke_pro_device", "device_id")
 }
 
 func TestMCPGetAgentTargetRejectsUnknownTarget(t *testing.T) {
@@ -772,6 +876,18 @@ func TestMCPGetAgentTargetRejectsUnknownTarget(t *testing.T) {
 	coreErr := core.ErrorFrom(err)
 	if coreErr.Message != "unsupported agent target" {
 		t.Fatalf("unexpected error: %#v", coreErr)
+	}
+	details, ok := coreErr.Details.(map[string]any)
+	if !ok || details["tool"] != "get_agent_target" || details["argument"] != "target" || details["value"] != "unknown" {
+		t.Fatalf("unexpected details: %#v", coreErr.Details)
+	}
+	targets, ok := details["supported_targets"].([]string)
+	if !ok || !containsString(targets, "codex") || !containsString(targets, "cursor") {
+		t.Fatalf("expected supported targets: %#v", details["supported_targets"])
+	}
+	args, ok := details["supported_arguments"].([]string)
+	if !ok || !containsString(args, "target") {
+		t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
 	}
 }
 
@@ -800,6 +916,35 @@ func TestMCPInstallRequiresYes(t *testing.T) {
 	}
 	if response.Result.Content[0].Text == "" {
 		t.Fatalf("expected text content")
+	}
+	assertMCPConfirmationDetails(t, stdout.Bytes(), "install_skill", "skill")
+}
+
+func assertMCPConfirmationDetails(t *testing.T, output []byte, tool, supportedArgument string) {
+	t.Helper()
+	var response struct {
+		Result struct {
+			StructuredContent struct {
+				Error struct {
+					Details map[string]any `json:"details"`
+				} `json:"error"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(output), &response); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, string(output))
+	}
+	details := response.Result.StructuredContent.Error.Details
+	if details["tool"] != tool || details["argument"] != "yes" || details["expected"] != true {
+		t.Fatalf("unexpected confirmation details: %#v", details)
+	}
+	retry, ok := details["retry_with"].(map[string]any)
+	if !ok || retry["yes"] != true {
+		t.Fatalf("expected retry_with yes=true: %#v", details["retry_with"])
+	}
+	args, ok := details["supported_arguments"].([]any)
+	if !ok || !containsAnyString(args, "yes") || !containsAnyString(args, supportedArgument) {
+		t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
 	}
 }
 
@@ -850,6 +995,23 @@ func TestMCPContentLengthFraming(t *testing.T) {
 	}
 }
 
+func TestMCPLineModeAllowsBlankAndIndentedMessages(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	input := strings.NewReader("\n  \t\n  {\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"search_skills\",\"arguments\":{\"query\":\"pdf\",\"limit\":1}}}\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("expected no stderr, got %s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "pdf") {
+		t.Fatalf("expected pdf response after blank and indented lines: %s", stdout.String())
+	}
+}
+
 func TestMCPRejectsOversizedContentLength(t *testing.T) {
 	service := core.NewService(core.PathsForRoot(t.TempDir()))
 	input := strings.NewReader("Content-Length: " + strconv.Itoa(maxMCPMessageBytes+1) + "\r\n\r\n{}")
@@ -893,6 +1055,7 @@ func TestMCPUninstallRequiresYes(t *testing.T) {
 	if !strings.Contains(stdout.String(), "confirmation_required") {
 		t.Fatalf("expected confirmation error: %s", stdout.String())
 	}
+	assertMCPConfirmationDetails(t, stdout.Bytes(), "uninstall_skill", "skill")
 }
 
 func TestMCPDoctorAndVerifySkill(t *testing.T) {
@@ -970,8 +1133,164 @@ func TestMCPRejectsUnknownToolArgument(t *testing.T) {
 		t.Fatalf("unexpected message: %#v", coreErr)
 	}
 	details, ok := coreErr.Details.(map[string]any)
-	if !ok || details["argument"] != "typo" {
+	if !ok || details["tool"] != "search_skills" || details["argument"] != "typo" {
 		t.Fatalf("unexpected details: %#v", coreErr.Details)
+	}
+	args, ok := details["supported_arguments"].([]string)
+	if !ok || !containsString(args, "query") || !containsString(args, "limit") {
+		t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
+	}
+}
+
+func TestMCPRejectsNonObjectToolArguments(t *testing.T) {
+	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	_, err := s.callTool(json.RawMessage(`{"name":"search_skills","arguments":["pdf"]}`))
+	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
+		t.Fatalf("expected invalid argument, got %v", err)
+	}
+	coreErr := core.ErrorFrom(err)
+	if coreErr.Message != "invalid tool arguments" {
+		t.Fatalf("unexpected message: %#v", coreErr)
+	}
+	details, ok := coreErr.Details.(map[string]any)
+	if !ok || details["tool"] != "search_skills" || details["expected"] != "object" {
+		t.Fatalf("unexpected details: %#v", coreErr.Details)
+	}
+	args, ok := details["supported_arguments"].([]string)
+	if !ok || !containsString(args, "query") || !containsString(args, "limit") {
+		t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
+	}
+}
+
+func TestMCPRejectsMissingRequiredToolArgument(t *testing.T) {
+	tests := []struct {
+		name              string
+		request           string
+		message           string
+		tool              string
+		argument          string
+		supportedArgument string
+	}{
+		{
+			name:              "search query",
+			request:           `{"name":"search_skills","arguments":{"limit":1}}`,
+			message:           "query is required",
+			tool:              "search_skills",
+			argument:          "query",
+			supportedArgument: "limit",
+		},
+		{
+			name:              "run skill",
+			request:           `{"name":"run_skill","arguments":{"args":["--help"]}}`,
+			message:           "skill is required",
+			tool:              "run_skill",
+			argument:          "skill",
+			supportedArgument: "args",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+			_, err := s.callTool(json.RawMessage(tt.request))
+			if !core.IsErrorCode(err, core.CodeInvalidArgument) {
+				t.Fatalf("expected invalid argument, got %v", err)
+			}
+			coreErr := core.ErrorFrom(err)
+			if coreErr.Message != tt.message {
+				t.Fatalf("unexpected message: %#v", coreErr)
+			}
+			details, ok := coreErr.Details.(map[string]any)
+			if !ok || details["tool"] != tt.tool || details["argument"] != tt.argument || details["expected"] != "non_empty_string" {
+				t.Fatalf("unexpected details: %#v", coreErr.Details)
+			}
+			args, ok := details["supported_arguments"].([]string)
+			if !ok || !containsString(args, tt.argument) || !containsString(args, tt.supportedArgument) {
+				t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
+			}
+		})
+	}
+}
+
+func TestMCPRejectsMissingPlanInstallSkillArguments(t *testing.T) {
+	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	_, err := s.callTool(json.RawMessage(`{"name":"plan_install","arguments":{}}`))
+	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
+		t.Fatalf("expected invalid argument, got %v", err)
+	}
+	coreErr := core.ErrorFrom(err)
+	if coreErr.Message != "at least one skill name is required" {
+		t.Fatalf("unexpected message: %#v", coreErr)
+	}
+	details, ok := coreErr.Details.(map[string]any)
+	if !ok || details["tool"] != "plan_install" || details["expected"] != "non_empty_string_or_array_of_strings" {
+		t.Fatalf("unexpected details: %#v", coreErr.Details)
+	}
+	names, ok := details["arguments"].([]string)
+	if !ok || !containsString(names, "skill") || !containsString(names, "skills") {
+		t.Fatalf("expected argument alternatives: %#v", details["arguments"])
+	}
+	args, ok := details["supported_arguments"].([]string)
+	if !ok || !containsString(args, "skill") || !containsString(args, "skills") {
+		t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
+	}
+}
+
+func TestMCPRejectsMissingToolNameWithSupportedTools(t *testing.T) {
+	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	_, err := s.callTool(json.RawMessage(`{"arguments":{}}`))
+	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
+		t.Fatalf("expected invalid argument, got %v", err)
+	}
+	coreErr := core.ErrorFrom(err)
+	if coreErr.Message != "tool name is required" {
+		t.Fatalf("unexpected message: %#v", coreErr)
+	}
+	details, ok := coreErr.Details.(map[string]any)
+	if !ok {
+		t.Fatalf("expected details map: %#v", coreErr.Details)
+	}
+	tools, ok := details["supported_tools"].([]string)
+	if !ok || !containsString(tools, "search_skills") || !containsString(tools, "run_skill") {
+		t.Fatalf("expected supported_tools details: %#v", details["supported_tools"])
+	}
+}
+
+func TestMCPRejectsUnknownToolWithSupportedTools(t *testing.T) {
+	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	_, err := s.callTool(json.RawMessage(`{"name":"search_skillz","arguments":{"query":"pdf"}}`))
+	if !core.IsErrorCode(err, core.CodeNotFound) {
+		t.Fatalf("expected not found, got %v", err)
+	}
+	coreErr := core.ErrorFrom(err)
+	if coreErr.Message != "unknown tool" {
+		t.Fatalf("unexpected message: %#v", coreErr)
+	}
+	details, ok := coreErr.Details.(map[string]any)
+	if !ok || details["tool"] != "search_skillz" {
+		t.Fatalf("unexpected details: %#v", coreErr.Details)
+	}
+	tools, ok := details["supported_tools"].([]string)
+	if !ok || !containsString(tools, "search_skills") || !containsString(tools, "run_skill") {
+		t.Fatalf("expected supported_tools details: %#v", details["supported_tools"])
+	}
+}
+
+func TestMCPToolErrorPreservesSupportedKeysDetails(t *testing.T) {
+	response := toolError(core.NewError(core.CodeInvalidArgument, "unknown config key", map[string]any{
+		"key":            "typo",
+		"supported_keys": core.ConfigKeyNames(),
+	}), nil)
+	content, ok := response["structuredContent"].(core.Response)
+	if !ok || content.Error == nil {
+		t.Fatalf("expected structured error response: %#v", response["structuredContent"])
+	}
+	details, ok := content.Error.Details.(map[string]any)
+	if !ok {
+		t.Fatalf("expected error details map: %#v", content.Error.Details)
+	}
+	keys, ok := details["supported_keys"].([]string)
+	if !ok || !containsString(keys, "registry_url") || !containsString(keys, "package_max_bytes") {
+		t.Fatalf("expected supported_keys details: %#v", details["supported_keys"])
 	}
 }
 
@@ -986,8 +1305,12 @@ func TestMCPRejectsWrongArgumentType(t *testing.T) {
 		t.Fatalf("unexpected message: %#v", coreErr)
 	}
 	details, ok := coreErr.Details.(map[string]any)
-	if !ok || details["argument"] != "skill" || details["expected"] != "string" {
+	if !ok || details["tool"] != "install_skill" || details["argument"] != "skill" || details["expected"] != "string" {
 		t.Fatalf("unexpected details: %#v", coreErr.Details)
+	}
+	args, ok := details["supported_arguments"].([]string)
+	if !ok || !containsString(args, "skill") || !containsString(args, "yes") {
+		t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
 	}
 }
 
@@ -1000,6 +1323,14 @@ func TestMCPRejectsNonPositiveIntegerArgument(t *testing.T) {
 	if core.ErrorFrom(err).Message != "timeout_ms must be a positive integer" {
 		t.Fatalf("unexpected error: %#v", core.ErrorFrom(err))
 	}
+	details, ok := core.ErrorFrom(err).Details.(map[string]any)
+	if !ok || details["tool"] != "run_skill" || details["argument"] != "timeout_ms" || details["expected"] != "positive_integer" {
+		t.Fatalf("unexpected details: %#v", core.ErrorFrom(err).Details)
+	}
+	args, ok := details["supported_arguments"].([]string)
+	if !ok || !containsString(args, "timeout_ms") || !containsString(args, "output_limit_bytes") {
+		t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
+	}
 }
 
 func TestMCPRejectsTrailingArgumentJSONValue(t *testing.T) {
@@ -1010,6 +1341,34 @@ func TestMCPRejectsTrailingArgumentJSONValue(t *testing.T) {
 	}
 	if core.ErrorFrom(err).Message != "invalid tools/call params" {
 		t.Fatalf("unexpected error: %#v", core.ErrorFrom(err))
+	}
+	details, ok := core.ErrorFrom(err).Details.(map[string]any)
+	if !ok || details["expected"] != "object" {
+		t.Fatalf("unexpected details: %#v", core.ErrorFrom(err).Details)
+	}
+	params, ok := details["supported_params"].([]string)
+	if !ok || !containsString(params, "name") || !containsString(params, "arguments") {
+		t.Fatalf("expected supported_params details: %#v", details["supported_params"])
+	}
+}
+
+func TestMCPRejectsUnknownToolCallParamWithSupportedParams(t *testing.T) {
+	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	_, err := s.callTool(json.RawMessage(`{"name":"search_skills","arguments":{"query":"pdf"},"extra":true}`))
+	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
+		t.Fatalf("expected invalid argument, got %v", err)
+	}
+	coreErr := core.ErrorFrom(err)
+	if coreErr.Message != "invalid tools/call params" {
+		t.Fatalf("unexpected error: %#v", coreErr)
+	}
+	details, ok := coreErr.Details.(map[string]any)
+	if !ok || details["expected"] != "object" {
+		t.Fatalf("unexpected details: %#v", coreErr.Details)
+	}
+	params, ok := details["supported_params"].([]string)
+	if !ok || !containsString(params, "name") || !containsString(params, "arguments") {
+		t.Fatalf("expected supported_params details: %#v", details["supported_params"])
 	}
 }
 
@@ -1025,6 +1384,83 @@ func TestMCPRejectsInvalidJSONRPCVersion(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"message":"invalid request"`) || !strings.Contains(stdout.String(), `jsonrpc must be 2.0`) {
 		t.Fatalf("expected invalid request response: %s", stdout.String())
 	}
+	assertMCPInvalidRequestDetails(t, stdout.Bytes(), "jsonrpc", "jsonrpc must be 2.0")
+}
+
+func TestMCPRejectsUnknownMethodWithSupportedMethods(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/lost","params":{}}` + "\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	var response struct {
+		Error struct {
+			Code int `json:"code"`
+			Data struct {
+				Method           string   `json:"method"`
+				SupportedMethods []string `json:"supported_methods"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
+		t.Fatalf("invalid unknown method response: %v\n%s", err, stdout.String())
+	}
+	if response.Error.Code != -32601 || response.Error.Data.Method != "tools/lost" {
+		t.Fatalf("unexpected unknown method response: %s", stdout.String())
+	}
+	if !containsString(response.Error.Data.SupportedMethods, "tools/list") || !containsString(response.Error.Data.SupportedMethods, "tools/call") {
+		t.Fatalf("expected supported methods: %s", stdout.String())
+	}
+}
+
+func TestMCPRejectsMissingMethodWithSupportedMethods(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"params":{}}` + "\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	var response struct {
+		Error struct {
+			Code int `json:"code"`
+			Data struct {
+				Error            string   `json:"error"`
+				SupportedMethods []string `json:"supported_methods"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
+		t.Fatalf("invalid missing method response: %v\n%s", err, stdout.String())
+	}
+	if response.Error.Code != -32600 || response.Error.Data.Error != "missing method" {
+		t.Fatalf("unexpected missing method response: %s", stdout.String())
+	}
+	if !containsString(response.Error.Data.SupportedMethods, "initialize") || !containsString(response.Error.Data.SupportedMethods, "tools/call") {
+		t.Fatalf("expected supported methods: %s", stdout.String())
+	}
+}
+
+func TestMCPSupportedMethodsAreStable(t *testing.T) {
+	seen := map[string]bool{}
+	for _, method := range supportedMethods() {
+		if method == "" {
+			t.Fatalf("supportedMethods contains empty method: %#v", supportedMethods())
+		}
+		if seen[method] {
+			t.Fatalf("supportedMethods contains duplicate method %s: %#v", method, supportedMethods())
+		}
+		seen[method] = true
+	}
+	for _, method := range []string{"initialize", "notifications/initialized", "tools/list", "tools/call"} {
+		if !seen[method] {
+			t.Fatalf("supportedMethods missing %s: %#v", method, supportedMethods())
+		}
+	}
 }
 
 func TestMCPRejectsInvalidRequestIDType(t *testing.T) {
@@ -1039,6 +1475,7 @@ func TestMCPRejectsInvalidRequestIDType(t *testing.T) {
 	if !strings.Contains(stdout.String(), `id must be string, number, or null`) {
 		t.Fatalf("expected invalid id response: %s", stdout.String())
 	}
+	assertMCPInvalidRequestDetails(t, stdout.Bytes(), "id", "id must be string, number, or null")
 }
 
 func TestMCPRejectsNonObjectParams(t *testing.T) {
@@ -1053,6 +1490,7 @@ func TestMCPRejectsNonObjectParams(t *testing.T) {
 	if !strings.Contains(stdout.String(), `params must be an object or null`) {
 		t.Fatalf("expected invalid params response: %s", stdout.String())
 	}
+	assertMCPInvalidRequestDetails(t, stdout.Bytes(), "params", "params must be an object or null")
 }
 
 func TestMCPRejectsUnknownTopLevelField(t *testing.T) {
@@ -1069,7 +1507,39 @@ func TestMCPRejectsUnknownTopLevelField(t *testing.T) {
 	}
 }
 
+func assertMCPInvalidRequestDetails(t *testing.T, output []byte, field, message string) {
+	t.Helper()
+	var response struct {
+		Error struct {
+			Code int `json:"code"`
+			Data struct {
+				Error    string `json:"error"`
+				Field    string `json:"field"`
+				Expected any    `json:"expected"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(output), &response); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, string(output))
+	}
+	if response.Error.Code != -32600 || response.Error.Data.Error != message || response.Error.Data.Field != field {
+		t.Fatalf("unexpected invalid request details: %s", string(output))
+	}
+	if response.Error.Data.Expected == nil {
+		t.Fatalf("expected field expectation in invalid request details: %s", string(output))
+	}
+}
+
 func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAnyString(values []any, want string) bool {
 	for _, value := range values {
 		if value == want {
 			return true

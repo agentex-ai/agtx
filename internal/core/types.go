@@ -176,6 +176,15 @@ type ListResult struct {
 	Available []SkillManifest  `json:"available,omitempty"`
 }
 
+type ConfigKeyInfo struct {
+	Key         string   `json:"key"`
+	Type        string   `json:"type"`
+	Default     any      `json:"default,omitempty"`
+	Description string   `json:"description"`
+	Allowed     []string `json:"allowed,omitempty"`
+	Mutable     bool     `json:"mutable"`
+}
+
 type ProLoginStartResult struct {
 	LoginURL    string `json:"login_url"`
 	State       string `json:"state,omitempty"`
@@ -223,19 +232,19 @@ type ProLogoutResult struct {
 }
 
 type ProSetupResult struct {
-	Authenticated        bool              `json:"authenticated"`
-	HasPendingLogin      bool              `json:"has_pending_login"`
-	CallbackScheme       string            `json:"callback_scheme"`
-	CallbackURIExample   string            `json:"callback_uri_example,omitempty"`
-	AuthPath             string            `json:"auth_path"`
-	ConfigPath           string            `json:"config_path"`
-	ProAPIURL            string            `json:"pro_api_url,omitempty"`
-	RegistryURL          string            `json:"registry_url,omitempty"`
-	Platform             string            `json:"platform"`
-	CanRegisterScheme    bool              `json:"can_register_scheme"`
-	SchemeCommandHint    string            `json:"scheme_command_hint,omitempty"`
-	RecommendedActions   []ProSetupAction  `json:"recommended_actions,omitempty"`
-	CurrentStatus        []string          `json:"current_status,omitempty"`
+	Authenticated      bool             `json:"authenticated"`
+	HasPendingLogin    bool             `json:"has_pending_login"`
+	CallbackScheme     string           `json:"callback_scheme"`
+	CallbackURIExample string           `json:"callback_uri_example,omitempty"`
+	AuthPath           string           `json:"auth_path"`
+	ConfigPath         string           `json:"config_path"`
+	ProAPIURL          string           `json:"pro_api_url,omitempty"`
+	RegistryURL        string           `json:"registry_url,omitempty"`
+	Platform           string           `json:"platform"`
+	CanRegisterScheme  bool             `json:"can_register_scheme"`
+	SchemeCommandHint  string           `json:"scheme_command_hint,omitempty"`
+	RecommendedActions []ProSetupAction `json:"recommended_actions,omitempty"`
+	CurrentStatus      []string         `json:"current_status,omitempty"`
 }
 
 type ProSetupAction struct {

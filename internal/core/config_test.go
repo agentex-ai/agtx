@@ -233,6 +233,75 @@ func TestSetAndUnsetConfigValue(t *testing.T) {
 	}
 }
 
+func TestConfigKeysMatchMutableSetters(t *testing.T) {
+	seen := map[string]bool{}
+	var mutable []string
+	for _, key := range ConfigKeys() {
+		if key.Key == "" {
+			t.Fatalf("config key must not be empty: %#v", key)
+		}
+		if seen[key.Key] {
+			t.Fatalf("duplicate config key: %s", key.Key)
+		}
+		seen[key.Key] = true
+		if key.Type == "" {
+			t.Fatalf("config key %s must include a type", key.Key)
+		}
+		if key.Description == "" {
+			t.Fatalf("config key %s must include a description", key.Key)
+		}
+		if len(key.Allowed) > 0 && key.Type != "enum" {
+			t.Fatalf("config key %s has allowed values but type %s", key.Key, key.Type)
+		}
+		if !key.Mutable {
+			continue
+		}
+		mutable = append(mutable, key.Key)
+		config, err := SetConfigValue(DefaultConfig(), key.Key, configKeySampleValue(t, key))
+		if err != nil {
+			t.Fatalf("metadata key %s is not settable: %v", key.Key, err)
+		}
+		if _, err := UnsetConfigValue(config, key.Key); err != nil {
+			t.Fatalf("metadata key %s is not unsettable: %v", key.Key, err)
+		}
+	}
+	got := ConfigKeyNames()
+	if len(got) != len(mutable) {
+		t.Fatalf("ConfigKeyNames length mismatch: got %v want %v", got, mutable)
+	}
+	for i := range got {
+		if got[i] != mutable[i] {
+			t.Fatalf("ConfigKeyNames mismatch: got %v want %v", got, mutable)
+		}
+	}
+}
+
+func TestUnknownConfigKeyIncludesSupportedKeys(t *testing.T) {
+	for _, err := range []error{
+		func() error {
+			_, err := SetConfigValue(DefaultConfig(), "typo", "value")
+			return err
+		}(),
+		func() error {
+			_, err := UnsetConfigValue(DefaultConfig(), "typo")
+			return err
+		}(),
+	} {
+		if !IsErrorCode(err, CodeInvalidArgument) {
+			t.Fatalf("expected invalid argument, got %v", err)
+		}
+		coreErr := ErrorFrom(err)
+		details, ok := coreErr.Details.(map[string]any)
+		if !ok {
+			t.Fatalf("expected detail map, got %#v", coreErr.Details)
+		}
+		keys, ok := details["supported_keys"].([]string)
+		if !ok || !containsConfigKey(keys, "registry_url") || !containsConfigKey(keys, "package_max_bytes") {
+			t.Fatalf("expected supported config keys, got %#v", details["supported_keys"])
+		}
+	}
+}
+
 func TestValidateRegistryFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.json")
 	if err := os.WriteFile(path, []byte(`{"schema_version":1,"skills":[{"schema_version":1,"name":"demo","version":"1.0.0","summary":"Demo","description":"Demo","platforms":[{"os":"darwin","arch":"arm64"}],"stub":true}]}`), 0o644); err != nil {
@@ -244,6 +313,37 @@ func TestValidateRegistryFile(t *testing.T) {
 	}
 	if !result.OK || result.Skills != 1 {
 		t.Fatalf("unexpected validation: %#v", result)
+	}
+}
+
+func containsConfigKey(keys []string, want string) bool {
+	for _, key := range keys {
+		if key == want {
+			return true
+		}
+	}
+	return false
+}
+
+func configKeySampleValue(t *testing.T, key ConfigKeyInfo) string {
+	t.Helper()
+	switch key.Type {
+	case "url":
+		return "https://example.com/value"
+	case "string_list":
+		return "a.json,b.json"
+	case "string":
+		return "stable"
+	case "enum":
+		if len(key.Allowed) == 0 {
+			t.Fatalf("enum config key %s must include allowed values", key.Key)
+		}
+		return key.Allowed[0]
+	case "positive_integer":
+		return "1234"
+	default:
+		t.Fatalf("unsupported config key type %s for %s", key.Type, key.Key)
+		return ""
 	}
 }
 

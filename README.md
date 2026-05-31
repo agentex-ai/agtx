@@ -17,6 +17,7 @@ agtx status
 agtx doctor --json
 agtx verify pdf --json
 agtx config init
+agtx config keys --json
 agtx config set registry_url https://example.com/agtx/registry.json
 agtx config set pro_api_url https://agtx-pro.example.com
 agtx config set package_max_bytes 268435456
@@ -41,6 +42,8 @@ Mutating commands require confirmation. Agent callers should pass `--json --yes`
 ```
 
 For `agtx run`, `--output-limit-bytes` bounds captured stdout/stderr and `--input file|-` reads in CLI agent calls. Use `--` before skill arguments; any `--json` or `--ndjson` after that separator is passed through to the skill, not treated as an agtx output flag.
+
+Structured errors include recovery hints for agent callers: unknown commands include `supported_commands`, nested command errors include `supported_subcommands`, missing positional arguments include `expected_args`, flag parse/unexpected-argument errors include `supported_flags`, and MCP envelope/method/tool/params/argument errors include `field`, `expected`, `supported_methods`, `supported_tools`, `supported_params`, or `supported_arguments`. MCP required-argument, argument-shape, and confirmation errors also include the tool name plus expected argument shape or `yes=true` retry details.
 
 ## Build
 
@@ -119,6 +122,7 @@ agtx pro logout
 ```
 
 `config.json` is strict: unknown keys, `null` values, trailing JSON values, invalid URLs, unsupported schema versions, and non-positive limits are rejected instead of silently falling back.
+Use `agtx config keys --json` to discover supported settings; unknown-key errors also include `supported_keys` for agent recovery.
 
 Plan before mutating, then refresh a configured remote registry:
 

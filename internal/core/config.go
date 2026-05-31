@@ -56,6 +56,38 @@ func DefaultConfig() Config {
 	}
 }
 
+func ConfigKeys() []ConfigKeyInfo {
+	defaults := DefaultConfig()
+	return []ConfigKeyInfo{
+		{Key: "registry_url", Type: "url", Default: defaults.RegistryURL, Description: "Remote registry manifest URL used by registry refresh.", Mutable: true},
+		{Key: "pro_api_url", Type: "url", Default: defaults.ProAPIURL, Description: "Base URL for Pro login, status, devices, and gated downloads.", Mutable: true},
+		{Key: "registry_files", Type: "string_list", Default: defaults.RegistryFiles, Description: "Comma- or semicolon-separated local registry overlay files.", Mutable: true},
+		{Key: "channel", Type: "string", Default: defaults.Channel, Description: "Release channel used by registry and tooling policy.", Mutable: true},
+		{Key: "telemetry", Type: "enum", Default: defaults.Telemetry, Description: "Telemetry mode for local configuration.", Allowed: []string{"off", "desensitized"}, Mutable: true},
+		{Key: "lock_timeout_ms", Type: "positive_integer", Default: defaults.LockTimeoutMS, Description: "Maximum time to wait for a mutation lock.", Mutable: true},
+		{Key: "stale_lock_ms", Type: "positive_integer", Default: defaults.StaleLockMS, Description: "Age after which a mutation lock is considered stale.", Mutable: true},
+		{Key: "run_timeout_ms", Type: "positive_integer", Default: defaults.RunTimeoutMS, Description: "Default skill execution timeout.", Mutable: true},
+		{Key: "run_output_limit_bytes", Type: "positive_integer", Default: defaults.RunOutputLimitBytes, Description: "Default captured stdout/stderr and run input byte limit.", Mutable: true},
+		{Key: "registry_max_bytes", Type: "positive_integer", Default: defaults.RegistryMaxBytes, Description: "Maximum registry manifest size to read or download.", Mutable: true},
+		{Key: "registry_download_timeout_ms", Type: "positive_integer", Default: defaults.RegistryDownloadTimeoutMS, Description: "Remote registry refresh timeout.", Mutable: true},
+		{Key: "package_max_bytes", Type: "positive_integer", Default: defaults.PackageMaxBytes, Description: "Maximum package archive size to read or download.", Mutable: true},
+		{Key: "package_download_timeout_ms", Type: "positive_integer", Default: defaults.PackageDownloadTimeoutMS, Description: "Package download timeout.", Mutable: true},
+		{Key: "extracted_max_bytes", Type: "positive_integer", Default: defaults.ExtractedMaxBytes, Description: "Maximum total uncompressed package bytes.", Mutable: true},
+		{Key: "extracted_max_files", Type: "positive_integer", Default: defaults.ExtractedMaxFiles, Description: "Maximum number of files extracted from a package.", Mutable: true},
+	}
+}
+
+func ConfigKeyNames() []string {
+	keys := ConfigKeys()
+	names := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if key.Mutable {
+			names = append(names, key.Key)
+		}
+	}
+	return names
+}
+
 func LoadConfig(path string) (Config, error) {
 	data, err := readFileLimited(path, defaultConfigMaxBytes, "config")
 	if err != nil {
@@ -383,7 +415,7 @@ func SetConfigValue(config Config, key, value string) (Config, error) {
 		}
 		config.ExtractedMaxFiles = parsed
 	default:
-		return config, NewError(CodeInvalidArgument, "unknown config key", map[string]any{"key": key})
+		return config, NewError(CodeInvalidArgument, "unknown config key", map[string]any{"key": key, "supported_keys": ConfigKeyNames()})
 	}
 	config = normalizeConfig(config)
 	if err := validateConfig(config); err != nil {
@@ -425,7 +457,7 @@ func UnsetConfigValue(config Config, key string) (Config, error) {
 	case "extracted_max_files":
 		config.ExtractedMaxFiles = defaultExtractedMaxFiles
 	default:
-		return config, NewError(CodeInvalidArgument, "unknown config key", map[string]any{"key": key})
+		return config, NewError(CodeInvalidArgument, "unknown config key", map[string]any{"key": key, "supported_keys": ConfigKeyNames()})
 	}
 	config = normalizeConfig(config)
 	if err := validateConfig(config); err != nil {

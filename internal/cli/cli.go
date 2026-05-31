@@ -72,7 +72,7 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "agent":
 		return runAgent(args[1:], stdout, stderr)
 	default:
-		err := core.NewError(core.CodeInvalidArgument, "unknown command", map[string]any{"command": args[0]})
+		err := core.NewError(core.CodeInvalidArgument, "unknown command", map[string]any{"command": args[0], "supported_commands": supportedCommands()})
 		if jsonOut || ndjsonOut {
 			return failAgent(stdout, stderr, jsonOut, ndjsonOut, err)
 		}
@@ -82,9 +82,14 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 }
 
+func supportedCommands() []string {
+	return []string{"config", "search", "install", "run", "uninstall", "list", "upgrade", "rollback", "status", "doctor", "verify", "registry", "pro", "mcp", "agent"}
+}
+
 func runConfig(service *core.Service, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		return fail(stdout, stderr, false, core.NewError(core.CodeInvalidArgument, "config subcommand is required", nil))
+	jsonOut := wantsJSONOutput(args)
+	if len(args) == 0 || onlyJSONFlag(args) {
+		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "config subcommand is required", map[string]any{"supported_subcommands": configSubcommands()}))
 	}
 	switch args[0] {
 	case "init":
@@ -92,7 +97,7 @@ func runConfig(service *core.Service, args []string, stdout, stderr io.Writer) i
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		force := takeBoolFlag(&rest, "--force", "")
 		if len(rest) > 0 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected config init arguments", map[string]any{"args": rest}))
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected config init arguments", rest, configInitFlags()))
 		}
 		config, err := service.InitConfig(force)
 		if err != nil {
@@ -107,7 +112,7 @@ func runConfig(service *core.Service, args []string, stdout, stderr io.Writer) i
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) > 0 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected config path arguments", map[string]any{"args": rest}))
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected config path arguments", rest, jsonOnlyFlags()))
 		}
 		if jsonOut {
 			return writeJSON(stdout, core.NewResponse(map[string]any{"path": service.Paths.ConfigFile}, nil), 0)
@@ -118,7 +123,7 @@ func runConfig(service *core.Service, args []string, stdout, stderr io.Writer) i
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) > 0 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected config show arguments", map[string]any{"args": rest}))
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected config show arguments", rest, jsonOnlyFlags()))
 		}
 		if jsonOut {
 			return writeJSON(stdout, core.NewResponse(service.Config, nil), 0)
@@ -132,11 +137,25 @@ func runConfig(service *core.Service, args []string, stdout, stderr io.Writer) i
 			fmt.Fprintf(stdout, "registry_file: %s\n", file)
 		}
 		return 0
+	case "keys":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected config keys arguments", rest, jsonOnlyFlags()))
+		}
+		keys := core.ConfigKeys()
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(keys, nil), 0)
+		}
+		for _, item := range keys {
+			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", item.Key, item.Type, configDefaultString(item.Default), item.Description)
+		}
+		return 0
 	case "set":
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) != 2 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "config set requires key and value", nil))
+			return fail(stdout, stderr, jsonOut, argumentCountError("config set requires key and value", []string{"key", "value"}, jsonOnlyFlags()))
 		}
 		config, err := service.SetConfig(rest[0], rest[1])
 		if err != nil {
@@ -151,7 +170,7 @@ func runConfig(service *core.Service, args []string, stdout, stderr io.Writer) i
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) != 1 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "config unset requires key", nil))
+			return fail(stdout, stderr, jsonOut, argumentCountError("config unset requires key", []string{"key"}, jsonOnlyFlags()))
 		}
 		config, err := service.UnsetConfig(rest[0])
 		if err != nil {
@@ -163,22 +182,27 @@ func runConfig(service *core.Service, args []string, stdout, stderr io.Writer) i
 		fmt.Fprintf(stdout, "%s reset\n", rest[0])
 		return 0
 	default:
-		return fail(stdout, stderr, false, core.NewError(core.CodeInvalidArgument, "unknown config subcommand", map[string]any{"subcommand": args[0]}))
+		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unknown config subcommand", map[string]any{"subcommand": args[0], "supported_subcommands": configSubcommands()}))
 	}
+}
+
+func configSubcommands() []string {
+	return []string{"init", "path", "show", "keys", "set", "unset"}
+}
+
+func configInitFlags() []string {
+	return []string{"--json", "--force"}
 }
 
 func runSearch(service *core.Service, args []string, stdout, stderr io.Writer) int {
 	jsonOut := takeBoolFlag(&args, "--json", "")
-	limit := takeIntFlag(&args, "--limit", 10, map[string]bool{
-		"--json":  true,
-		"--limit": true,
-	})
+	limit := takeIntFlag(&args, "--limit", 10, flagSet(searchFlags()))
 	if hasInternalInvalidFlag(args) {
-		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "invalid --limit value", nil))
+		return fail(stdout, stderr, jsonOut, internalFlagError(args, searchFlags()))
 	}
 	query := strings.TrimSpace(strings.Join(args, " "))
 	if query == "" {
-		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "search query is required", nil))
+		return fail(stdout, stderr, jsonOut, argumentCountError("search query is required", []string{"query"}, searchFlags()))
 	}
 	results := service.Search(query, limit)
 	if jsonOut {
@@ -194,12 +218,20 @@ func runSearch(service *core.Service, args []string, stdout, stderr io.Writer) i
 	return 0
 }
 
+func searchFlags() []string {
+	return []string{"--json", "--limit"}
+}
+
+func installFlags() []string {
+	return []string{"--json", "--yes", "-y", "--plan"}
+}
+
 func runInstall(ctx context.Context, service *core.Service, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	jsonOut := takeBoolFlag(&args, "--json", "")
 	yes := takeBoolFlag(&args, "--yes", "-y")
 	planOnly := takeBoolFlag(&args, "--plan", "")
 	if len(args) == 0 {
-		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "at least one skill name is required", nil))
+		return fail(stdout, stderr, jsonOut, argumentCountError("at least one skill name is required", []string{"skill..."}, installFlags()))
 	}
 	if planOnly {
 		plan, err := service.PlanInstall(args)
@@ -236,35 +268,18 @@ func runSkill(ctx context.Context, service *core.Service, args []string, stdin i
 	args, passthrough := splitArgsAfterDoubleDash(args)
 	jsonOut := takeBoolFlag(&args, "--json", "")
 	ndjsonOut := takeBoolFlag(&args, "--ndjson", "")
-	inputPath := takeStringFlag(&args, "--input", "", map[string]bool{
-		"--json":               true,
-		"--ndjson":             true,
-		"--input":              true,
-		"--timeout-ms":         true,
-		"--output-limit-bytes": true,
-	})
-	timeoutMS := takeIntFlag(&args, "--timeout-ms", service.Config.RunTimeoutMS, map[string]bool{
-		"--json":               true,
-		"--ndjson":             true,
-		"--input":              true,
-		"--timeout-ms":         true,
-		"--output-limit-bytes": true,
-	})
-	outputLimit := takeInt64Flag(&args, "--output-limit-bytes", service.Config.RunOutputLimitBytes, map[string]bool{
-		"--json":               true,
-		"--ndjson":             true,
-		"--input":              true,
-		"--timeout-ms":         true,
-		"--output-limit-bytes": true,
-	})
+	runKnownFlags := flagSet(runFlags())
+	inputPath := takeStringFlag(&args, "--input", "", runKnownFlags)
+	timeoutMS := takeIntFlag(&args, "--timeout-ms", service.Config.RunTimeoutMS, runKnownFlags)
+	outputLimit := takeInt64Flag(&args, "--output-limit-bytes", service.Config.RunOutputLimitBytes, runKnownFlags)
 	if jsonOut && ndjsonOut {
-		return failRun(stdout, stderr, jsonOut, ndjsonOut, core.NewError(core.CodeInvalidArgument, "--json and --ndjson are mutually exclusive", nil), core.RunResult{})
+		return failRun(stdout, stderr, jsonOut, ndjsonOut, mutuallyExclusiveFlagsError("--json", "--ndjson", runFlags()), core.RunResult{})
 	}
 	if len(args) == 0 {
-		return failRun(stdout, stderr, jsonOut, ndjsonOut, core.NewError(core.CodeInvalidArgument, "skill name is required", nil), core.RunResult{})
+		return failRun(stdout, stderr, jsonOut, ndjsonOut, argumentCountError("skill name is required", []string{"skill"}, runFlags()), core.RunResult{})
 	}
 	if hasInternalInvalidFlag(args) {
-		return failRun(stdout, stderr, jsonOut, ndjsonOut, internalFlagError(args), core.RunResult{})
+		return failRun(stdout, stderr, jsonOut, ndjsonOut, internalFlagError(args, runFlags()), core.RunResult{})
 	}
 	name := args[0]
 	skillArgs := append([]string{}, args[1:]...)
@@ -304,13 +319,21 @@ func runSkill(ctx context.Context, service *core.Service, args []string, stdin i
 	return result.ExitCode
 }
 
+func runFlags() []string {
+	return []string{"--json", "--ndjson", "--input", "--timeout-ms", "--output-limit-bytes"}
+}
+
+func uninstallFlags() []string {
+	return []string{"--json", "--yes", "-y", "--plan", "--all-versions"}
+}
+
 func runUninstall(service *core.Service, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	jsonOut := takeBoolFlag(&args, "--json", "")
 	yes := takeBoolFlag(&args, "--yes", "-y")
 	planOnly := takeBoolFlag(&args, "--plan", "")
 	allVersions := takeBoolFlag(&args, "--all-versions", "")
 	if len(args) != 1 {
-		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "uninstall requires exactly one skill name", nil))
+		return fail(stdout, stderr, jsonOut, argumentCountError("uninstall requires exactly one skill name", []string{"skill"}, uninstallFlags()))
 	}
 	if planOnly {
 		plan, err := service.PlanUninstall(args[0], allVersions)
@@ -342,7 +365,7 @@ func runList(service *core.Service, args []string, stdout, stderr io.Writer) int
 	installed := takeBoolFlag(&args, "--installed", "")
 	available := takeBoolFlag(&args, "--available", "")
 	if len(args) > 0 {
-		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected list arguments", map[string]any{"args": args}))
+		return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected list arguments", args, listFlags()))
 	}
 	result, err := service.List(core.ListOptions{Installed: installed, Available: available})
 	if err != nil {
@@ -367,6 +390,10 @@ func runList(service *core.Service, args []string, stdout, stderr io.Writer) int
 		fmt.Fprintln(stdout, "No skills found.")
 	}
 	return 0
+}
+
+func listFlags() []string {
+	return []string{"--json", "--installed", "--available"}
 }
 
 func runUpgrade(ctx context.Context, service *core.Service, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -408,18 +435,12 @@ func runRollback(service *core.Service, args []string, stdin io.Reader, stdout, 
 	jsonOut := takeBoolFlag(&args, "--json", "")
 	yes := takeBoolFlag(&args, "--yes", "-y")
 	planOnly := takeBoolFlag(&args, "--plan", "")
-	targetVersion := takeStringFlag(&args, "--to", "", map[string]bool{
-		"--json": true,
-		"--yes":  true,
-		"-y":     true,
-		"--plan": true,
-		"--to":   true,
-	})
+	targetVersion := takeStringFlag(&args, "--to", "", flagSet(rollbackFlags()))
 	if hasInternalInvalidFlag(args) {
-		return fail(stdout, stderr, jsonOut, internalFlagError(args))
+		return fail(stdout, stderr, jsonOut, internalFlagError(args, rollbackFlags()))
 	}
 	if len(args) != 1 {
-		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "rollback requires exactly one skill name", nil))
+		return fail(stdout, stderr, jsonOut, argumentCountError("rollback requires exactly one skill name", []string{"skill"}, rollbackFlags()))
 	}
 	if planOnly {
 		plan, err := service.PlanRollback(args[0], targetVersion)
@@ -446,10 +467,14 @@ func runRollback(service *core.Service, args []string, stdin io.Reader, stdout, 
 	return 0
 }
 
+func rollbackFlags() []string {
+	return []string{"--json", "--yes", "-y", "--plan", "--to"}
+}
+
 func runStatus(service *core.Service, args []string, stdout, stderr io.Writer) int {
 	jsonOut := takeBoolFlag(&args, "--json", "")
 	if len(args) > 0 {
-		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected status arguments", map[string]any{"args": args}))
+		return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected status arguments", args, jsonOnlyFlags()))
 	}
 	status, err := service.Status()
 	if err != nil {
@@ -466,7 +491,7 @@ func runStatus(service *core.Service, args []string, stdout, stderr io.Writer) i
 func runDoctor(service *core.Service, args []string, stdout, stderr io.Writer) int {
 	jsonOut := takeBoolFlag(&args, "--json", "")
 	if len(args) > 0 {
-		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected doctor arguments", map[string]any{"args": args}))
+		return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected doctor arguments", args, jsonOnlyFlags()))
 	}
 	result := service.Doctor()
 	if jsonOut {
@@ -480,7 +505,7 @@ func runDoctor(service *core.Service, args []string, stdout, stderr io.Writer) i
 func runVerify(service *core.Service, args []string, stdout, stderr io.Writer) int {
 	jsonOut := takeBoolFlag(&args, "--json", "")
 	if len(args) != 1 {
-		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "verify requires exactly one skill name", nil))
+		return fail(stdout, stderr, jsonOut, argumentCountError("verify requires exactly one skill name", []string{"skill"}, jsonOnlyFlags()))
 	}
 	result, err := service.VerifySkill(args[0])
 	if jsonOut {
@@ -499,15 +524,16 @@ func runVerify(service *core.Service, args []string, stdout, stderr io.Writer) i
 }
 
 func runRegistry(ctx context.Context, service *core.Service, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		return fail(stdout, stderr, false, core.NewError(core.CodeInvalidArgument, "registry subcommand is required", nil))
+	jsonOut := wantsJSONOutput(args)
+	if len(args) == 0 || onlyJSONFlag(args) {
+		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "registry subcommand is required", map[string]any{"supported_subcommands": registrySubcommands()}))
 	}
 	switch args[0] {
 	case "sources":
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) > 0 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected registry sources arguments", map[string]any{"args": rest}))
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected registry sources arguments", rest, jsonOnlyFlags()))
 		}
 		if jsonOut {
 			return writeJSON(stdout, core.NewResponse(service.RegistrySources, nil), 0)
@@ -534,7 +560,7 @@ func runRegistry(ctx context.Context, service *core.Service, args []string, stdo
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) > 0 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected registry refresh arguments", map[string]any{"args": rest}))
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected registry refresh arguments", rest, jsonOnlyFlags()))
 		}
 		result, err := service.RefreshRegistry(ctx)
 		if err != nil {
@@ -549,7 +575,7 @@ func runRegistry(ctx context.Context, service *core.Service, args []string, stdo
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) != 1 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "registry validate requires path", nil))
+			return fail(stdout, stderr, jsonOut, argumentCountError("registry validate requires path", []string{"path"}, jsonOnlyFlags()))
 		}
 		result, err := service.ValidateRegistry(rest[0])
 		if err != nil {
@@ -564,13 +590,18 @@ func runRegistry(ctx context.Context, service *core.Service, args []string, stdo
 		}
 		return 0
 	default:
-		return fail(stdout, stderr, false, core.NewError(core.CodeInvalidArgument, "unknown registry subcommand", map[string]any{"subcommand": args[0]}))
+		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unknown registry subcommand", map[string]any{"subcommand": args[0], "supported_subcommands": registrySubcommands()}))
 	}
 }
 
+func registrySubcommands() []string {
+	return []string{"sources", "refresh", "validate"}
+}
+
 func runPro(ctx context.Context, service *core.Service, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		return fail(stdout, stderr, false, core.NewError(core.CodeInvalidArgument, "pro subcommand is required", nil))
+	jsonOut := wantsJSONOutput(args)
+	if len(args) == 0 || onlyJSONFlag(args) {
+		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "pro subcommand is required", map[string]any{"supported_subcommands": proSubcommands()}))
 	}
 	switch args[0] {
 	case "login":
@@ -578,7 +609,7 @@ func runPro(ctx context.Context, service *core.Service, args []string, stdout, s
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		openBrowser := takeBoolFlag(&rest, "--open", "")
 		if len(rest) > 0 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected pro login arguments", map[string]any{"args": rest}))
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected pro login arguments", rest, proLoginFlags()))
 		}
 		result, err := service.ProLoginStart(ctx)
 		if err != nil {
@@ -599,7 +630,7 @@ func runPro(ctx context.Context, service *core.Service, args []string, stdout, s
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) != 1 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "pro callback requires callback uri", nil))
+			return fail(stdout, stderr, jsonOut, argumentCountError("pro callback requires callback uri", []string{"callback_uri"}, jsonOnlyFlags()))
 		}
 		result, err := service.ProCallback(ctx, rest[0])
 		if err != nil {
@@ -614,7 +645,7 @@ func runPro(ctx context.Context, service *core.Service, args []string, stdout, s
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) > 0 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected pro status arguments", map[string]any{"args": rest}))
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected pro status arguments", rest, jsonOnlyFlags()))
 		}
 		result, err := service.ProStatus(ctx)
 		if err != nil {
@@ -636,7 +667,7 @@ func runPro(ctx context.Context, service *core.Service, args []string, stdout, s
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) > 0 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected pro setup arguments", map[string]any{"args": rest}))
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected pro setup arguments", rest, jsonOnlyFlags()))
 		}
 		result, err := service.ProSetup(ctx)
 		if err != nil {
@@ -672,7 +703,7 @@ func runPro(ctx context.Context, service *core.Service, args []string, stdout, s
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) > 0 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected pro devices arguments", map[string]any{"args": rest}))
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected pro devices arguments", rest, jsonOnlyFlags()))
 		}
 		devices, err := service.ProDevices(ctx)
 		if err != nil {
@@ -693,7 +724,7 @@ func runPro(ctx context.Context, service *core.Service, args []string, stdout, s
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) != 1 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "pro revoke requires device id", nil))
+			return fail(stdout, stderr, jsonOut, argumentCountError("pro revoke requires device id", []string{"device_id"}, jsonOnlyFlags()))
 		}
 		device, err := service.ProRevokeDevice(ctx, rest[0])
 		if err != nil {
@@ -708,7 +739,7 @@ func runPro(ctx context.Context, service *core.Service, args []string, stdout, s
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) > 0 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected pro logout arguments", map[string]any{"args": rest}))
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected pro logout arguments", rest, jsonOnlyFlags()))
 		}
 		result, err := service.ProLogout()
 		if err != nil {
@@ -723,7 +754,7 @@ func runPro(ctx context.Context, service *core.Service, args []string, stdout, s
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) > 0 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected pro register-scheme arguments", map[string]any{"args": rest}))
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected pro register-scheme arguments", rest, jsonOnlyFlags()))
 		}
 		result, err := service.ProRegisterScheme()
 		if err != nil {
@@ -735,8 +766,16 @@ func runPro(ctx context.Context, service *core.Service, args []string, stdout, s
 		fmt.Fprintf(stdout, "%s:// registered: %s\n", result.Scheme, result.Command)
 		return 0
 	default:
-		return fail(stdout, stderr, false, core.NewError(core.CodeInvalidArgument, "unknown pro subcommand", map[string]any{"subcommand": args[0]}))
+		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unknown pro subcommand", map[string]any{"subcommand": args[0], "supported_subcommands": proSubcommands()}))
 	}
+}
+
+func proSubcommands() []string {
+	return []string{"login", "callback", "status", "setup", "devices", "revoke", "logout", "register-scheme"}
+}
+
+func proLoginFlags() []string {
+	return []string{"--json", "--open"}
 }
 
 func openURL(rawURL string) error {
@@ -751,16 +790,19 @@ func openURL(rawURL string) error {
 }
 
 func runAgent(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 {
-		fmt.Fprintf(stderr, "usage: agtx agent init <%s> [--print|--json]\n", strings.Join(supportedAgentTargets(), "|"))
-		fmt.Fprintln(stderr, "       agtx agent targets [--json]")
-		return 1
+	jsonOut := wantsJSONOutput(args)
+	if len(args) < 1 || onlyJSONFlag(args) {
+		if !jsonOut {
+			printAgentUsage(stderr)
+			return 1
+		}
+		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "agent subcommand is required", map[string]any{"supported_subcommands": agentSubcommands()}))
 	}
 	if args[0] == "targets" {
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
 		if len(rest) != 0 {
-			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "agent targets does not accept positional arguments", map[string]any{"args": rest}))
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("agent targets does not accept positional arguments", rest, jsonOnlyFlags()))
 		}
 		targets := agentTargets()
 		if jsonOut {
@@ -772,18 +814,24 @@ func runAgent(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if args[0] != "init" {
-		fmt.Fprintf(stderr, "usage: agtx agent init <%s> [--print|--json]\n", strings.Join(supportedAgentTargets(), "|"))
-		fmt.Fprintln(stderr, "       agtx agent targets [--json]")
-		return 1
+		if !jsonOut {
+			printAgentUsage(stderr)
+			return 1
+		}
+		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unknown agent subcommand", map[string]any{"subcommand": args[0], "supported_subcommands": agentSubcommands()}))
 	}
 	args = args[1:]
 	printOnly := takeBoolFlag(&args, "--print", "")
-	jsonOut := takeBoolFlag(&args, "--json", "")
+	jsonOut = takeBoolFlag(&args, "--json", "")
 	if printOnly && jsonOut {
-		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "--print and --json are mutually exclusive", nil))
+		return fail(stdout, stderr, jsonOut, mutuallyExclusiveFlagsError("--print", "--json", agentInitFlags()))
 	}
 	if len(args) != 1 {
-		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "agent init requires exactly one target", map[string]any{"supported_targets": supportedAgentTargets()}))
+		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "agent init requires exactly one target", map[string]any{
+			"expected_args":     []string{"target"},
+			"supported_flags":   agentInitFlags(),
+			"supported_targets": supportedAgentTargets(),
+		}))
 	}
 	if !printOnly && !jsonOut {
 		fmt.Fprintln(stderr, "agtx does not modify agent configs automatically; rerun with --print or --json")
@@ -798,6 +846,52 @@ func runAgent(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprint(stdout, renderAgentSnippet(info))
 	return 0
+}
+
+func agentSubcommands() []string {
+	return []string{"init", "targets"}
+}
+
+func agentInitFlags() []string {
+	return []string{"--print", "--json"}
+}
+
+func printAgentUsage(stderr io.Writer) {
+	fmt.Fprintf(stderr, "usage: agtx agent init <%s> [--print|--json]\n", strings.Join(supportedAgentTargets(), "|"))
+	fmt.Fprintln(stderr, "       agtx agent targets [--json]")
+}
+
+func jsonOnlyFlags() []string {
+	return []string{"--json"}
+}
+
+func flagSet(flags []string) map[string]bool {
+	set := make(map[string]bool, len(flags))
+	for _, flag := range flags {
+		set[flag] = true
+	}
+	return set
+}
+
+func unexpectedArgumentsError(message string, args, supportedFlags []string) error {
+	return core.NewError(core.CodeInvalidArgument, message, map[string]any{
+		"args":            args,
+		"supported_flags": supportedFlags,
+	})
+}
+
+func argumentCountError(message string, expectedArgs, supportedFlags []string) error {
+	return core.NewError(core.CodeInvalidArgument, message, map[string]any{
+		"expected_args":   expectedArgs,
+		"supported_flags": supportedFlags,
+	})
+}
+
+func mutuallyExclusiveFlagsError(left, right string, supportedFlags []string) error {
+	return core.NewError(core.CodeInvalidArgument, left+" and "+right+" are mutually exclusive", map[string]any{
+		"flags":           []string{left, right},
+		"supported_flags": supportedFlags,
+	})
 }
 
 func confirmMutation(action string, targets []string, yes, jsonOut bool, stdin io.Reader, stdout io.Writer) error {
@@ -933,6 +1027,22 @@ func valueOrDash(value string) string {
 		return "-"
 	}
 	return value
+}
+
+func configDefaultString(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return "-"
+	case string:
+		return valueOrDash(typed)
+	case []string:
+		if len(typed) == 0 {
+			return "-"
+		}
+		return strings.Join(typed, ",")
+	default:
+		return fmt.Sprint(typed)
+	}
 }
 
 func readInput(stdin io.Reader, path string, limit int64) ([]byte, error) {
@@ -1128,17 +1238,26 @@ func containsInternalFlag(args []string, flag string) bool {
 	return false
 }
 
-func internalFlagError(args []string) error {
+func internalFlagError(args []string, supportedFlags []string) error {
 	for _, arg := range args {
 		if strings.HasPrefix(arg, "__missing_") {
-			return core.NewError(core.CodeInvalidArgument, strings.TrimPrefix(arg, "__missing_")+" requires a value", nil)
+			flag := strings.TrimPrefix(arg, "__missing_")
+			return core.NewError(core.CodeInvalidArgument, flag+" requires a value", map[string]any{
+				"flag":            flag,
+				"reason":          "missing_value",
+				"supported_flags": supportedFlags,
+			})
 		}
 		if strings.HasPrefix(arg, "__invalid_") {
 			flag := strings.TrimPrefix(arg, "__invalid_")
-			return core.NewError(core.CodeInvalidArgument, flag+" must be a positive integer", nil)
+			return core.NewError(core.CodeInvalidArgument, flag+" must be a positive integer", map[string]any{
+				"flag":            flag,
+				"reason":          "invalid_positive_integer",
+				"supported_flags": supportedFlags,
+			})
 		}
 	}
-	return core.NewError(core.CodeInvalidArgument, "invalid flag value", nil)
+	return core.NewError(core.CodeInvalidArgument, "invalid flag value", map[string]any{"supported_flags": supportedFlags})
 }
 
 func isTerminal(reader io.Reader) bool {
@@ -1155,7 +1274,7 @@ func isTerminal(reader io.Reader) bool {
 
 func wantsJSONOutput(args []string) bool {
 	for _, arg := range args {
-		if arg == "--json" || strings.HasPrefix(arg, "--json=") {
+		if arg == "--json" {
 			return true
 		}
 	}
@@ -1164,11 +1283,18 @@ func wantsJSONOutput(args []string) bool {
 
 func wantsNDJSONOutput(args []string) bool {
 	for _, arg := range args {
-		if arg == "--ndjson" || strings.HasPrefix(arg, "--ndjson=") {
+		if arg == "--ndjson" {
 			return true
 		}
 	}
 	return false
+}
+
+func onlyJSONFlag(args []string) bool {
+	if len(args) != 1 {
+		return false
+	}
+	return args[0] == "--json"
 }
 
 func printHelp(out io.Writer) {
@@ -1185,7 +1311,7 @@ Usage:
   agtx status [--json]
   agtx doctor [--json]
   agtx verify <skill> [--json]
-  agtx config init|show|path|set|unset [--json]
+  agtx config init|show|path|keys|set|unset [--json]
   agtx registry sources|refresh|validate [--json]
   agtx pro login [--open] [--json]
   agtx pro callback <agtx://pro/callback?...> [--json]
