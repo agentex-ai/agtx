@@ -175,3 +175,76 @@ type ListResult struct {
 	Installed []InstalledSkill `json:"installed,omitempty"`
 	Available []SkillManifest  `json:"available,omitempty"`
 }
+
+type ProLoginStartResult struct {
+	LoginURL    string `json:"login_url"`
+	State       string `json:"state,omitempty"`
+	DeviceID    string `json:"device_id,omitempty"`
+	RedirectURI string `json:"redirect_uri,omitempty"`
+	AuthPath    string `json:"auth_path,omitempty"`
+}
+
+type ProCallbackResult struct {
+	Authenticated bool   `json:"authenticated"`
+	DeviceID      string `json:"device_id,omitempty"`
+	DeviceName    string `json:"device_name,omitempty"`
+	ExpiresAt     string `json:"expires_at,omitempty"`
+	RegistryURL   string `json:"registry_url,omitempty"`
+	ProAPIURL     string `json:"pro_api_url,omitempty"`
+	DeviceLimit   int    `json:"device_limit,omitempty"`
+	Subscription  string `json:"subscription,omitempty"`
+	AuthPath      string `json:"auth_path,omitempty"`
+}
+
+type ProStatusResult struct {
+	Authenticated bool        `json:"authenticated"`
+	Subscription  string      `json:"subscription,omitempty"`
+	Plan          string      `json:"plan,omitempty"`
+	DeviceID      string      `json:"device_id,omitempty"`
+	DeviceName    string      `json:"device_name,omitempty"`
+	ExpiresAt     string      `json:"expires_at,omitempty"`
+	DeviceLimit   int         `json:"device_limit,omitempty"`
+	AuthPath      string      `json:"auth_path,omitempty"`
+	Devices       []ProDevice `json:"devices,omitempty"`
+}
+
+type ProDevice struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Current     bool   `json:"current,omitempty"`
+	LastSeenAt  string `json:"last_seen_at,omitempty"`
+	ActivatedAt string `json:"activated_at,omitempty"`
+	RevokedAt   string `json:"revoked_at,omitempty"`
+}
+
+type ProLogoutResult struct {
+	LoggedOut bool   `json:"logged_out"`
+	AuthPath  string `json:"auth_path"`
+}
+
+type ProSetupResult struct {
+	Authenticated        bool              `json:"authenticated"`
+	HasPendingLogin      bool              `json:"has_pending_login"`
+	CallbackScheme       string            `json:"callback_scheme"`
+	CallbackURIExample   string            `json:"callback_uri_example,omitempty"`
+	AuthPath             string            `json:"auth_path"`
+	ConfigPath           string            `json:"config_path"`
+	ProAPIURL            string            `json:"pro_api_url,omitempty"`
+	RegistryURL          string            `json:"registry_url,omitempty"`
+	Platform             string            `json:"platform"`
+	CanRegisterScheme    bool              `json:"can_register_scheme"`
+	SchemeCommandHint    string            `json:"scheme_command_hint,omitempty"`
+	RecommendedActions   []ProSetupAction  `json:"recommended_actions,omitempty"`
+	CurrentStatus        []string          `json:"current_status,omitempty"`
+}
+
+type ProSetupAction struct {
+	ID          string         `json:"id"`
+	Title       string         `json:"title"`
+	Summary     string         `json:"summary"`
+	Blocking    bool           `json:"blocking"`
+	Command     string         `json:"command,omitempty"`
+	MCPTool     string         `json:"mcp_tool,omitempty"`
+	Arguments   map[string]any `json:"arguments,omitempty"`
+	AppliesWhen []string       `json:"applies_when,omitempty"`
+}

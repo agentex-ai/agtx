@@ -159,6 +159,54 @@ func TestInstallInfersArchiveTypeWithURLQuery(t *testing.T) {
 	}
 }
 
+func TestInstallDownloadUnauthorizedIncludesProHints(t *testing.T) {
+	root := t.TempDir()
+	entrypoint := "echo.sh"
+	if runtime.GOOS == "windows" {
+		entrypoint = "echo.bat"
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusUnauthorized)
+		_, _ = writer.Write([]byte(`{"error":{"code":"unauthorized","message":"login required"}}`))
+	}))
+	defer server.Close()
+
+	service := NewService(PathsForRoot(root))
+	service.Config.ProAPIURL = server.URL
+	service.Registry = Registry{SchemaVersion: 1, Skills: []SkillManifest{{
+		SchemaVersion: 1,
+		Name:          "pro_echo",
+		Version:       "1.0.0",
+		Summary:       "Pro Echo",
+		Description:   "Requires auth before package download",
+		Platforms: []PlatformBundle{{
+			OS:         runtime.GOOS,
+			Arch:       runtime.GOARCH,
+			URL:        server.URL + "/echo.zip",
+			SHA256:     strings.Repeat("a", 64),
+			Archive:    "zip",
+			Entrypoint: entrypoint,
+		}},
+	}}}
+	_, err := service.InstallSkills(context.Background(), []string{"pro_echo"})
+	if !IsErrorCode(err, CodeUnauthorized) {
+		t.Fatalf("expected unauthorized, got %v", err)
+	}
+	coreErr := ErrorFrom(err)
+	details, ok := coreErr.Details.(map[string]any)
+	if !ok {
+		t.Fatalf("expected detail map, got %#v", coreErr.Details)
+	}
+	setup, ok := details["pro_setup"].(ProSetupResult)
+	if !ok || setup.ProAPIURL != server.URL || setup.Authenticated {
+		t.Fatalf("expected unauthenticated pro setup details, got %#v", details["pro_setup"])
+	}
+	actions, ok := details["next_actions"].([]ProSetupAction)
+	if !ok || !containsSetupAction(actions, "restart_login") {
+		t.Fatalf("expected restart_login recovery action, got %#v", details["next_actions"])
+	}
+}
+
 func TestInstallLocalFileURLPackageAndRun(t *testing.T) {
 	root := t.TempDir()
 	entrypoint := "echo.sh"
@@ -703,6 +751,41 @@ func TestRefreshRegistryWritesCache(t *testing.T) {
 	}
 	if _, ok := service.Registry.Find("remote"); !ok {
 		t.Fatalf("expected refreshed skill in registry")
+	}
+}
+
+func TestRefreshRegistrySubscriptionErrorIncludesProHints(t *testing.T) {
+	root := t.TempDir()
+	paths := PathsForRoot(root)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusPaymentRequired)
+		_, _ = writer.Write([]byte(`{"error":{"code":"subscription_required","message":"active subscription required"}}`))
+	}))
+	defer server.Close()
+
+	if err := SaveAuth(paths.AuthFile, AuthState{SchemaVersion: 1, AccessToken: "access", RefreshToken: "refresh", DeviceID: "device-1"}); err != nil {
+		t.Fatalf("save auth: %v", err)
+	}
+	config := DefaultConfig()
+	config.RegistryURL = server.URL + "/registry.json"
+	config.ProAPIURL = server.URL
+
+	_, err := RefreshRegistry(context.Background(), paths, config)
+	if !IsErrorCode(err, CodeSubscriptionRequired) {
+		t.Fatalf("expected subscription_required, got %v", err)
+	}
+	coreErr := ErrorFrom(err)
+	details, ok := coreErr.Details.(map[string]any)
+	if !ok {
+		t.Fatalf("expected detail map, got %#v", coreErr.Details)
+	}
+	setup, ok := details["pro_setup"].(ProSetupResult)
+	if !ok || !setup.Authenticated || setup.ProAPIURL != server.URL {
+		t.Fatalf("expected authenticated pro setup details, got %#v", details["pro_setup"])
+	}
+	actions, ok := details["next_actions"].([]ProSetupAction)
+	if !ok || !containsSetupAction(actions, "check_status") {
+		t.Fatalf("expected check_status recovery action, got %#v", details["next_actions"])
 	}
 }
 

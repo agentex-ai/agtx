@@ -79,6 +79,7 @@ func RefreshRegistry(ctx context.Context, paths Paths, config Config) (RegistryR
 	if err != nil {
 		return RegistryRefreshResult{}, err
 	}
+	attachAuthHeader(req, config, loadRequestAuth(ctx, paths, config))
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		if requestCtx.Err() == context.DeadlineExceeded {
@@ -88,7 +89,8 @@ func RefreshRegistry(ctx context.Context, paths Paths, config Config) (RegistryR
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return RegistryRefreshResult{}, NewError(CodeInternal, "registry refresh failed", map[string]any{"url": config.RegistryURL, "status": res.Status})
+		data, _ := readAllLimited(res.Body, defaultAuthMaxBytes, "registry error")
+		return RegistryRefreshResult{}, withProRecoveryDetails(remoteHTTPError("registry refresh failed", config.RegistryURL, res.StatusCode, res.Status, data), paths, config)
 	}
 	data, err := readAllLimited(res.Body, config.RegistryMaxBytes, "registry")
 	if err != nil {
@@ -258,24 +260,28 @@ func validateBundleURL(raw string) error {
 }
 
 func validateRegistryURL(raw string) error {
+	return validateServiceURL("registry_url", raw)
+}
+
+func validateServiceURL(label, raw string) error {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed != raw {
-		return NewError(CodeInvalidArgument, "registry_url must not contain leading or trailing whitespace", map[string]any{"url": raw})
+		return NewError(CodeInvalidArgument, label+" must not contain leading or trailing whitespace", map[string]any{"url": raw})
 	}
 	if strings.ContainsRune(raw, 0) {
-		return NewError(CodeInvalidArgument, "registry_url contains NUL byte", nil)
+		return NewError(CodeInvalidArgument, label+" contains NUL byte", nil)
 	}
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme == "" {
-		return NewError(CodeInvalidArgument, "registry_url is invalid", map[string]any{"url": raw})
+		return NewError(CodeInvalidArgument, label+" is invalid", map[string]any{"url": raw})
 	}
 	switch parsed.Scheme {
 	case "http", "https":
 		if parsed.Host == "" {
-			return NewError(CodeInvalidArgument, "registry_url requires host", map[string]any{"url": raw})
+			return NewError(CodeInvalidArgument, label+" requires host", map[string]any{"url": raw})
 		}
 	default:
-		return NewError(CodeInvalidArgument, "unsupported registry_url scheme", map[string]any{"scheme": parsed.Scheme})
+		return NewError(CodeInvalidArgument, "unsupported "+label+" scheme", map[string]any{"scheme": parsed.Scheme})
 	}
 	return nil
 }

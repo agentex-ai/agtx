@@ -22,6 +22,7 @@ const defaultPackageDownloadTimeoutMS = 30000
 type Config struct {
 	SchemaVersion             int      `json:"schema_version"`
 	RegistryURL               string   `json:"registry_url,omitempty"`
+	ProAPIURL                 string   `json:"pro_api_url,omitempty"`
 	RegistryFiles             []string `json:"registry_files,omitempty"`
 	Channel                   string   `json:"channel"`
 	Telemetry                 string   `json:"telemetry"`
@@ -131,6 +132,7 @@ func normalizeConfig(config Config) Config {
 type configFile struct {
 	SchemaVersion             *int      `json:"schema_version"`
 	RegistryURL               *string   `json:"registry_url,omitempty"`
+	ProAPIURL                 *string   `json:"pro_api_url,omitempty"`
 	RegistryFiles             *[]string `json:"registry_files,omitempty"`
 	Channel                   *string   `json:"channel"`
 	Telemetry                 *string   `json:"telemetry"`
@@ -164,6 +166,9 @@ func decodeConfig(data []byte) (Config, error) {
 	}
 	if file.RegistryURL != nil {
 		config.RegistryURL = *file.RegistryURL
+	}
+	if file.ProAPIURL != nil {
+		config.ProAPIURL = *file.ProAPIURL
 	}
 	if file.RegistryFiles != nil {
 		config.RegistryFiles = append([]string(nil), (*file.RegistryFiles)...)
@@ -228,6 +233,11 @@ func validateConfig(config Config) error {
 			return err
 		}
 	}
+	if config.ProAPIURL != "" {
+		if err := validateServiceURL("pro_api_url", config.ProAPIURL); err != nil {
+			return err
+		}
+	}
 	for _, path := range config.RegistryFiles {
 		if strings.TrimSpace(path) == "" {
 			return NewError(CodeInvalidArgument, "registry_files entries cannot be empty", nil)
@@ -289,6 +299,13 @@ func SetConfigValue(config Config, key, value string) (Config, error) {
 			}
 		}
 		config.RegistryURL = value
+	case "pro_api_url":
+		if value != "" {
+			if err := validateServiceURL("pro_api_url", value); err != nil {
+				return config, err
+			}
+		}
+		config.ProAPIURL = value
 	case "registry_files":
 		if value == "" {
 			config.RegistryFiles = nil
@@ -379,6 +396,8 @@ func UnsetConfigValue(config Config, key string) (Config, error) {
 	switch strings.TrimSpace(key) {
 	case "registry_url":
 		config.RegistryURL = ""
+	case "pro_api_url":
+		config.ProAPIURL = ""
 	case "registry_files":
 		config.RegistryFiles = nil
 	case "channel":

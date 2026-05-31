@@ -1,0 +1,600 @@
+package core
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/url"
+	"os"
+	"runtime"
+	"strings"
+	"time"
+)
+
+const (
+	defaultAuthMaxBytes = 128 * 1024
+	proRedirectURI      = "agtx://pro/callback"
+)
+
+type AuthState struct {
+	SchemaVersion int          `json:"schema_version"`
+	DeviceID      string       `json:"device_id"`
+	DeviceName    string       `json:"device_name"`
+	AccessToken   string       `json:"access_token,omitempty"`
+	RefreshToken  string       `json:"refresh_token,omitempty"`
+	ExpiresAt     string       `json:"expires_at,omitempty"`
+	Pending       *PendingAuth `json:"pending,omitempty"`
+}
+
+type PendingAuth struct {
+	State        string `json:"state"`
+	CodeVerifier string `json:"code_verifier"`
+	StartedAt    string `json:"started_at"`
+	ProAPIURL    string `json:"pro_api_url"`
+}
+
+type proTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int    `json:"expires_in"`
+	ExpiresAt    string `json:"expires_at"`
+	RegistryURL  string `json:"registry_url"`
+	DeviceID     string `json:"device_id"`
+	DeviceName   string `json:"device_name"`
+	DeviceLimit  int    `json:"device_limit"`
+	Subscription string `json:"subscription"`
+}
+
+type requestAuth struct {
+	AccessToken string
+	DeviceID    string
+}
+
+func LoadAuth(path string) (AuthState, error) {
+	data, err := readFileLimited(path, defaultAuthMaxBytes, "auth")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return AuthState{SchemaVersion: 1}, nil
+		}
+		return AuthState{}, err
+	}
+	auth, err := decodeAuth(data)
+	if err != nil {
+		return AuthState{}, NewError(CodeInvalidArgument, "invalid agtx auth", map[string]any{"path": path, "error": err.Error()})
+	}
+	return auth, nil
+}
+
+func SaveAuth(path string, auth AuthState) error {
+	auth = normalizeAuth(auth)
+	if err := validateAuth(auth); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(auth, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(path, append(data, '\n'), 0o600)
+}
+
+func (s *Service) ProLoginStart(ctx context.Context) (ProLoginStartResult, error) {
+	_ = ctx
+	apiURL, err := s.proAPIURL()
+	if err != nil {
+		return ProLoginStartResult{}, err
+	}
+	auth := normalizeAuth(s.Auth)
+	if auth.DeviceID == "" {
+		auth.DeviceID = randomToken(32)
+	}
+	if auth.DeviceName == "" {
+		auth.DeviceName = defaultDeviceName()
+	}
+	state := randomToken(32)
+	verifier := randomToken(48)
+	auth.Pending = &PendingAuth{State: state, CodeVerifier: verifier, StartedAt: time.Now().UTC().Format(time.RFC3339), ProAPIURL: apiURL}
+	if err := SaveAuth(s.Paths.AuthFile, auth); err != nil {
+		return ProLoginStartResult{}, err
+	}
+	s.Auth = auth
+	loginURL, err := buildLoginURL(apiURL, auth, state, verifier)
+	if err != nil {
+		return ProLoginStartResult{}, err
+	}
+	return ProLoginStartResult{LoginURL: loginURL, State: state, DeviceID: auth.DeviceID, RedirectURI: proRedirectURI, AuthPath: s.Paths.AuthFile}, nil
+}
+
+func (s *Service) ProCallback(ctx context.Context, rawCallback string) (ProCallbackResult, error) {
+	callback, err := url.Parse(rawCallback)
+	if err != nil {
+		return ProCallbackResult{}, NewError(CodeInvalidArgument, "callback uri is invalid", map[string]any{"error": err.Error()})
+	}
+	if callback.Scheme != "agtx" || callback.Host != "pro" || callback.Path != "/callback" {
+		return ProCallbackResult{}, NewError(CodeInvalidArgument, "callback uri must use agtx://pro/callback", nil)
+	}
+	code := strings.TrimSpace(callback.Query().Get("code"))
+	state := strings.TrimSpace(callback.Query().Get("state"))
+	if code == "" || state == "" {
+		return ProCallbackResult{}, NewError(CodeInvalidArgument, "callback uri requires code and state", nil)
+	}
+	auth := normalizeAuth(s.Auth)
+	if auth.Pending == nil {
+		return ProCallbackResult{}, NewError(CodeInvalidArgument, "no pending pro login", map[string]any{"retry_with": "agtx pro login"})
+	}
+	if state != auth.Pending.State {
+		return ProCallbackResult{}, NewError(CodeInvalidArgument, "callback state does not match pending login", nil)
+	}
+	apiURL := auth.Pending.ProAPIURL
+	token, err := s.exchangeCode(ctx, apiURL, code, auth.Pending.CodeVerifier, auth)
+	if err != nil {
+		return ProCallbackResult{}, err
+	}
+	auth.AccessToken = token.AccessToken
+	auth.RefreshToken = token.RefreshToken
+	auth.ExpiresAt = tokenExpiry(token)
+	auth.Pending = nil
+	if token.DeviceID != "" {
+		auth.DeviceID = token.DeviceID
+	}
+	if token.DeviceName != "" {
+		auth.DeviceName = token.DeviceName
+	}
+	if err := SaveAuth(s.Paths.AuthFile, auth); err != nil {
+		return ProCallbackResult{}, err
+	}
+	s.Auth = auth
+	if token.RegistryURL != "" && token.RegistryURL != s.Config.RegistryURL {
+		config, err := SetConfigValue(s.Config, "registry_url", token.RegistryURL)
+		if err != nil {
+			return ProCallbackResult{}, err
+		}
+		if err := SaveConfig(s.Paths.ConfigFile, config); err != nil {
+			return ProCallbackResult{}, err
+		}
+		s.Config = config
+		s.Registry, s.RegistrySources = LoadRegistry(s.Paths, s.Config)
+	}
+	return ProCallbackResult{Authenticated: true, DeviceID: auth.DeviceID, DeviceName: auth.DeviceName, ExpiresAt: auth.ExpiresAt, RegistryURL: token.RegistryURL, ProAPIURL: apiURL, AuthPath: s.Paths.AuthFile, DeviceLimit: token.DeviceLimit, Subscription: token.Subscription}, nil
+}
+
+func (s *Service) ProStatus(ctx context.Context) (ProStatusResult, error) {
+	auth, err := s.currentAuth(ctx)
+	if err != nil {
+		return ProStatusResult{}, err
+	}
+	status := ProStatusResult{Authenticated: auth.AccessToken != "", DeviceID: auth.DeviceID, DeviceName: auth.DeviceName, ExpiresAt: auth.ExpiresAt, AuthPath: s.Paths.AuthFile}
+	if auth.AccessToken == "" {
+		return status, nil
+	}
+	var remote ProStatusResult
+	if err := s.proGET(ctx, "/v1/pro/status", &remote); err != nil {
+		return status, err
+	}
+	remote.Authenticated = true
+	if remote.DeviceID == "" {
+		remote.DeviceID = auth.DeviceID
+	}
+	if remote.DeviceName == "" {
+		remote.DeviceName = auth.DeviceName
+	}
+	if remote.ExpiresAt == "" {
+		remote.ExpiresAt = auth.ExpiresAt
+	}
+	return remote, nil
+}
+
+func (s *Service) ProDevices(ctx context.Context) ([]ProDevice, error) {
+	var devices []ProDevice
+	if err := s.proGET(ctx, "/v1/devices", &devices); err != nil {
+		return nil, err
+	}
+	return devices, nil
+}
+
+func (s *Service) ProRevokeDevice(ctx context.Context, id string) (ProDevice, error) {
+	if strings.TrimSpace(id) == "" {
+		return ProDevice{}, NewError(CodeInvalidArgument, "device id is required", nil)
+	}
+	var device ProDevice
+	err := s.proJSON(ctx, http.MethodPost, "/v1/devices/"+url.PathEscape(id)+"/revoke", nil, &device)
+	return device, err
+}
+
+func (s *Service) ProLogout() (ProLogoutResult, error) {
+	if err := os.Remove(s.Paths.AuthFile); err != nil && !os.IsNotExist(err) {
+		return ProLogoutResult{}, err
+	}
+	s.Auth = AuthState{SchemaVersion: 1}
+	return ProLogoutResult{AuthPath: s.Paths.AuthFile, LoggedOut: true}, nil
+}
+
+func (s *Service) ProSetup(ctx context.Context) (ProSetupResult, error) {
+	auth, err := LoadAuth(s.Paths.AuthFile)
+	if err != nil {
+		return ProSetupResult{}, err
+	}
+	auth = normalizeAuth(auth)
+	s.Auth = auth
+	result := buildProSetupResult(s.Paths, s.Config, auth, runtime.GOOS, runtime.GOARCH)
+	_ = ctx
+	return result, nil
+}
+
+func (s *Service) ProRegisterScheme() (ProSchemeResult, error) {
+	if proRegisterSchemeHook != nil {
+		return proRegisterSchemeHook()
+	}
+	return registerProScheme()
+}
+
+func (s *Service) proAPIURL() (string, error) {
+	return proAPIURLFromConfig(s.Config)
+}
+
+func (s *Service) exchangeCode(ctx context.Context, apiURL, code, verifier string, auth AuthState) (proTokenResponse, error) {
+	request := map[string]any{"grant_type": "authorization_code", "code": code, "code_verifier": verifier, "redirect_uri": proRedirectURI, "device_id": auth.DeviceID, "device_name": auth.DeviceName}
+	var response proTokenResponse
+	err := requestJSON(ctx, http.MethodPost, apiURL+"/v1/cli/token", requestAuth{}, request, &response)
+	return response, err
+}
+
+func (s *Service) proGET(ctx context.Context, path string, out any) error {
+	return s.proJSON(ctx, http.MethodGet, path, nil, out)
+}
+
+func (s *Service) proJSON(ctx context.Context, method, path string, in, out any) error {
+	apiURL, err := s.proAPIURL()
+	if err != nil {
+		return err
+	}
+	auth, err := s.currentAuth(ctx)
+	if err != nil {
+		return withProRecoveryDetails(err, s.Paths, s.Config)
+	}
+	if strings.TrimSpace(auth.AccessToken) == "" {
+		return withProRecoveryDetails(NewError(CodeUnauthorized, "pro login required", map[string]any{"retry_with": "agtx pro login"}), s.Paths, s.Config)
+	}
+	if err := requestJSON(ctx, method, apiURL+path, requestAuth{AccessToken: auth.AccessToken, DeviceID: auth.DeviceID}, in, out); err != nil {
+		return withProRecoveryDetails(err, s.Paths, s.Config)
+	}
+	return nil
+}
+
+func buildLoginURL(apiURL string, auth AuthState, state, verifier string) (string, error) {
+	parsed, err := url.Parse(apiURL + "/v1/cli/login/start")
+	if err != nil {
+		return "", err
+	}
+	query := parsed.Query()
+	query.Set("state", state)
+	query.Set("device_id", auth.DeviceID)
+	query.Set("device_name", auth.DeviceName)
+	query.Set("redirect_uri", proRedirectURI)
+	query.Set("code_challenge", pkceChallenge(verifier))
+	query.Set("code_challenge_method", "S256")
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
+func requestJSON(ctx context.Context, method, rawURL string, auth requestAuth, in, out any) error {
+	var body *bytes.Reader
+	if in == nil {
+		body = bytes.NewReader(nil)
+	} else {
+		data, err := json.Marshal(in)
+		if err != nil {
+			return err
+		}
+		body = bytes.NewReader(data)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if auth.AccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+auth.AccessToken)
+	}
+	if auth.DeviceID != "" {
+		req.Header.Set("X-AGTX-Device-ID", auth.DeviceID)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		data, _ := readAllLimited(res.Body, defaultAuthMaxBytes, "pro error")
+		return remoteHTTPError("pro request failed", rawURL, res.StatusCode, res.Status, data)
+	}
+	if out == nil {
+		return nil
+	}
+	data, err := readAllLimited(res.Body, defaultAuthMaxBytes, "pro response")
+	if err != nil {
+		return err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
+	if err := decodeJSONStrict(data, out); err != nil {
+		return NewError(CodeInvalidArgument, "invalid pro response", err.Error())
+	}
+	return nil
+}
+
+func decodeAuth(data []byte) (AuthState, error) {
+	var auth AuthState
+	if err := decodeJSONStrict(data, &auth); err != nil {
+		return AuthState{}, err
+	}
+	auth = normalizeAuth(auth)
+	return auth, validateAuth(auth)
+}
+
+func normalizeAuth(auth AuthState) AuthState {
+	if auth.SchemaVersion == 0 {
+		auth.SchemaVersion = 1
+	}
+	return auth
+}
+
+func validateAuth(auth AuthState) error {
+	if auth.SchemaVersion != 1 {
+		return NewError(CodeInvalidArgument, "unsupported auth schema_version", map[string]any{"schema_version": auth.SchemaVersion})
+	}
+	if auth.DeviceID != "" && strings.TrimSpace(auth.DeviceID) == "" {
+		return NewError(CodeInvalidArgument, "device_id cannot be blank", nil)
+	}
+	if strings.ContainsRune(auth.DeviceID, 0) || strings.ContainsRune(auth.AccessToken, 0) || strings.ContainsRune(auth.RefreshToken, 0) {
+		return NewError(CodeInvalidArgument, "auth values must not contain NUL bytes", nil)
+	}
+	return nil
+}
+
+func loadRequestAuth(ctx context.Context, paths Paths, config Config) requestAuth {
+	state, err := authForHTTPRequest(ctx, paths, config)
+	if err != nil {
+		return requestAuth{}
+	}
+	return state
+}
+
+func attachAuthHeader(req *http.Request, config Config, auth requestAuth) {
+	if req == nil || strings.TrimSpace(auth.AccessToken) == "" || !shouldAuthorizeURL(req.URL, config) {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+auth.AccessToken)
+	if auth.DeviceID != "" {
+		req.Header.Set("X-AGTX-Device-ID", auth.DeviceID)
+	}
+}
+
+func authForHTTPRequest(ctx context.Context, paths Paths, config Config) (requestAuth, error) {
+	auth, err := LoadAuth(paths.AuthFile)
+	if err != nil {
+		return requestAuth{}, err
+	}
+	auth, err = refreshAuthIfNeeded(ctx, paths.AuthFile, config, auth)
+	if err != nil {
+		return requestAuth{}, err
+	}
+	return requestAuth{AccessToken: strings.TrimSpace(auth.AccessToken), DeviceID: strings.TrimSpace(auth.DeviceID)}, nil
+}
+
+func (s *Service) currentAuth(ctx context.Context) (AuthState, error) {
+	auth, err := LoadAuth(s.Paths.AuthFile)
+	if err != nil {
+		return AuthState{}, err
+	}
+	auth, err = refreshAuthIfNeeded(ctx, s.Paths.AuthFile, s.Config, auth)
+	if err != nil {
+		return AuthState{}, err
+	}
+	s.Auth = auth
+	return auth, nil
+}
+
+func refreshAuthIfNeeded(ctx context.Context, authPath string, config Config, auth AuthState) (AuthState, error) {
+	auth = normalizeAuth(auth)
+	if strings.TrimSpace(auth.RefreshToken) == "" || !accessTokenExpiredSoon(auth.ExpiresAt) {
+		return auth, nil
+	}
+	apiURL, err := proAPIURLFromConfig(config)
+	if err != nil {
+		return auth, nil
+	}
+	token, err := refreshAccessToken(ctx, apiURL, auth)
+	if err != nil {
+		return auth, err
+	}
+	if token.AccessToken != "" {
+		auth.AccessToken = token.AccessToken
+	}
+	if token.RefreshToken != "" {
+		auth.RefreshToken = token.RefreshToken
+	}
+	auth.ExpiresAt = tokenExpiry(token)
+	if token.DeviceID != "" {
+		auth.DeviceID = token.DeviceID
+	}
+	if token.DeviceName != "" {
+		auth.DeviceName = token.DeviceName
+	}
+	if err := SaveAuth(authPath, auth); err != nil {
+		return auth, err
+	}
+	return auth, nil
+}
+
+func refreshAccessToken(ctx context.Context, apiURL string, auth AuthState) (proTokenResponse, error) {
+	request := map[string]any{
+		"grant_type":    "refresh_token",
+		"refresh_token": auth.RefreshToken,
+		"device_id":     auth.DeviceID,
+		"device_name":   auth.DeviceName,
+	}
+	var response proTokenResponse
+	err := requestJSON(ctx, http.MethodPost, strings.TrimRight(apiURL, "/")+"/v1/cli/token", requestAuth{}, request, &response)
+	return response, err
+}
+
+func proAPIURLFromConfig(config Config) (string, error) {
+	if strings.TrimSpace(config.ProAPIURL) != "" {
+		return strings.TrimRight(config.ProAPIURL, "/"), nil
+	}
+	if strings.TrimSpace(config.RegistryURL) != "" {
+		parsed, err := url.Parse(config.RegistryURL)
+		if err == nil && parsed.Scheme != "" && parsed.Host != "" {
+			return parsed.Scheme + "://" + parsed.Host, nil
+		}
+	}
+	return "", NewError(CodeInvalidArgument, "pro_api_url is not configured", map[string]any{"retry_with": "agtx config set pro_api_url https://example.com"})
+}
+
+func accessTokenExpiredSoon(expiresAt string) bool {
+	if strings.TrimSpace(expiresAt) == "" {
+		return false
+	}
+	expires, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil {
+		return true
+	}
+	return time.Until(expires) <= time.Minute
+}
+
+func shouldAuthorizeURL(target *url.URL, config Config) bool {
+	if target == nil {
+		return false
+	}
+	for _, raw := range []string{config.ProAPIURL, config.RegistryURL} {
+		if sameOrigin(target, raw) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameOrigin(target *url.URL, raw string) bool {
+	if strings.TrimSpace(raw) == "" {
+		return false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(target.Scheme, parsed.Scheme) && strings.EqualFold(target.Host, parsed.Host)
+}
+
+func tokenExpiry(token proTokenResponse) string {
+	if strings.TrimSpace(token.ExpiresAt) != "" {
+		return token.ExpiresAt
+	}
+	if token.ExpiresIn > 0 {
+		return time.Now().UTC().Add(time.Duration(token.ExpiresIn) * time.Second).Format(time.RFC3339)
+	}
+	return ""
+}
+
+func buildProSetupActions(result ProSetupResult) []ProSetupAction {
+	actions := []ProSetupAction{}
+	if result.ProAPIURL == "" {
+		actions = append(actions, ProSetupAction{
+			ID:       "configure_pro_api",
+			Title:    "Configure Pro API",
+			Summary:  "Set pro_api_url before starting the Pro login flow.",
+			Blocking: true,
+			Command:  "agtx config set pro_api_url https://agtx-pro.example.com",
+			AppliesWhen: []string{
+				"pro_api_not_configured",
+			},
+		})
+	}
+	if !result.Authenticated && result.CanRegisterScheme {
+		actions = append(actions, ProSetupAction{
+			ID:       "register_callback_scheme",
+			Title:    "Register callback scheme",
+			Summary:  "Register agtx:// so browser login callbacks can return to agtx automatically.",
+			Blocking: false,
+			Command:  "agtx pro register-scheme",
+			MCPTool:  "register_pro_scheme",
+			AppliesWhen: []string{
+				"not_authenticated",
+			},
+		})
+	}
+	if !result.Authenticated && !result.HasPendingLogin && result.ProAPIURL != "" {
+		actions = append(actions, ProSetupAction{
+			ID:       "start_login",
+			Title:    "Start Pro login",
+			Summary:  "Create a login URL and pending PKCE state.",
+			Blocking: true,
+			Command:  "agtx pro login --open",
+			MCPTool:  "start_pro_login",
+			AppliesWhen: []string{
+				"pro_api_configured",
+				"not_authenticated",
+			},
+		})
+	}
+	if !result.Authenticated && result.HasPendingLogin {
+		actions = append(actions, ProSetupAction{
+			ID:       "complete_login",
+			Title:    "Complete Pro login",
+			Summary:  "Finish login with the agtx://pro/callback URI returned by the browser flow.",
+			Blocking: true,
+			Command:  "agtx pro callback \"agtx://pro/callback?code=...&state=...\"",
+			MCPTool:  "complete_pro_login",
+			Arguments: map[string]any{
+				"callback_uri": "agtx://pro/callback?code=...&state=...",
+			},
+			AppliesWhen: []string{
+				"pending_login",
+			},
+		})
+	}
+	if result.Authenticated {
+		actions = append(actions, ProSetupAction{
+			ID:       "check_status",
+			Title:    "Check Pro status",
+			Summary:  "Inspect subscription state and device limits before Pro-only installs.",
+			Blocking: false,
+			Command:  "agtx pro status --json",
+			MCPTool:  "get_pro_status",
+			AppliesWhen: []string{
+				"authenticated",
+			},
+		})
+	}
+	return actions
+}
+
+func defaultDeviceName() string {
+	host, err := os.Hostname()
+	if err != nil || strings.TrimSpace(host) == "" {
+		host = runtime.GOOS + "-" + runtime.GOARCH
+	}
+	return host
+}
+
+func randomToken(bytesLen int) string {
+	data := make([]byte, bytesLen)
+	if _, err := rand.Read(data); err != nil {
+		sum := sha256.Sum256([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
+		return hex.EncodeToString(sum[:])
+	}
+	return base64.RawURLEncoding.EncodeToString(data)
+}
+
+func pkceChallenge(verifier string) string {
+	sum := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}

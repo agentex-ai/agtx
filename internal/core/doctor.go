@@ -17,6 +17,7 @@ func (s *Service) Doctor() DoctorResult {
 		s.checkConfigFile(),
 		s.checkRegistrySources(),
 		s.checkRegistryManifests(),
+		s.checkAuthFile(),
 	}
 	checks = append(checks, s.checkInstalledSkills()...)
 	return DoctorResult{OK: checksOK(checks), Summary: summarizeChecks(checks), Checks: checks}
@@ -108,6 +109,32 @@ func (s *Service) checkConfigFile() DoctorCheck {
 		return errorCheck("config_file", "config file is invalid", s.Paths.ConfigFile, err)
 	}
 	return okCheck("config_file", "config file is valid", s.Paths.ConfigFile)
+}
+
+func (s *Service) checkAuthFile() DoctorCheck {
+	if _, err := os.Stat(s.Paths.AuthFile); err != nil {
+		if os.IsNotExist(err) {
+			return DoctorCheck{Name: "auth_file", OK: true, Severity: "info", Message: "auth file does not exist; Pro is not logged in", Path: s.Paths.AuthFile}
+		}
+		return errorCheck("auth_file", "cannot access auth file", s.Paths.AuthFile, err)
+	}
+	auth, err := LoadAuth(s.Paths.AuthFile)
+	if err != nil {
+		return errorCheck("auth_file", "auth file is invalid; run agtx pro logout then agtx pro login", s.Paths.AuthFile, err)
+	}
+	if strings.TrimSpace(auth.AccessToken) == "" {
+		return DoctorCheck{Name: "auth_file", OK: true, Severity: "info", Message: "auth file is valid; Pro is not logged in", Path: s.Paths.AuthFile}
+	}
+	details := map[string]any{
+		"device_id":   auth.DeviceID,
+		"device_name": auth.DeviceName,
+		"expires_at":  auth.ExpiresAt,
+		"pending":     auth.Pending != nil,
+	}
+	if accessTokenExpiredSoon(auth.ExpiresAt) {
+		return DoctorCheck{Name: "auth_file", OK: true, Severity: "warning", Message: "auth file is valid but access token is expired or near expiry", Path: s.Paths.AuthFile, Details: details}
+	}
+	return okCheck("auth_file", "auth file is valid", s.Paths.AuthFile).withDetails(details)
 }
 
 func (s *Service) checkRegistrySources() DoctorCheck {

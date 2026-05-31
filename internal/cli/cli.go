@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -29,8 +31,9 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	jsonOut := wantsJSONOutput(args)
-	ndjsonOut := wantsNDJSONOutput(args)
+	argsForOutputMode := argsBeforeDoubleDash(args)
+	jsonOut := wantsJSONOutput(argsForOutputMode)
+	ndjsonOut := wantsNDJSONOutput(argsForOutputMode)
 	service, err := core.NewDefaultService()
 	if err != nil {
 		return failAgent(stdout, stderr, jsonOut, ndjsonOut, err)
@@ -62,6 +65,8 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runVerify(service, args[1:], stdout, stderr)
 	case "registry":
 		return runRegistry(ctx, service, args[1:], stdout, stderr)
+	case "pro":
+		return runPro(ctx, service, args[1:], stdout, stderr)
 	case "mcp":
 		return mcp.Run(service, stdin, stdout, stderr)
 	case "agent":
@@ -119,6 +124,7 @@ func runConfig(service *core.Service, args []string, stdout, stderr io.Writer) i
 			return writeJSON(stdout, core.NewResponse(service.Config, nil), 0)
 		}
 		fmt.Fprintf(stdout, "channel: %s\ntelemetry: %s\nregistry_url: %s\n", service.Config.Channel, service.Config.Telemetry, service.Config.RegistryURL)
+		fmt.Fprintf(stdout, "pro_api_url: %s\n", service.Config.ProAPIURL)
 		fmt.Fprintf(stdout, "lock_timeout_ms: %d\nstale_lock_ms: %d\n", service.Config.LockTimeoutMS, service.Config.StaleLockMS)
 		fmt.Fprintf(stdout, "run_timeout_ms: %d\nrun_output_limit_bytes: %d\n", service.Config.RunTimeoutMS, service.Config.RunOutputLimitBytes)
 		fmt.Fprintf(stdout, "registry_max_bytes: %d\nregistry_download_timeout_ms: %d\npackage_max_bytes: %d\npackage_download_timeout_ms: %d\nextracted_max_bytes: %d\nextracted_max_files: %d\n", service.Config.RegistryMaxBytes, service.Config.RegistryDownloadTimeoutMS, service.Config.PackageMaxBytes, service.Config.PackageDownloadTimeoutMS, service.Config.ExtractedMaxBytes, service.Config.ExtractedMaxFiles)
@@ -163,7 +169,10 @@ func runConfig(service *core.Service, args []string, stdout, stderr io.Writer) i
 
 func runSearch(service *core.Service, args []string, stdout, stderr io.Writer) int {
 	jsonOut := takeBoolFlag(&args, "--json", "")
-	limit := takeIntFlag(&args, "--limit", 10)
+	limit := takeIntFlag(&args, "--limit", 10, map[string]bool{
+		"--json":  true,
+		"--limit": true,
+	})
 	if hasInternalInvalidFlag(args) {
 		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "invalid --limit value", nil))
 	}
@@ -224,11 +233,30 @@ func runInstall(ctx context.Context, service *core.Service, args []string, stdin
 }
 
 func runSkill(ctx context.Context, service *core.Service, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	args, passthrough := splitArgsAfterDoubleDash(args)
 	jsonOut := takeBoolFlag(&args, "--json", "")
 	ndjsonOut := takeBoolFlag(&args, "--ndjson", "")
-	inputPath := takeStringFlag(&args, "--input", "")
-	timeoutMS := takeIntFlag(&args, "--timeout-ms", service.Config.RunTimeoutMS)
-	outputLimit := takeInt64Flag(&args, "--output-limit-bytes", service.Config.RunOutputLimitBytes)
+	inputPath := takeStringFlag(&args, "--input", "", map[string]bool{
+		"--json":               true,
+		"--ndjson":             true,
+		"--input":              true,
+		"--timeout-ms":         true,
+		"--output-limit-bytes": true,
+	})
+	timeoutMS := takeIntFlag(&args, "--timeout-ms", service.Config.RunTimeoutMS, map[string]bool{
+		"--json":               true,
+		"--ndjson":             true,
+		"--input":              true,
+		"--timeout-ms":         true,
+		"--output-limit-bytes": true,
+	})
+	outputLimit := takeInt64Flag(&args, "--output-limit-bytes", service.Config.RunOutputLimitBytes, map[string]bool{
+		"--json":               true,
+		"--ndjson":             true,
+		"--input":              true,
+		"--timeout-ms":         true,
+		"--output-limit-bytes": true,
+	})
 	if jsonOut && ndjsonOut {
 		return failRun(stdout, stderr, jsonOut, ndjsonOut, core.NewError(core.CodeInvalidArgument, "--json and --ndjson are mutually exclusive", nil), core.RunResult{})
 	}
@@ -236,10 +264,11 @@ func runSkill(ctx context.Context, service *core.Service, args []string, stdin i
 		return failRun(stdout, stderr, jsonOut, ndjsonOut, core.NewError(core.CodeInvalidArgument, "skill name is required", nil), core.RunResult{})
 	}
 	if hasInternalInvalidFlag(args) {
-		return failRun(stdout, stderr, jsonOut, ndjsonOut, core.NewError(core.CodeInvalidArgument, "invalid run limit value", nil), core.RunResult{})
+		return failRun(stdout, stderr, jsonOut, ndjsonOut, internalFlagError(args), core.RunResult{})
 	}
 	name := args[0]
-	skillArgs := args[1:]
+	skillArgs := append([]string{}, args[1:]...)
+	skillArgs = append(skillArgs, passthrough...)
 	input, err := readInput(stdin, inputPath, outputLimit)
 	if err != nil {
 		return failRun(stdout, stderr, jsonOut, ndjsonOut, err, core.RunResult{})
@@ -379,7 +408,16 @@ func runRollback(service *core.Service, args []string, stdin io.Reader, stdout, 
 	jsonOut := takeBoolFlag(&args, "--json", "")
 	yes := takeBoolFlag(&args, "--yes", "-y")
 	planOnly := takeBoolFlag(&args, "--plan", "")
-	targetVersion := takeStringFlag(&args, "--to", "")
+	targetVersion := takeStringFlag(&args, "--to", "", map[string]bool{
+		"--json": true,
+		"--yes":  true,
+		"-y":     true,
+		"--plan": true,
+		"--to":   true,
+	})
+	if hasInternalInvalidFlag(args) {
+		return fail(stdout, stderr, jsonOut, internalFlagError(args))
+	}
 	if len(args) != 1 {
 		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "rollback requires exactly one skill name", nil))
 	}
@@ -530,27 +568,235 @@ func runRegistry(ctx context.Context, service *core.Service, args []string, stdo
 	}
 }
 
+func runPro(ctx context.Context, service *core.Service, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		return fail(stdout, stderr, false, core.NewError(core.CodeInvalidArgument, "pro subcommand is required", nil))
+	}
+	switch args[0] {
+	case "login":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		openBrowser := takeBoolFlag(&rest, "--open", "")
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected pro login arguments", map[string]any{"args": rest}))
+		}
+		result, err := service.ProLoginStart(ctx)
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(result, nil), 0)
+		}
+		fmt.Fprintf(stdout, "Open this URL to sign in:\n%s\n\n", result.LoginURL)
+		if openBrowser {
+			if err := openURL(result.LoginURL); err != nil {
+				fmt.Fprintf(stderr, "warning: could not open browser: %s\n", err)
+			}
+		}
+		fmt.Fprintf(stdout, "If the agtx:// callback is not registered, copy the callback URI and run:\nagtx pro callback <callback-uri>\n")
+		return 0
+	case "callback":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		if len(rest) != 1 {
+			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "pro callback requires callback uri", nil))
+		}
+		result, err := service.ProCallback(ctx, rest[0])
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(result, nil), 0)
+		}
+		fmt.Fprintf(stdout, "Pro login complete for %s (%s)\n", result.DeviceName, result.DeviceID)
+		return 0
+	case "status":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected pro status arguments", map[string]any{"args": rest}))
+		}
+		result, err := service.ProStatus(ctx)
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(result, nil), 0)
+		}
+		if !result.Authenticated {
+			fmt.Fprintln(stdout, "Pro: not logged in")
+			return 0
+		}
+		fmt.Fprintf(stdout, "Pro: logged in\nsubscription: %s\nplan: %s\ndevice: %s (%s)\n", valueOrDash(result.Subscription), valueOrDash(result.Plan), result.DeviceName, result.DeviceID)
+		if result.DeviceLimit > 0 {
+			fmt.Fprintf(stdout, "device_limit: %d\n", result.DeviceLimit)
+		}
+		return 0
+	case "setup":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected pro setup arguments", map[string]any{"args": rest}))
+		}
+		result, err := service.ProSetup(ctx)
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(result, nil), 0)
+		}
+		fmt.Fprintf(stdout, "authenticated: %t\npending_login: %t\nplatform: %s\n", result.Authenticated, result.HasPendingLogin, result.Platform)
+		if result.ProAPIURL != "" {
+			fmt.Fprintf(stdout, "pro_api_url: %s\n", result.ProAPIURL)
+		}
+		if result.RegistryURL != "" {
+			fmt.Fprintf(stdout, "registry_url: %s\n", result.RegistryURL)
+		}
+		for _, status := range result.CurrentStatus {
+			fmt.Fprintf(stdout, "status: %s\n", status)
+		}
+		if len(result.RecommendedActions) > 0 {
+			fmt.Fprintln(stdout, "next:")
+			for _, action := range result.RecommendedActions {
+				fmt.Fprintf(stdout, "  - %s: %s\n", action.ID, action.Title)
+				if action.Command != "" {
+					fmt.Fprintf(stdout, "    command: %s\n", action.Command)
+				}
+				if action.MCPTool != "" {
+					fmt.Fprintf(stdout, "    mcp: %s\n", action.MCPTool)
+				}
+			}
+		}
+		return 0
+	case "devices":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected pro devices arguments", map[string]any{"args": rest}))
+		}
+		devices, err := service.ProDevices(ctx)
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(devices, nil), 0)
+		}
+		for _, device := range devices {
+			current := ""
+			if device.Current {
+				current = "\tcurrent"
+			}
+			fmt.Fprintf(stdout, "%s\t%s%s\n", device.ID, device.Name, current)
+		}
+		return 0
+	case "revoke":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		if len(rest) != 1 {
+			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "pro revoke requires device id", nil))
+		}
+		device, err := service.ProRevokeDevice(ctx, rest[0])
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(device, nil), 0)
+		}
+		fmt.Fprintf(stdout, "revoked %s\t%s\n", device.ID, device.Name)
+		return 0
+	case "logout":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected pro logout arguments", map[string]any{"args": rest}))
+		}
+		result, err := service.ProLogout()
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(result, nil), 0)
+		}
+		fmt.Fprintf(stdout, "logged out: %s\n", result.AuthPath)
+		return 0
+	case "register-scheme":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unexpected pro register-scheme arguments", map[string]any{"args": rest}))
+		}
+		result, err := service.ProRegisterScheme()
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(result, nil), 0)
+		}
+		fmt.Fprintf(stdout, "%s:// registered: %s\n", result.Scheme, result.Command)
+		return 0
+	default:
+		return fail(stdout, stderr, false, core.NewError(core.CodeInvalidArgument, "unknown pro subcommand", map[string]any{"subcommand": args[0]}))
+	}
+}
+
+func openURL(rawURL string) error {
+	switch runtime.GOOS {
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL).Start()
+	case "darwin":
+		return exec.Command("open", rawURL).Start()
+	default:
+		return exec.Command("xdg-open", rawURL).Start()
+	}
+}
+
 func runAgent(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 || args[0] != "init" {
-		fmt.Fprintln(stderr, "usage: agtx agent init <codex|cc|cursor|opencode|trae|openclaw|hermes> --print")
+	if len(args) < 1 {
+		fmt.Fprintf(stderr, "usage: agtx agent init <%s> [--print|--json]\n", strings.Join(supportedAgentTargets(), "|"))
+		fmt.Fprintln(stderr, "       agtx agent targets [--json]")
+		return 1
+	}
+	if args[0] == "targets" {
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		if len(rest) != 0 {
+			return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "agent targets does not accept positional arguments", map[string]any{"args": rest}))
+		}
+		targets := agentTargets()
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(targets, nil), 0)
+		}
+		for _, target := range targets {
+			fmt.Fprintf(stdout, "%s\t%s\n", target.Target, target.Summary)
+		}
+		return 0
+	}
+	if args[0] != "init" {
+		fmt.Fprintf(stderr, "usage: agtx agent init <%s> [--print|--json]\n", strings.Join(supportedAgentTargets(), "|"))
+		fmt.Fprintln(stderr, "       agtx agent targets [--json]")
 		return 1
 	}
 	args = args[1:]
 	printOnly := takeBoolFlag(&args, "--print", "")
+	jsonOut := takeBoolFlag(&args, "--json", "")
+	if printOnly && jsonOut {
+		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "--print and --json are mutually exclusive", nil))
+	}
 	if len(args) != 1 {
-		fmt.Fprintln(stderr, "usage: agtx agent init <target> --print")
+		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "agent init requires exactly one target", map[string]any{"supported_targets": supportedAgentTargets()}))
+	}
+	if !printOnly && !jsonOut {
+		fmt.Fprintln(stderr, "agtx does not modify agent configs automatically; rerun with --print or --json")
 		return 1
 	}
-	if !printOnly {
-		fmt.Fprintln(stderr, "agtx does not modify agent configs automatically; rerun with --print")
-		return 1
-	}
-	snippet, err := agentSnippet(args[0])
+	info, err := agentSnippet(args[0])
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, err.Error(), map[string]any{"supported_targets": supportedAgentTargets()}))
 	}
-	fmt.Fprint(stdout, snippet)
+	if jsonOut {
+		return writeJSON(stdout, core.NewResponse(info, nil), 0)
+	}
+	fmt.Fprint(stdout, renderAgentSnippet(info))
 	return 0
 }
 
@@ -749,7 +995,7 @@ func takeBoolFlag(args *[]string, long, short string) bool {
 	return found
 }
 
-func takeStringFlag(args *[]string, name, fallback string) string {
+func takeStringFlag(args *[]string, name, fallback string, knownFlags map[string]bool) string {
 	values := *args
 	next := values[:0]
 	result := fallback
@@ -757,14 +1003,25 @@ func takeStringFlag(args *[]string, name, fallback string) string {
 		arg := values[i]
 		if arg == name {
 			if i+1 < len(values) {
-				result = values[i+1]
+				nextValue := values[i+1]
+				if isKnownFlagToken(nextValue, knownFlags) {
+					next = append(next, "__missing_"+name)
+					continue
+				}
+				result = nextValue
 				i++
+			} else {
+				next = append(next, "__missing_"+name)
 			}
 			continue
 		}
 		prefix := name + "="
 		if strings.HasPrefix(arg, prefix) {
 			result = strings.TrimPrefix(arg, prefix)
+			if result == "" {
+				next = append(next, "__missing_"+name)
+				result = fallback
+			}
 			continue
 		}
 		next = append(next, arg)
@@ -784,17 +1041,20 @@ func hasFlag(args []string, name string) bool {
 
 func hasInternalInvalidFlag(args []string) bool {
 	for _, arg := range args {
-		if strings.HasPrefix(arg, "__invalid_") {
+		if strings.HasPrefix(arg, "__invalid_") || strings.HasPrefix(arg, "__missing_") {
 			return true
 		}
 	}
 	return false
 }
 
-func takeIntFlag(args *[]string, name string, fallback int) int {
+func takeIntFlag(args *[]string, name string, fallback int, knownFlags map[string]bool) int {
 	hadFlag := hasFlag(*args, name)
-	raw := takeStringFlag(args, name, "")
+	raw := takeStringFlag(args, name, "", knownFlags)
 	if raw == "" {
+		if hadFlag && !containsInternalFlag(*args, "__missing_"+name) {
+			*args = append(*args, "__missing_"+name)
+		}
 		return fallback
 	}
 	value, err := strconv.Atoi(raw)
@@ -807,10 +1067,13 @@ func takeIntFlag(args *[]string, name string, fallback int) int {
 	return value
 }
 
-func takeInt64Flag(args *[]string, name string, fallback int64) int64 {
+func takeInt64Flag(args *[]string, name string, fallback int64, knownFlags map[string]bool) int64 {
 	hadFlag := hasFlag(*args, name)
-	raw := takeStringFlag(args, name, "")
+	raw := takeStringFlag(args, name, "", knownFlags)
 	if raw == "" {
+		if hadFlag && !containsInternalFlag(*args, "__missing_"+name) {
+			*args = append(*args, "__missing_"+name)
+		}
 		return fallback
 	}
 	value, err := strconv.ParseInt(raw, 10, 64)
@@ -821,6 +1084,61 @@ func takeInt64Flag(args *[]string, name string, fallback int64) int64 {
 		return fallback
 	}
 	return value
+}
+
+func splitArgsAfterDoubleDash(args []string) ([]string, []string) {
+	for index, arg := range args {
+		if arg == "--" {
+			return append([]string{}, args[:index]...), append([]string{}, args[index+1:]...)
+		}
+	}
+	return args, nil
+}
+
+func argsBeforeDoubleDash(args []string) []string {
+	for index, arg := range args {
+		if arg == "--" {
+			return args[:index]
+		}
+	}
+	return args
+}
+
+func isKnownFlagToken(value string, knownFlags map[string]bool) bool {
+	if value == "" || value == "-" || !strings.HasPrefix(value, "-") {
+		return false
+	}
+	if knownFlags[value] {
+		return true
+	}
+	for flag := range knownFlags {
+		if strings.HasPrefix(value, flag+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+func containsInternalFlag(args []string, flag string) bool {
+	for _, arg := range args {
+		if arg == flag {
+			return true
+		}
+	}
+	return false
+}
+
+func internalFlagError(args []string) error {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "__missing_") {
+			return core.NewError(core.CodeInvalidArgument, strings.TrimPrefix(arg, "__missing_")+" requires a value", nil)
+		}
+		if strings.HasPrefix(arg, "__invalid_") {
+			flag := strings.TrimPrefix(arg, "__invalid_")
+			return core.NewError(core.CodeInvalidArgument, flag+" must be a positive integer", nil)
+		}
+	}
+	return core.NewError(core.CodeInvalidArgument, "invalid flag value", nil)
 }
 
 func isTerminal(reader io.Reader) bool {
@@ -869,6 +1187,11 @@ Usage:
   agtx verify <skill> [--json]
   agtx config init|show|path|set|unset [--json]
   agtx registry sources|refresh|validate [--json]
+  agtx pro login [--open] [--json]
+  agtx pro callback <agtx://pro/callback?...> [--json]
+  agtx pro status|setup|logout|devices|register-scheme [--json]
+  agtx pro revoke <device-id> [--json]
   agtx mcp
-  agtx agent init <target> --print`)
+  agtx agent init <target> [--print|--json]
+  agtx agent targets [--json]`)
 }

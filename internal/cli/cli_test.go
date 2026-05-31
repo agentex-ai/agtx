@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -86,6 +87,27 @@ func TestMainConfigLoadFailureHonorsNDJSON(t *testing.T) {
 	}
 	if event.Event != "failed" || event.Data.Error.Code != "size_limit_exceeded" {
 		t.Fatalf("unexpected event: %s", stdout.String())
+	}
+}
+
+func TestMainIgnoresInvalidAuthForNonProCommand(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	configDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "auth.json"), []byte(`{"schema_version":1,"extra":true}`), 0o600); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"status", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("status should ignore invalid auth code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"ok": true`)) {
+		t.Fatalf("expected ok status: %s", stdout.String())
 	}
 }
 
@@ -187,6 +209,122 @@ func TestSearchRejectsInvalidLimit(t *testing.T) {
 	}
 }
 
+func TestRunRejectsMissingInputValue(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"run", "pdf", "--input", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected missing input value failure")
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"--input requires a value"`)) {
+		t.Fatalf("expected missing input error: %s", stdout.String())
+	}
+}
+
+func TestRunAcceptsDashAsInputValue(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"run", "pdf", "--input", "-", "--output-limit-bytes", "4", "--json"}, bytes.NewReader([]byte("too large")), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected input size failure from stdin")
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"code": "size_limit_exceeded"`)) {
+		t.Fatalf("expected size limit response from stdin input: %s", stdout.String())
+	}
+}
+
+func TestRunRejectsMissingTimeoutValue(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"run", "pdf", "--timeout-ms", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected missing timeout value failure")
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"--timeout-ms requires a value"`)) {
+		t.Fatalf("expected missing timeout error: %s", stdout.String())
+	}
+}
+
+func TestRollbackRejectsMissingToValue(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"rollback", "pdf", "--to", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected missing rollback target failure")
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"--to requires a value"`)) {
+		t.Fatalf("expected missing rollback target error: %s", stdout.String())
+	}
+}
+
+func TestRunTreatsDoubleDashAsSkillArgSeparator(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"run", "pdf", "--", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected not installed failure")
+	}
+	if bytes.Contains(stdout.Bytes(), []byte(`"--json and --ndjson are mutually exclusive"`)) {
+		t.Fatalf("expected --json after -- to be passed through as skill arg: %s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "skill is not installed") {
+		t.Fatalf("expected skill lookup failure once parsing succeeds: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestMainConfigLoadFailureIgnoresJSONAfterDoubleDash(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	configDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), bytes.Repeat([]byte("x"), 1024*1024+1), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"run", "pdf", "--", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected config load failure")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected plain failure with no json stdout, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "configured size limit") {
+		t.Fatalf("expected plain stderr size limit error, got stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestMainConfigLoadFailureIgnoresNDJSONAfterDoubleDash(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	configDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), bytes.Repeat([]byte("x"), 1024*1024+1), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"run", "pdf", "--", "--ndjson"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected config load failure")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected plain failure with no ndjson stdout, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "configured size limit") {
+		t.Fatalf("expected plain stderr size limit error, got stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+}
+
 func TestInstallPlanDoesNotRequireConfirmation(t *testing.T) {
 	t.Setenv("AGTX_HOME", t.TempDir())
 	var stdout bytes.Buffer
@@ -227,6 +365,207 @@ func TestConfigSetUnsetAndRegistryValidate(t *testing.T) {
 	code = Main([]string{"config", "unset", "registry_files", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("config unset failed with code %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+}
+
+func TestProLoginStartJSON(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"config", "set", "pro_api_url", "https://pro.example.com", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("config set failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"pro", "login", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("pro login failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"login_url": "https://pro.example.com/v1/cli/login/start?`)) {
+		t.Fatalf("expected login URL: %s", stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "config", "auth.json")); err != nil {
+		t.Fatalf("expected auth file: %v", err)
+	}
+}
+
+func TestProLoginRejectsUnexpectedArgument(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"pro", "login", "extra", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected unexpected argument failure")
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"code": "invalid_argument"`)) {
+		t.Fatalf("expected invalid argument response: %s", stdout.String())
+	}
+}
+
+func TestProSetupJSON(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"config", "set", "pro_api_url", "https://pro.example.com", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("config set failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"pro", "setup", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("pro setup failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var response struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Authenticated      bool `json:"authenticated"`
+			HasPendingLogin    bool `json:"has_pending_login"`
+			ProAPIURL          string `json:"pro_api_url"`
+			CurrentStatus      []string `json:"current_status"`
+			RecommendedActions []struct {
+				ID      string `json:"id"`
+				MCPTool string `json:"mcp_tool"`
+			} `json:"recommended_actions"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid pro setup json: %v\n%s", err, stdout.String())
+	}
+	if !response.OK || response.Data.Authenticated || response.Data.HasPendingLogin {
+		t.Fatalf("expected unauthenticated setup response: %s", stdout.String())
+	}
+	if response.Data.ProAPIURL != "https://pro.example.com" {
+		t.Fatalf("expected pro api url in setup response: %s", stdout.String())
+	}
+	if !containsString(response.Data.CurrentStatus, "pro_api_configured") || !containsString(response.Data.CurrentStatus, "not_authenticated") {
+		t.Fatalf("expected setup status markers: %s", stdout.String())
+	}
+	if !containsCLIAction(response.Data.RecommendedActions, "start_login") {
+		t.Fatalf("expected start_login recommendation: %s", stdout.String())
+	}
+}
+
+func TestProSetupPlainText(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"config", "set", "pro_api_url", "https://pro.example.com", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("config set failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"pro", "setup"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("pro setup failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "authenticated: false") || !strings.Contains(output, "status: pro_api_configured") || !strings.Contains(output, "next:") || !strings.Contains(output, "mcp: start_pro_login") {
+		t.Fatalf("expected setup text output: %s", output)
+	}
+}
+
+func TestHelpShowsDetailedProUsage(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"--help"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("help failed code=%d stderr=%s", code, stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`agtx pro login [--open] [--json]`)) {
+		t.Fatalf("expected pro login usage: %s", stdout.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`agtx pro status|setup|logout|devices|register-scheme [--json]`)) {
+		t.Fatalf("expected pro setup usage: %s", stdout.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`agtx pro revoke <device-id> [--json]`)) {
+		t.Fatalf("expected pro revoke usage: %s", stdout.String())
+	}
+}
+
+func TestProStatusWithoutLogin(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"pro", "status", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("pro status failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"authenticated": false`)) {
+		t.Fatalf("expected unauthenticated status: %s", stdout.String())
+	}
+}
+
+func TestProDevicesUnauthorizedIncludesRecoveryHintsJSON(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"config", "set", "pro_api_url", "https://pro.example.com", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("config set failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"pro", "devices", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected unauthorized error")
+	}
+	var response struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				ProSetup struct {
+					ProAPIURL string `json:"pro_api_url"`
+				} `json:"pro_setup"`
+				NextActions []struct {
+					ID string `json:"id"`
+				} `json:"next_actions"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid pro devices json: %v\n%s", err, stdout.String())
+	}
+	if response.OK || response.Error.Code != "unauthorized" || response.Error.Details.ProSetup.ProAPIURL != "https://pro.example.com" {
+		t.Fatalf("expected unauthorized details with pro setup: %s", stdout.String())
+	}
+	foundRestart := false
+	for _, action := range response.Error.Details.NextActions {
+		if action.ID == "restart_login" {
+			foundRestart = true
+			break
+		}
+	}
+	if !foundRestart {
+		t.Fatalf("expected restart_login next action: %s", stdout.String())
+	}
+}
+
+func TestProLogoutRemovesAuth(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	authPath := filepath.Join(root, "config", "auth.json")
+	if err := os.MkdirAll(filepath.Dir(authPath), 0o755); err != nil {
+		t.Fatalf("mkdir auth dir: %v", err)
+	}
+	if err := os.WriteFile(authPath, []byte(`{"schema_version":1,"access_token":"secret"}`), 0o600); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"pro", "logout", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("pro logout failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(authPath); !os.IsNotExist(err) {
+		t.Fatalf("expected auth removed, got %v", err)
 	}
 }
 
@@ -296,4 +635,169 @@ func TestRunInputFileHonorsSizeLimit(t *testing.T) {
 	if !bytes.Contains(stdout.Bytes(), []byte(`"code": "size_limit_exceeded"`)) {
 		t.Fatalf("expected size limit response: %s", stdout.String())
 	}
+}
+
+func TestAgentInitJSON(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"agent", "init", "codex", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("agent init json failed code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var response struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Target        string `json:"target"`
+			ConfigFormat  string `json:"config_format"`
+			ConfigSnippet string `json:"config_snippet"`
+			RuleSnippet   string `json:"rule_snippet"`
+			SetupSteps    []struct {
+				ID          string   `json:"id"`
+				Kind        string   `json:"kind"`
+				Snippet     string   `json:"snippet"`
+				Priority    int      `json:"priority"`
+				Blocking    bool     `json:"blocking"`
+				Platforms   []string `json:"platforms"`
+				AppliesWhen []struct {
+					Field string   `json:"field"`
+					AnyOf []string `json:"any_of"`
+				} `json:"applies_when"`
+				WritesFiles []struct {
+					Kind    string   `json:"kind"`
+					Paths   []string `json:"paths"`
+					Summary string   `json:"summary"`
+				} `json:"writes_files"`
+				Artifacts []struct {
+					Kind         string   `json:"kind"`
+					Summary      string   `json:"summary"`
+					ConsumableBy []string `json:"consumable_by"`
+				} `json:"artifacts"`
+				Verification struct {
+					Kind        string `json:"kind"`
+					Expectation string `json:"expectation"`
+				} `json:"verification"`
+			} `json:"setup_steps"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid agent init json: %v\n%s", err, stdout.String())
+	}
+	if !response.OK || response.Data.Target != "codex" || response.Data.ConfigFormat != "toml" {
+		t.Fatalf("unexpected response: %s", stdout.String())
+	}
+	if !strings.Contains(response.Data.ConfigSnippet, `[mcp_servers.agtx]`) {
+		t.Fatalf("expected codex config snippet: %s", stdout.String())
+	}
+	if !strings.Contains(response.Data.RuleSnippet, `Use agtx through MCP`) {
+		t.Fatalf("expected rule snippet: %s", stdout.String())
+	}
+	if len(response.Data.SetupSteps) < 2 || response.Data.SetupSteps[0].ID == "" || response.Data.SetupSteps[0].Snippet == "" {
+		t.Fatalf("expected structured setup steps: %s", stdout.String())
+	}
+	if response.Data.SetupSteps[0].Priority <= 0 || !response.Data.SetupSteps[0].Blocking || response.Data.SetupSteps[0].Verification.Expectation == "" {
+		t.Fatalf("expected setup step metadata: %s", stdout.String())
+	}
+	if len(response.Data.SetupSteps[0].Platforms) == 0 || len(response.Data.SetupSteps[0].AppliesWhen) == 0 {
+		t.Fatalf("expected setup step platforms and conditions: %s", stdout.String())
+	}
+	if len(response.Data.SetupSteps[0].WritesFiles) == 0 || len(response.Data.SetupSteps[0].Artifacts) == 0 {
+		t.Fatalf("expected setup step write/artifact metadata: %s", stdout.String())
+	}
+}
+
+func TestAgentInitRejectsPrintAndJSONTogether(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"agent", "init", "codex", "--print", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected mutually exclusive flag failure")
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"--print and --json are mutually exclusive"`)) {
+		t.Fatalf("expected structured error: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestAgentInitUnsupportedTargetJSON(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"agent", "init", "unknown", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected unsupported target failure")
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"supported_targets"`)) {
+		t.Fatalf("expected supported_targets details: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestAgentTargetsJSON(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"agent", "targets", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("agent targets failed code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var response struct {
+		OK   bool `json:"ok"`
+		Data []struct {
+			Target          string   `json:"target"`
+			Summary         string   `json:"summary"`
+			ConfigPathHints []string `json:"config_path_hints"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid agent targets json: %v\n%s", err, stdout.String())
+	}
+	if !response.OK || len(response.Data) == 0 {
+		t.Fatalf("expected target list: %s", stdout.String())
+	}
+	foundCodex := false
+	for _, target := range response.Data {
+		if target.Target == "codex" {
+			foundCodex = true
+			if target.Summary == "" || len(target.ConfigPathHints) == 0 {
+				t.Fatalf("expected codex summary and path hints: %s", stdout.String())
+			}
+		}
+	}
+	if !foundCodex {
+		t.Fatalf("expected codex target: %s", stdout.String())
+	}
+}
+
+func TestAgentTargetsPlainText(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"agent", "targets"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("agent targets failed code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "codex\t") || !strings.Contains(stdout.String(), "claude-code") {
+		t.Fatalf("expected plain target listing: %s", stdout.String())
+	}
+}
+
+func containsCLIAction(actions []struct {
+	ID      string `json:"id"`
+	MCPTool string `json:"mcp_tool"`
+}, want string) bool {
+	for _, action := range actions {
+		if action.ID == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

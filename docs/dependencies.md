@@ -30,12 +30,13 @@
 - Archive and entrypoint paths are interpreted with POSIX-style forward-slash semantics on every host; they must be non-empty, unique after cleaning, and contained inside the skill directory.
 - Extracted file permissions are normalized to `0644` or `0755`; setuid, setgid, sticky, and overly broad write bits from archives are not preserved.
 
-## macOS Build
+## Release Builds
 
-Recommended release build:
+Recommended release builds:
 
 ```sh
 CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags "netgo osusergo" -trimpath -ldflags "-s -w" -o dist/agtx-darwin-arm64 ./cmd/agtx
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o dist/agtx-windows-amd64.exe ./cmd/agtx
 ```
 
 `CGO_ENABLED=0` does not mean a macOS binary has no system runtime linkage. The target is no third-party dynamic libraries and no third-party runtime.

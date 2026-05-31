@@ -9,6 +9,7 @@ import (
 type Paths struct {
 	ConfigDir   string
 	ConfigFile  string
+	AuthFile    string
 	CacheDir    string
 	SkillsDir   string
 	LogsDir     string
@@ -21,6 +22,7 @@ func DefaultPaths() (Paths, error) {
 		return Paths{
 			ConfigDir:   filepath.Join(root, "config"),
 			ConfigFile:  filepath.Join(root, "config", "config.json"),
+			AuthFile:    filepath.Join(root, "config", "auth.json"),
 			CacheDir:    filepath.Join(root, "cache"),
 			SkillsDir:   filepath.Join(root, "skills"),
 			LogsDir:     filepath.Join(root, "logs"),
@@ -40,6 +42,7 @@ func DefaultPaths() (Paths, error) {
 		return Paths{
 			ConfigDir:   configDir,
 			ConfigFile:  filepath.Join(configDir, "config.json"),
+			AuthFile:    filepath.Join(configDir, "auth.json"),
 			CacheDir:    cacheDir,
 			SkillsDir:   filepath.Join(configDir, "skills"),
 			LogsDir:     filepath.Join(home, "Library", "Logs", "agtx"),
@@ -59,6 +62,7 @@ func DefaultPaths() (Paths, error) {
 		return Paths{
 			ConfigDir:   configDir,
 			ConfigFile:  filepath.Join(configDir, "config.json"),
+			AuthFile:    filepath.Join(configDir, "auth.json"),
 			CacheDir:    cacheDir,
 			SkillsDir:   filepath.Join(configDir, "skills"),
 			LogsDir:     filepath.Join(localAppData, "agtx", "Logs"),
@@ -82,6 +86,7 @@ func DefaultPaths() (Paths, error) {
 		return Paths{
 			ConfigDir:   configDir,
 			ConfigFile:  filepath.Join(configDir, "config.json"),
+			AuthFile:    filepath.Join(configDir, "auth.json"),
 			CacheDir:    cacheDir,
 			SkillsDir:   filepath.Join(configDir, "skills"),
 			LogsDir:     filepath.Join(stateBase, "agtx", "logs"),
@@ -95,6 +100,7 @@ func PathsForRoot(root string) Paths {
 	return Paths{
 		ConfigDir:   filepath.Join(root, "config"),
 		ConfigFile:  filepath.Join(root, "config", "config.json"),
+		AuthFile:    filepath.Join(root, "config", "auth.json"),
 		CacheDir:    filepath.Join(root, "cache"),
 		SkillsDir:   filepath.Join(root, "skills"),
 		LogsDir:     filepath.Join(root, "logs"),

@@ -30,6 +30,7 @@ var pathSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
 type Service struct {
 	Paths           Paths
 	Config          Config
+	Auth            AuthState
 	Registry        Registry
 	RegistrySources []RegistrySource
 }
@@ -37,7 +38,8 @@ type Service struct {
 func NewService(paths Paths) *Service {
 	config := DefaultConfig()
 	registry, sources := LoadRegistry(paths, config)
-	return &Service{Paths: paths, Config: config, Registry: registry, RegistrySources: sources}
+	auth, _ := LoadAuth(paths.AuthFile)
+	return &Service{Paths: paths, Config: config, Auth: auth, Registry: registry, RegistrySources: sources}
 }
 
 func NewDefaultService() (*Service, error) {
@@ -49,8 +51,9 @@ func NewDefaultService() (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	auth, _ := LoadAuth(paths.AuthFile)
 	registry, sources := LoadRegistry(paths, config)
-	return &Service{Paths: paths, Config: config, Registry: registry, RegistrySources: sources}, nil
+	return &Service{Paths: paths, Config: config, Auth: auth, Registry: registry, RegistrySources: sources}, nil
 }
 
 func (s *Service) InitConfig(force bool) (Config, error) {
@@ -586,7 +589,7 @@ func (s *Service) materializeSkill(ctx context.Context, skill SkillManifest, bun
 		if strings.TrimSpace(bundle.Entrypoint) == "" {
 			return NewError(CodeInvalidArgument, "non-stub packages must declare entrypoint", map[string]any{"skill": skill.Name})
 		}
-		archiveBytes, err := fetchBundleBytes(ctx, bundle.URL, s.Config.PackageMaxBytes, time.Duration(s.Config.PackageDownloadTimeoutMS)*time.Millisecond)
+		archiveBytes, err := fetchBundleBytes(ctx, bundle.URL, s.Config, s.Paths, time.Duration(s.Config.PackageDownloadTimeoutMS)*time.Millisecond)
 		if err != nil {
 			return err
 		}
@@ -808,14 +811,14 @@ func (m SkillManifest) BundleFor(goos, goarch string) (PlatformBundle, bool) {
 	return PlatformBundle{}, false
 }
 
-func fetchBundleBytes(ctx context.Context, url string, limit int64, timeout time.Duration) ([]byte, error) {
+func fetchBundleBytes(ctx context.Context, url string, config Config, paths Paths, timeout time.Duration) ([]byte, error) {
 	if path, ok, err := localBundlePath(url); err != nil {
 		return nil, err
 	} else if ok {
-		return readFileLimited(path, limit, "package")
+		return readFileLimited(path, config.PackageMaxBytes, "package")
 	}
 	if !strings.Contains(url, "://") {
-		return readFileLimited(url, limit, "package")
+		return readFileLimited(url, config.PackageMaxBytes, "package")
 	}
 	requestCtx := ctx
 	cancel := func() {}
@@ -827,6 +830,7 @@ func fetchBundleBytes(ctx context.Context, url string, limit int64, timeout time
 	if err != nil {
 		return nil, err
 	}
+	attachAuthHeader(req, config, loadRequestAuth(ctx, paths, config))
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		if requestCtx.Err() == context.DeadlineExceeded {
@@ -836,9 +840,10 @@ func fetchBundleBytes(ctx context.Context, url string, limit int64, timeout time
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, NewError(CodeInternal, "download failed", map[string]any{"url": url, "status": res.Status})
+		data, _ := readAllLimited(res.Body, defaultAuthMaxBytes, "package error")
+		return nil, withProRecoveryDetails(remoteHTTPError("download failed", url, res.StatusCode, res.Status, data), paths, config)
 	}
-	data, err := readAllLimited(res.Body, limit, "package")
+	data, err := readAllLimited(res.Body, config.PackageMaxBytes, "package")
 	if err != nil {
 		if requestCtx.Err() == context.DeadlineExceeded {
 			return nil, NewError(CodeTimeout, "package download timed out", map[string]any{"url": url, "timeout_ms": timeout.Milliseconds()})
