@@ -899,7 +899,13 @@ func confirmMutation(action string, targets []string, yes, jsonOut bool, stdin i
 		return nil
 	}
 	if jsonOut || !isTerminal(stdin) {
-		return core.NewError(core.CodeConfirmationRequired, action+" requires explicit confirmation", map[string]any{"action": action, "targets": targets, "retry_with": "--yes"})
+		return core.NewError(core.CodeConfirmationRequired, action+" requires explicit confirmation", map[string]any{
+			"action":          action,
+			"targets":         targets,
+			"expected":        "--yes",
+			"retry_with":      "--yes",
+			"supported_flags": mutationFlags(action),
+		})
 	}
 	fmt.Fprintf(stdout, "%s %s? [y/N] ", action, strings.Join(targets, ", "))
 	reader := bufio.NewReader(stdin)
@@ -912,6 +918,21 @@ func confirmMutation(action string, targets []string, yes, jsonOut bool, stdin i
 		return nil
 	}
 	return core.NewError(core.CodeConfirmationRequired, action+" cancelled", map[string]any{"action": action})
+}
+
+func mutationFlags(action string) []string {
+	switch action {
+	case "install":
+		return installFlags()
+	case "uninstall":
+		return uninstallFlags()
+	case "upgrade":
+		return upgradeFlags()
+	case "rollback":
+		return rollbackFlags()
+	default:
+		return []string{"--json", "--yes", "-y"}
+	}
 }
 
 func fail(stdout, stderr io.Writer, jsonOut bool, err error) int {

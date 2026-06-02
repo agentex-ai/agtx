@@ -158,14 +158,18 @@ func readLineLimited(reader *bufio.Reader, limit int) ([]byte, error) {
 func (s *server) handleLine(line []byte) error {
 	trimmed := bytes.TrimSpace(line)
 	if !json.Valid(trimmed) {
-		return s.writeError(nil, -32700, "parse error", "invalid JSON")
+		return s.writeError(nil, -32700, "parse error", map[string]any{"error": "invalid JSON", "expected": "json_object"})
 	}
 	if len(trimmed) > 0 && trimmed[0] == '[' {
-		return s.writeError(nil, -32600, "invalid request", "JSON-RPC batches are not implemented in agtx mcp v1")
+		return s.writeError(nil, -32600, "invalid request", map[string]any{
+			"error":            "JSON-RPC batches are not implemented in agtx mcp v1",
+			"expected":         "single_jsonrpc_request",
+			"supported_fields": rpcEnvelopeFields(),
+		})
 	}
 	var request rpcRequest
 	if err := decodeJSONStrict(trimmed, &request); err != nil {
-		return s.writeError(nil, -32600, "invalid request", err.Error())
+		return s.writeError(nil, -32600, "invalid request", invalidRPCEnvelopeError(err))
 	}
 	id := request.ID
 	hasID := len(id) > 0
@@ -223,6 +227,18 @@ func (s *server) handleLine(line []byte) error {
 
 func supportedMethods() []string {
 	return []string{"initialize", "notifications/initialized", "tools/list", "tools/call"}
+}
+
+func invalidRPCEnvelopeError(err error) map[string]any {
+	return map[string]any{
+		"error":            err.Error(),
+		"expected":         "object",
+		"supported_fields": rpcEnvelopeFields(),
+	}
+}
+
+func rpcEnvelopeFields() []string {
+	return []string{"jsonrpc", "id", "method", "params"}
 }
 
 func validateRequest(request rpcRequest) (any, bool) {

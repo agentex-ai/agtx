@@ -1493,6 +1493,62 @@ func TestMCPRejectsNonObjectParams(t *testing.T) {
 	assertMCPInvalidRequestDetails(t, stdout.Bytes(), "params", "params must be an object or null")
 }
 
+func TestMCPRejectsInvalidJSONWithStructuredParseError(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	input := strings.NewReader(`{"jsonrpc":"2.0"` + "\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	var response struct {
+		Error struct {
+			Code int `json:"code"`
+			Data struct {
+				Error    string `json:"error"`
+				Expected string `json:"expected"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+	if response.Error.Code != -32700 || response.Error.Data.Error != "invalid JSON" || response.Error.Data.Expected != "json_object" {
+		t.Fatalf("unexpected parse error details: %s", stdout.String())
+	}
+}
+
+func TestMCPRejectsBatchWithSupportedEnvelopeFields(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	input := strings.NewReader(`[{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}]` + "\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	var response struct {
+		Error struct {
+			Code int `json:"code"`
+			Data struct {
+				Error           string   `json:"error"`
+				Expected        string   `json:"expected"`
+				SupportedFields []string `json:"supported_fields"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+	if response.Error.Code != -32600 || response.Error.Data.Expected != "single_jsonrpc_request" {
+		t.Fatalf("unexpected batch error details: %s", stdout.String())
+	}
+	if !containsString(response.Error.Data.SupportedFields, "jsonrpc") || !containsString(response.Error.Data.SupportedFields, "params") {
+		t.Fatalf("expected supported_fields details: %s", stdout.String())
+	}
+}
+
 func TestMCPRejectsUnknownTopLevelField(t *testing.T) {
 	service := core.NewService(core.PathsForRoot(t.TempDir()))
 	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{},"extra":true}` + "\n")
@@ -1504,6 +1560,24 @@ func TestMCPRejectsUnknownTopLevelField(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"message":"invalid request"`) || !strings.Contains(stdout.String(), `unknown field \"extra\"`) {
 		t.Fatalf("expected strict top-level decode failure: %s", stdout.String())
+	}
+	var response struct {
+		Error struct {
+			Data struct {
+				Error           string   `json:"error"`
+				Expected        string   `json:"expected"`
+				SupportedFields []string `json:"supported_fields"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+	if response.Error.Data.Expected != "object" || !strings.Contains(response.Error.Data.Error, `unknown field "extra"`) {
+		t.Fatalf("unexpected top-level field details: %s", stdout.String())
+	}
+	if !containsString(response.Error.Data.SupportedFields, "jsonrpc") || !containsString(response.Error.Data.SupportedFields, "method") {
+		t.Fatalf("expected supported_fields details: %s", stdout.String())
 	}
 }
 

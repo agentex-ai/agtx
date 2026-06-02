@@ -20,7 +20,13 @@ func TestInstallRequiresConfirmationForJSONAgent(t *testing.T) {
 	var response struct {
 		OK    bool `json:"ok"`
 		Error struct {
-			Code string `json:"code"`
+			Code    string `json:"code"`
+			Details struct {
+				Action         string   `json:"action"`
+				Expected       string   `json:"expected"`
+				RetryWith      string   `json:"retry_with"`
+				SupportedFlags []string `json:"supported_flags"`
+			} `json:"details"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
@@ -28,6 +34,12 @@ func TestInstallRequiresConfirmationForJSONAgent(t *testing.T) {
 	}
 	if response.OK || response.Error.Code != "confirmation_required" {
 		t.Fatalf("unexpected response: %s", stdout.String())
+	}
+	if response.Error.Details.Action != "install" || response.Error.Details.Expected != "--yes" || response.Error.Details.RetryWith != "--yes" {
+		t.Fatalf("unexpected confirmation details: %s", stdout.String())
+	}
+	if !containsString(response.Error.Details.SupportedFlags, "--yes") || !containsString(response.Error.Details.SupportedFlags, "--plan") {
+		t.Fatalf("expected supported flags in confirmation details: %s", stdout.String())
 	}
 }
 

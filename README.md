@@ -43,7 +43,7 @@ Mutating commands require confirmation. Agent callers should pass `--json --yes`
 
 For `agtx run`, `--output-limit-bytes` bounds captured stdout/stderr and `--input file|-` reads in CLI agent calls. Use `--` before skill arguments; any `--json` or `--ndjson` after that separator is passed through to the skill, not treated as an agtx output flag.
 
-Structured errors include recovery hints for agent callers: unknown commands include `supported_commands`, nested command errors include `supported_subcommands`, missing positional arguments include `expected_args`, flag parse/unexpected-argument errors include `supported_flags`, and MCP envelope/method/tool/params/argument errors include `field`, `expected`, `supported_methods`, `supported_tools`, `supported_params`, or `supported_arguments`. MCP required-argument, argument-shape, and confirmation errors also include the tool name plus expected argument shape or `yes=true` retry details.
+Structured errors include recovery hints for agent callers: unknown commands include `supported_commands`, nested command errors include `supported_subcommands`, missing positional arguments include `expected_args`, flag parse/unexpected-argument errors include `supported_flags`, and MCP parse/envelope/method/tool/params/argument errors include `field`, `expected`, `supported_fields`, `supported_methods`, `supported_tools`, `supported_params`, or `supported_arguments`. MCP required-argument, argument-shape, and confirmation errors also include the tool name plus expected argument shape or `yes=true` retry details.
 
 ## Build
 
