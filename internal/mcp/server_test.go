@@ -124,6 +124,7 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	var searchSchema map[string]any
 	var listSchema map[string]any
 	var configKeysSchema map[string]any
+	var registrySourcesSchema map[string]any
 	var statusSchema map[string]any
 	var proStatusSchema map[string]any
 	var proSetupSchema map[string]any
@@ -134,6 +135,7 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	var logoutProSchema map[string]any
 	var registerProSchemeSchema map[string]any
 	var refreshSchema map[string]any
+	var validateRegistrySchema map[string]any
 	var planOutputSchema map[string]any
 	var installSchema map[string]any
 	var installErrorSchema map[string]any
@@ -149,6 +151,8 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 			listSchema = tool.OutputSchema
 		case "list_config_keys":
 			configKeysSchema = tool.OutputSchema
+		case "list_registry_sources":
+			registrySourcesSchema = tool.OutputSchema
 		case "get_status":
 			statusSchema = tool.OutputSchema
 		case "get_pro_status":
@@ -169,6 +173,8 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 			registerProSchemeSchema = tool.OutputSchema
 		case "refresh_registry":
 			refreshSchema = tool.OutputSchema
+		case "validate_registry":
+			validateRegistrySchema = tool.OutputSchema
 		case "run_skill":
 			runSchema = tool.InputSchema
 			runOutputSchema = tool.OutputSchema
@@ -194,7 +200,7 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 			verifyErrorSchema = tool.ErrorOutputSchema
 		}
 	}
-	if searchSchema == nil || listSchema == nil || configKeysSchema == nil || statusSchema == nil || proStatusSchema == nil || proSetupSchema == nil || proLoginStartSchema == nil || proLoginCompleteSchema == nil || proDevicesSchema == nil || revokeProDeviceSchema == nil || logoutProSchema == nil || registerProSchemeSchema == nil || refreshSchema == nil || runSchema == nil || runOutputSchema == nil || runErrorSchema == nil || planSchema == nil || planOutputSchema == nil || installSchema == nil || installErrorSchema == nil || upgradeSchema == nil || rollbackSchema == nil || uninstallSchema == nil || agentSchema == nil || doctorSchema == nil || verifySchema == nil || verifyErrorSchema == nil {
+	if searchSchema == nil || listSchema == nil || configKeysSchema == nil || registrySourcesSchema == nil || statusSchema == nil || proStatusSchema == nil || proSetupSchema == nil || proLoginStartSchema == nil || proLoginCompleteSchema == nil || proDevicesSchema == nil || revokeProDeviceSchema == nil || logoutProSchema == nil || registerProSchemeSchema == nil || refreshSchema == nil || validateRegistrySchema == nil || runSchema == nil || runOutputSchema == nil || runErrorSchema == nil || planSchema == nil || planOutputSchema == nil || installSchema == nil || installErrorSchema == nil || upgradeSchema == nil || rollbackSchema == nil || uninstallSchema == nil || agentSchema == nil || doctorSchema == nil || verifySchema == nil || verifyErrorSchema == nil {
 		t.Fatalf("expected schemas for discovery metadata: %s", stdout.String())
 	}
 	if runSchema["additionalProperties"] != false {
@@ -251,6 +257,17 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	}
 	if _, ok := configKeysProps["default"].(map[string]any); !ok {
 		t.Fatalf("expected config key default schema: %#v", configKeysProps)
+	}
+	registrySourceItems, ok := registrySourcesSchema["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected list_registry_sources array schema: %#v", registrySourcesSchema)
+	}
+	registrySourceProps, ok := registrySourceItems["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected registry source properties: %#v", registrySourceItems)
+	}
+	if _, ok := registrySourceProps["loaded"].(map[string]any); !ok {
+		t.Fatalf("expected registry source loaded schema: %#v", registrySourceProps)
 	}
 	statusProps, ok := statusSchema["properties"].(map[string]any)
 	if !ok {
@@ -328,6 +345,13 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	}
 	if _, ok := refreshProps["bytes"].(map[string]any); !ok {
 		t.Fatalf("expected refresh_registry bytes schema: %#v", refreshProps)
+	}
+	validateRegistryProps, ok := validateRegistrySchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected validate_registry output properties: %#v", validateRegistrySchema)
+	}
+	if _, ok := validateRegistryProps["warnings"].(map[string]any); !ok {
+		t.Fatalf("expected validate_registry warnings schema: %#v", validateRegistryProps)
 	}
 	agentProps, ok := agentSchema["properties"].(map[string]any)
 	if !ok {
@@ -605,6 +629,78 @@ func TestMCPListConfigKeysTool(t *testing.T) {
 	}
 	if !foundRegistryURL {
 		t.Fatalf("expected registry_url key metadata: %s", stdout.String())
+	}
+}
+
+func TestMCPRegistrySourceAndValidateTools(t *testing.T) {
+	root := t.TempDir()
+	registryPath := filepath.Join(root, "registry.json")
+	if err := os.WriteFile(registryPath, []byte(`{"schema_version":1,"skills":[{"schema_version":1,"name":"demo","version":"1.0.0","summary":"Demo","description":"Demo","platforms":[{"os":"darwin","arch":"arm64"}],"stub":true}]}`), 0o644); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+	paths := core.PathsForRoot(root)
+	service := core.NewService(paths)
+	config, err := core.SetConfigValue(service.Config, "registry_files", registryPath)
+	if err != nil {
+		t.Fatalf("set registry_files: %v", err)
+	}
+	service.Config = config
+	service.Registry, service.RegistrySources = core.LoadRegistry(paths, config)
+
+	input := strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_registry_sources","arguments":{}}}` + "\n" +
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"validate_registry","arguments":{"path":"` + strings.ReplaceAll(registryPath, `\`, `\\`) + `"}}}` + "\n",
+	)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected two MCP responses, got %d: %s", len(lines), stdout.String())
+	}
+
+	var sourcesResponse struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent []struct {
+				Kind   string `json:"kind"`
+				Path   string `json:"path"`
+				Loaded bool   `json:"loaded"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &sourcesResponse); err != nil {
+		t.Fatalf("invalid list_registry_sources json: %v\n%s", err, lines[0])
+	}
+	foundFileSource := false
+	for _, source := range sourcesResponse.Result.StructuredContent {
+		if source.Kind == "file" && source.Path == registryPath && source.Loaded {
+			foundFileSource = true
+			break
+		}
+	}
+	if sourcesResponse.Result.IsError || !foundFileSource {
+		t.Fatalf("expected loaded registry file source: %s", lines[0])
+	}
+
+	var validateResponse struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				Path   string `json:"path"`
+				OK     bool   `json:"ok"`
+				Skills int    `json:"skills"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &validateResponse); err != nil {
+		t.Fatalf("invalid validate_registry json: %v\n%s", err, lines[1])
+	}
+	if validateResponse.Result.IsError || !validateResponse.Result.StructuredContent.OK || validateResponse.Result.StructuredContent.Path != registryPath || validateResponse.Result.StructuredContent.Skills != 1 {
+		t.Fatalf("expected valid registry result: %s", lines[1])
 	}
 }
 

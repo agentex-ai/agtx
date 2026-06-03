@@ -18,6 +18,7 @@ Available tools:
 - `get_agent_target`
 - `get_status`
 - `list_config_keys`
+- `list_registry_sources`
 - `get_pro_status`
 - `get_pro_setup`
 - `start_pro_login`
@@ -29,6 +30,7 @@ Available tools:
 - `doctor`
 - `verify_skill`
 - `refresh_registry`
+- `validate_registry`
 - `plan_install`
 - `install_skill`
 - `upgrade_skill`

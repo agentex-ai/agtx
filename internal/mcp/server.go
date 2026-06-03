@@ -341,6 +341,8 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 		return toolJSON(status), nil
 	case "list_config_keys":
 		return toolJSON(core.ConfigKeys()), nil
+	case "list_registry_sources":
+		return toolJSON(s.service.RegistrySources), nil
 	case "get_pro_status":
 		status, err := s.service.ProStatus(context.Background())
 		if err != nil {
@@ -442,6 +444,19 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 		return toolJSON(result), nil
 	case "refresh_registry":
 		result, err := s.service.RefreshRegistry(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(result), nil
+	case "validate_registry":
+		path, err := args.String("path")
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(path) == "" {
+			return nil, args.missingRequiredArgument("path", "non_empty_string")
+		}
+		result, err := s.service.ValidateRegistry(path)
 		if err != nil {
 			return nil, err
 		}
@@ -719,6 +734,7 @@ func tools() []map[string]any {
 		), agentTargetSchema()),
 		tool("get_status", "Return local agtx status and paths.", objectSchema(nil, nil, nil), statusSchema()),
 		tool("list_config_keys", "List supported agtx config keys, value types, defaults, and allowed values.", objectSchema(nil, nil, nil), arraySchema(configKeyInfoSchema(), "Supported agtx config keys.")),
+		tool("list_registry_sources", "List registry sources consulted for the active registry view.", objectSchema(nil, nil, nil), arraySchema(registrySourceSchema(), "Registry sources consulted for the current view.")),
 		tool("get_pro_status", "Return local Pro authentication and subscription status.", objectSchema(nil, nil, nil), proStatusSchema()),
 		tool("get_pro_setup", "Return a no-side-effect Pro setup checklist and next actions for humans or agents.", objectSchema(nil, nil, nil), proSetupSchema()),
 		tool("start_pro_login", "Create a Pro login URL and pending PKCE state without opening a browser.", objectSchema(nil, nil, nil), proLoginStartSchema()),
@@ -749,6 +765,13 @@ func tools() []map[string]any {
 			nil,
 		), verifyResultSchema()),
 		tool("refresh_registry", "Refresh the cached registry from configured registry_url.", objectSchema(nil, nil, nil), registryRefreshResultSchema()),
+		tool("validate_registry", "Validate a local registry manifest file without loading or installing it.", objectSchema(
+			map[string]any{
+				"path": nonEmptyStringSchema("Local registry manifest path to validate."),
+			},
+			[]string{"path"},
+			nil,
+		), registryValidationSchema()),
 		tool("plan_install", "Return the install plan for one or more skills without mutating local state.", objectSchema(
 			map[string]any{
 				"skill":  nonEmptyStringSchema("Single skill name to plan."),
@@ -1152,6 +1175,19 @@ func registryRefreshResultSchema() map[string]any {
 			"bytes":  nonNegativeIntegerSchema("Downloaded registry bytes written to cache."),
 		},
 		[]string{"source", "path", "bytes"},
+		nil,
+	)
+}
+
+func registryValidationSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"path":     nonEmptyStringSchema("Validated registry manifest path."),
+			"ok":       booleanSchema("Whether the registry passed validation without warnings."),
+			"skills":   nonNegativeIntegerSchema("Number of skills declared in the registry."),
+			"warnings": stringArraySchema("Validation warnings emitted for non-fatal issues.", false),
+		},
+		[]string{"path", "ok", "skills"},
 		nil,
 	)
 }
@@ -1586,8 +1622,10 @@ func allowedToolArguments(name string) (map[string]struct{}, bool) {
 		return toolArgumentSet(), true
 	case "get_agent_target":
 		return toolArgumentSet("target"), true
-	case "get_status", "list_config_keys", "get_pro_status", "get_pro_setup", "start_pro_login", "list_pro_devices", "logout_pro", "register_pro_scheme", "doctor", "refresh_registry":
+	case "get_status", "list_config_keys", "list_registry_sources", "get_pro_status", "get_pro_setup", "start_pro_login", "list_pro_devices", "logout_pro", "register_pro_scheme", "doctor", "refresh_registry":
 		return toolArgumentSet(), true
+	case "validate_registry":
+		return toolArgumentSet("path"), true
 	case "complete_pro_login":
 		return toolArgumentSet("callback_uri"), true
 	case "revoke_pro_device":

@@ -30,3 +30,14 @@ func TestSearchFindsChineseAudioWorkflow(t *testing.T) {
 		t.Fatalf("expected audio to rank first, got %s", results[0].Skill.Name)
 	}
 }
+
+func TestSearchFindsChineseDocumentWorkflow(t *testing.T) {
+	registry := DefaultRegistry()
+	results := registry.Search("总结合同文档", 3)
+	if len(results) == 0 {
+		t.Fatal("expected search results")
+	}
+	if results[0].Skill.Name != "docx" {
+		t.Fatalf("expected docx to rank first, got %s", results[0].Skill.Name)
+	}
+}
