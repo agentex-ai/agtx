@@ -1,0 +1,115 @@
+{
+  "$schema": "https://agentex.cc/registry/schemas/capability-commerce-standard.schema.json",
+  "schema_version": "2026-06-03",
+  "name": "Agentex Capability Commerce Standard",
+  "description": "A standard for ISV capability-pack manifests, billable meters, CPA/CPS attribution, revenue share, and settlement.",
+  "canonical_source": "agtx/docs/standards/capability-commerce-standard.json",
+  "human_markdown": "https://agentex.cc/registry/capability-commerce-standard.md",
+  "examples": {
+    "usage_metered": "https://agentex.cc/registry/examples/usage-metered-skill.json",
+    "outcome_cpa_cps": "https://agentex.cc/registry/examples/outcome-cpa-cps-skill.json"
+  },
+  "manifest": {
+    "required_fields": [
+      "id",
+      "vendor_id",
+      "version",
+      "capability_class",
+      "use_when",
+      "inputs",
+      "outputs",
+      "permissions",
+      "quality",
+      "billing",
+      "attribution",
+      "support"
+    ],
+    "capability_classes": [
+      "tool",
+      "workflow",
+      "model_adapter",
+      "connector",
+      "content",
+      "commerce"
+    ],
+    "recommended_manifest_url": "https://agentex.cc/registry/vendors/{vendor_id}/packs/{pack_id}.json"
+  },
+  "billing": {
+    "principle": "Meter-first billing. Subscriptions may bundle capacity, but each monetized pack must declare explicit billable units.",
+    "meters": [
+      "call",
+      "task",
+      "page",
+      "minute",
+      "token",
+      "credit",
+      "seat",
+      "storage_gb_day",
+      "success"
+    ],
+    "required_fields": [
+      "meter",
+      "unit_price",
+      "currency",
+      "free_quota",
+      "hard_limit_supported",
+      "refund_policy"
+    ],
+    "default_revenue_share": {
+      "isv": 70,
+      "platform": 30,
+      "basis": "net_revenue_after_payment_processor_tax_and_refunds"
+    }
+  },
+  "attribution": {
+    "principle": "CPA/CPS events must be idempotent, privacy-safe, and backed by verifiable evidence.",
+    "event_types": [
+      "lead_created",
+      "account_created",
+      "activation_completed",
+      "checkout_started",
+      "purchase_completed",
+      "subscription_started",
+      "subscription_renewed"
+    ],
+    "required_event_fields": [
+      "event_id",
+      "event_type",
+      "occurred_at",
+      "pack_id",
+      "vendor_id",
+      "account_id_hash",
+      "attribution_window_days",
+      "amount",
+      "currency",
+      "evidence"
+    ],
+    "default_windows_days": {
+      "cpa": 30,
+      "cps": 45
+    },
+    "default_cps_rate": 15,
+    "renewal_cps": "disabled_by_default"
+  },
+  "lifecycle": [
+    "draft",
+    "review",
+    "verified",
+    "stable",
+    "monetized",
+    "restricted"
+  ],
+  "settlement": {
+    "usage_revenue": "monthly_after_refunds_disputes_tax_and_payment_costs",
+    "cpa_cps_revenue": "after_attribution_window_and_fraud_review",
+    "failed_invocation_billing": "not_billable_unless_partial_value_billing_is_declared"
+  },
+  "validation": {
+    "third_party_monetized_support_required": [
+      "support.url",
+      "support.privacy_url",
+      "support.incident_email"
+    ],
+    "first_party_support": "Agentex first-party packs may inherit platform support defaults."
+  }
+}

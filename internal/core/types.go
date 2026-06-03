@@ -11,6 +11,8 @@ type SkillManifest struct {
 	SchemaVersion int              `json:"schema_version"`
 	Name          string           `json:"name"`
 	Version       string           `json:"version"`
+	VendorID      string           `json:"vendor_id,omitempty"`
+	Capability    *CapabilityInfo  `json:"capability,omitempty"`
 	Summary       string           `json:"summary"`
 	Description   string           `json:"description"`
 	Tags          []string         `json:"tags,omitempty"`
@@ -19,8 +21,16 @@ type SkillManifest struct {
 	Platforms     []PlatformBundle `json:"platforms,omitempty"`
 	InputSchema   map[string]any   `json:"input_schema,omitempty"`
 	OutputSchema  map[string]any   `json:"output_schema,omitempty"`
+	Billing       *BillingInfo     `json:"billing,omitempty"`
+	Attribution   *AttributionInfo `json:"attribution,omitempty"`
+	Support       *SupportInfo     `json:"support,omitempty"`
 	Signature     *SignatureInfo   `json:"signature,omitempty"`
 	Stub          bool             `json:"stub"`
+}
+
+type CapabilityInfo struct {
+	Class   string `json:"class,omitempty"`
+	UseWhen string `json:"use_when,omitempty"`
 }
 
 type Permission struct {
@@ -41,6 +51,39 @@ type SignatureInfo struct {
 	Algorithm string `json:"algorithm,omitempty"`
 	KeyID     string `json:"key_id,omitempty"`
 	Value     string `json:"value,omitempty"`
+}
+
+type BillingInfo struct {
+	Meters       []BillingMeter `json:"meters,omitempty"`
+	RevenueShare *RevenueShare  `json:"revenue_share,omitempty"`
+}
+
+type BillingMeter struct {
+	Meter              string  `json:"meter"`
+	UnitPrice          float64 `json:"unit_price,omitempty"`
+	Currency           string  `json:"currency,omitempty"`
+	FreeQuota          float64 `json:"free_quota,omitempty"`
+	HardLimitSupported bool    `json:"hard_limit_supported,omitempty"`
+	RefundPolicy       string  `json:"refund_policy,omitempty"`
+}
+
+type RevenueShare struct {
+	ISV      float64 `json:"isv,omitempty"`
+	Platform float64 `json:"platform,omitempty"`
+	Basis    string  `json:"basis,omitempty"`
+}
+
+type AttributionInfo struct {
+	Events            []string       `json:"events,omitempty"`
+	DefaultWindowDays map[string]int `json:"default_window_days,omitempty"`
+	DefaultCPSRate    float64        `json:"default_cps_rate,omitempty"`
+	RenewalCPS        string         `json:"renewal_cps,omitempty"`
+}
+
+type SupportInfo struct {
+	URL           string `json:"url,omitempty"`
+	PrivacyURL    string `json:"privacy_url,omitempty"`
+	IncidentEmail string `json:"incident_email,omitempty"`
 }
 
 type SearchResult struct {
@@ -64,13 +107,22 @@ type MutationPlan struct {
 }
 
 type PlannedChange struct {
-	Name           string   `json:"name"`
-	CurrentVersion string   `json:"current_version,omitempty"`
-	TargetVersion  string   `json:"target_version,omitempty"`
-	Status         string   `json:"status"`
-	Stub           bool     `json:"stub"`
-	Permissions    []string `json:"permissions,omitempty"`
-	Path           string   `json:"path,omitempty"`
+	Name           string           `json:"name"`
+	CurrentVersion string           `json:"current_version,omitempty"`
+	TargetVersion  string           `json:"target_version,omitempty"`
+	Status         string           `json:"status"`
+	Stub           bool             `json:"stub"`
+	Permissions    []string         `json:"permissions,omitempty"`
+	Commerce       *CommerceSummary `json:"commerce,omitempty"`
+	Path           string           `json:"path,omitempty"`
+}
+
+type CommerceSummary struct {
+	VendorID          string   `json:"vendor_id,omitempty"`
+	CapabilityClass   string   `json:"capability_class,omitempty"`
+	BillingMeters     []string `json:"billing_meters,omitempty"`
+	AttributionEvents []string `json:"attribution_events,omitempty"`
+	SupportURL        string   `json:"support_url,omitempty"`
 }
 
 type RollbackResult struct {

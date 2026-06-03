@@ -216,6 +216,7 @@ func (s *Service) PlanInstall(names []string) (MutationPlan, error) {
 			Status:         status,
 			Stub:           skill.Stub,
 			Permissions:    permissionNames(skill.Permissions),
+			Commerce:       commerceSummary(skill),
 			Path:           s.versionDir(skill.Name, skill.Version),
 		})
 	}
@@ -332,6 +333,7 @@ func (s *Service) PlanUpgrade(names []string) (MutationPlan, error) {
 			Status:         status,
 			Stub:           skill.Stub,
 			Permissions:    permissionNames(skill.Permissions),
+			Commerce:       commerceSummary(skill),
 			Path:           s.versionDir(skill.Name, skill.Version),
 		})
 	}
@@ -1099,4 +1101,36 @@ func permissionNames(permissions []Permission) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func commerceSummary(skill SkillManifest) *CommerceSummary {
+	summary := &CommerceSummary{
+		VendorID: skill.VendorID,
+	}
+	if skill.Capability != nil {
+		summary.CapabilityClass = skill.Capability.Class
+	}
+	if skill.Billing != nil {
+		for _, meter := range skill.Billing.Meters {
+			if strings.TrimSpace(meter.Meter) != "" {
+				summary.BillingMeters = append(summary.BillingMeters, meter.Meter)
+			}
+		}
+		sort.Strings(summary.BillingMeters)
+	}
+	if skill.Attribution != nil {
+		summary.AttributionEvents = append(summary.AttributionEvents, skill.Attribution.Events...)
+		sort.Strings(summary.AttributionEvents)
+	}
+	if skill.Support != nil {
+		summary.SupportURL = skill.Support.URL
+	}
+	if summary.VendorID == "" &&
+		summary.CapabilityClass == "" &&
+		len(summary.BillingMeters) == 0 &&
+		len(summary.AttributionEvents) == 0 &&
+		summary.SupportURL == "" {
+		return nil
+	}
+	return summary
 }

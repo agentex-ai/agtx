@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentex.cc/registry/schemas/capability-commerce-standard.schema.json",
+  "title": "Agentex Capability Commerce Standard",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "name",
+    "description",
+    "human_markdown",
+    "manifest",
+    "billing",
+    "attribution",
+    "lifecycle",
+    "settlement"
+  ],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "canonical_source": { "type": "string" },
+    "human_markdown": { "type": "string", "format": "uri" },
+    "examples": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "format": "uri" }
+    },
+    "manifest": {
+      "type": "object",
+      "required": ["required_fields", "capability_classes", "recommended_manifest_url"],
+      "properties": {
+        "required_fields": { "type": "array", "items": { "type": "string" } },
+        "capability_classes": { "type": "array", "items": { "type": "string" } },
+        "recommended_manifest_url": { "type": "string" }
+      }
+    },
+    "billing": {
+      "type": "object",
+      "required": ["principle", "meters", "required_fields", "default_revenue_share"],
+      "properties": {
+        "principle": { "type": "string" },
+        "meters": { "type": "array", "items": { "type": "string" } },
+        "required_fields": { "type": "array", "items": { "type": "string" } },
+        "default_revenue_share": {
+          "type": "object",
+          "required": ["isv", "platform", "basis"],
+          "properties": {
+            "isv": { "type": "number" },
+            "platform": { "type": "number" },
+            "basis": { "type": "string" }
+          }
+        }
+      }
+    },
+    "attribution": {
+      "type": "object",
+      "required": [
+        "principle",
+        "event_types",
+        "required_event_fields",
+        "default_windows_days",
+        "default_cps_rate",
+        "renewal_cps"
+      ],
+      "properties": {
+        "principle": { "type": "string" },
+        "event_types": { "type": "array", "items": { "type": "string" } },
+        "required_event_fields": { "type": "array", "items": { "type": "string" } },
+        "default_windows_days": {
+          "type": "object",
+          "required": ["cpa", "cps"],
+          "properties": {
+            "cpa": { "type": "number" },
+            "cps": { "type": "number" }
+          }
+        },
+        "default_cps_rate": { "type": "number" },
+        "renewal_cps": { "type": "string" }
+      }
+    },
+    "lifecycle": { "type": "array", "items": { "type": "string" } },
+    "settlement": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

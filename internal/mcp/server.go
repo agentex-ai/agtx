@@ -885,6 +885,10 @@ func positiveIntegerSchema(description string) map[string]any {
 	return schemaWithDescription(map[string]any{"type": "integer", "minimum": 1}, description)
 }
 
+func numberSchema(description string) map[string]any {
+	return schemaWithDescription(map[string]any{"type": "number"}, description)
+}
+
 func booleanSchema(description string) map[string]any {
 	return schemaWithDescription(map[string]any{"type": "boolean"}, description)
 }
@@ -1322,6 +1326,8 @@ func skillManifestSchema() map[string]any {
 			"schema_version": positiveIntegerSchema("Manifest schema version."),
 			"name":           nonEmptyStringSchema("Skill name."),
 			"version":        nonEmptyStringSchema("Skill version."),
+			"vendor_id":      stringSchema("ISV or first-party vendor identifier."),
+			"capability":     capabilityInfoSchema(),
 			"summary":        stringSchema("Short skill summary."),
 			"description":    stringSchema("Longer skill description."),
 			"tags":           stringArraySchema("Search and category tags.", false),
@@ -1330,10 +1336,87 @@ func skillManifestSchema() map[string]any {
 			"platforms":      arraySchema(platformBundleSchema(), "Supported platform bundles."),
 			"input_schema":   anySchema("Skill-specific input schema."),
 			"output_schema":  anySchema("Skill-specific output schema."),
+			"billing":        billingInfoSchema(),
+			"attribution":    attributionInfoSchema(),
+			"support":        supportInfoSchema(),
 			"signature":      signatureInfoSchema(),
 			"stub":           booleanSchema("Whether the skill is currently a stub package."),
 		},
 		[]string{"name", "version"},
+		nil,
+	)
+}
+
+func capabilityInfoSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"class":    stringSchema("Capability class such as tool, workflow, connector, model_adapter, content, or commerce."),
+			"use_when": stringSchema("Agent-readable trigger guidance."),
+		},
+		nil,
+		nil,
+	)
+}
+
+func billingInfoSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"meters":        arraySchema(billingMeterSchema(), "Supported billing meters."),
+			"revenue_share": revenueShareSchema(),
+		},
+		nil,
+		nil,
+	)
+}
+
+func billingMeterSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"meter":                nonEmptyStringSchema("Billing meter such as call, task, page, minute, token, credit, seat, storage_gb_day, or success."),
+			"unit_price":           numberSchema("Unit price in currency or credit units."),
+			"currency":             stringSchema("ISO 4217 currency or AGTX_CREDIT."),
+			"free_quota":           numberSchema("Included free quota for this meter."),
+			"hard_limit_supported": booleanSchema("Whether agents can enforce a hard spending cap."),
+			"refund_policy":        stringSchema("Refund or failed-invocation billing policy."),
+		},
+		[]string{"meter"},
+		nil,
+	)
+}
+
+func revenueShareSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"isv":      numberSchema("ISV revenue share percentage."),
+			"platform": numberSchema("Platform revenue share percentage."),
+			"basis":    stringSchema("Revenue share basis."),
+		},
+		nil,
+		nil,
+	)
+}
+
+func attributionInfoSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"events":              stringArraySchema("Supported CPA/CPS attribution events.", false),
+			"default_window_days": anySchema("Default attribution windows by type, such as cpa and cps."),
+			"default_cps_rate":    numberSchema("Default CPS commission percentage."),
+			"renewal_cps":         stringSchema("Renewal CPS policy."),
+		},
+		nil,
+		nil,
+	)
+}
+
+func supportInfoSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"url":            stringSchema("Vendor support URL."),
+			"privacy_url":    stringSchema("Vendor privacy policy URL."),
+			"incident_email": stringSchema("Security or incident contact email."),
+		},
+		nil,
 		nil,
 	)
 }
@@ -1399,9 +1482,24 @@ func plannedChangeSchema() map[string]any {
 			"status":          nonEmptyStringSchema("Mutation status such as install, rollback, or already_current."),
 			"stub":            booleanSchema("Whether the target package is a stub."),
 			"permissions":     stringArraySchema("Permissions requested by the target package.", false),
+			"commerce":        commerceSummarySchema(),
 			"path":            stringSchema("Filesystem path affected by the mutation."),
 		},
 		[]string{"name", "status"},
+		nil,
+	)
+}
+
+func commerceSummarySchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"vendor_id":          stringSchema("ISV or first-party vendor identifier."),
+			"capability_class":   stringSchema("Capability class such as tool, workflow, connector, model_adapter, content, or commerce."),
+			"billing_meters":     stringArraySchema("Billing meters declared by the target package.", false),
+			"attribution_events": stringArraySchema("CPA/CPS attribution events declared by the target package.", false),
+			"support_url":        stringSchema("Vendor support URL."),
+		},
+		nil,
 		nil,
 	)
 }

@@ -124,6 +124,39 @@ agtx pro logout
 `config.json` is strict: unknown keys, `null` values, trailing JSON values, invalid URLs, unsupported schema versions, and non-positive limits are rejected instead of silently falling back.
 Use `agtx config keys --json` to discover supported settings; unknown-key errors also include `supported_keys` for agent recovery.
 
+## Capability Commerce Standard
+
+`agtx` is the source-of-truth repo for Agentex capability-pack standards. The
+standards under `docs/standards/` define optional manifest commerce metadata,
+including vendor identity, capability class, billing meters, CPA/CPS attribution,
+revenue share, support links, and settlement rules. `agentex.cc` publishes static
+copies for agents, ISVs, and the website.
+
+After changing a standard here, publish the website copy from the sibling
+`agentex.cc` repo:
+
+```powershell
+cd ..\agentex.cc
+npm run sync:agtx-standards
+npm run build
+```
+
+The built-in first-wave skills already declare default billing meters:
+
+- `web_search`: `call`
+- `web_fetch`: `page`, `call`
+- `research`: `task`
+- `ocr` and `pdf`: `page`
+- `audio`: `minute`
+- `imagen`: `task`, `credit`
+- `docx`, `xlsx`, and `pptx`: `task`
+
+Example ISV manifests are available under `docs/standards/examples/` for
+usage-metered packs and CPA/CPS outcome packs.
+`agtx install --plan --json` and MCP `plan_install` expose a compact commerce
+summary so agents can show vendor, capability class, billing meters, attribution
+events, and support URL before asking for install confirmation.
+
 Plan before mutating, then refresh a configured remote registry:
 
 ```sh

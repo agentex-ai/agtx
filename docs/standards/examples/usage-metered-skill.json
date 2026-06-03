@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "name": "invoice_ocr",
+  "version": "1.0.0",
+  "vendor_id": "example_isv",
+  "capability": {
+    "class": "tool",
+    "use_when": "Use when an agent needs to extract structured text and totals from invoice scans or PDF pages."
+  },
+  "summary": "Invoice OCR",
+  "description": "Extracts invoice text, line items, totals, tax fields, and page-level confidence notes.",
+  "tags": ["ocr", "invoice", "document"],
+  "keywords": ["invoice", "receipt", "ocr", "tax", "total", "发票", "收据", "金额"],
+  "permissions": [
+    {
+      "name": "local_process",
+      "description": "Runs a local native executable."
+    }
+  ],
+  "platforms": [
+    {
+      "os": "darwin",
+      "arch": "arm64",
+      "url": "https://packages.example.com/invoice_ocr/1.0.0/darwin-arm64.zip",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "archive": "zip",
+      "entrypoint": "invoice_ocr"
+    }
+  ],
+  "input_schema": {
+    "type": "object",
+    "required": ["file"],
+    "properties": {
+      "file": {
+        "type": "string"
+      },
+      "language": {
+        "type": "string"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "pages": {
+        "type": "array"
+      },
+      "totals": {
+        "type": "object"
+      }
+    }
+  },
+  "billing": {
+    "meters": [
+      {
+        "meter": "page",
+        "unit_price": 2,
+        "currency": "AGTX_CREDIT",
+        "free_quota": 20,
+        "hard_limit_supported": true,
+        "refund_policy": "Do not bill pages that fail extraction."
+      }
+    ],
+    "revenue_share": {
+      "isv": 70,
+      "platform": 30,
+      "basis": "net_revenue_after_payment_processor_tax_and_refunds"
+    }
+  },
+  "support": {
+    "url": "https://example.com/support",
+    "privacy_url": "https://example.com/privacy",
+    "incident_email": "security@example.com"
+  },
+  "stub": false
+}

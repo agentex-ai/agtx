@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "name": "crm_lead_router",
+  "version": "1.0.0",
+  "vendor_id": "example_isv",
+  "capability": {
+    "class": "commerce",
+    "use_when": "Use when an agent should qualify a lead, route it to a CRM, and attribute downstream purchases."
+  },
+  "summary": "CRM lead router",
+  "description": "Qualifies leads, creates CRM records, and emits privacy-safe CPA/CPS attribution events.",
+  "tags": ["commerce", "crm", "lead"],
+  "keywords": ["lead", "crm", "sales", "activation", "purchase", "线索", "销售", "转化"],
+  "permissions": [
+    {
+      "name": "network",
+      "description": "Calls the vendor CRM and attribution endpoints."
+    }
+  ],
+  "platforms": [
+    {
+      "os": "darwin",
+      "arch": "arm64",
+      "url": "https://packages.example.com/crm_lead_router/1.0.0/darwin-arm64.zip",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "archive": "zip",
+      "entrypoint": "crm_lead_router"
+    }
+  ],
+  "input_schema": {
+    "type": "object",
+    "required": ["lead"],
+    "properties": {
+      "lead": {
+        "type": "object"
+      },
+      "campaign_id": {
+        "type": "string"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "event_id": {
+        "type": "string"
+      },
+      "status": {
+        "type": "string"
+      }
+    }
+  },
+  "billing": {
+    "meters": [
+      {
+        "meter": "success",
+        "unit_price": 0,
+        "currency": "AGTX_CREDIT",
+        "hard_limit_supported": true,
+        "refund_policy": "Do not bill rejected or duplicate leads."
+      }
+    ],
+    "revenue_share": {
+      "isv": 70,
+      "platform": 30,
+      "basis": "net_revenue_after_payment_processor_tax_and_refunds"
+    }
+  },
+  "attribution": {
+    "events": ["lead_created", "activation_completed", "purchase_completed", "subscription_started"],
+    "default_window_days": {
+      "cpa": 30,
+      "cps": 45
+    },
+    "default_cps_rate": 15,
+    "renewal_cps": "disabled_by_default"
+  },
+  "support": {
+    "url": "https://example.com/support",
+    "privacy_url": "https://example.com/privacy",
+    "incident_email": "security@example.com"
+  },
+  "stub": false
+}

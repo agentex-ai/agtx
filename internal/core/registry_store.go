@@ -186,7 +186,139 @@ func validateSkillManifest(skill SkillManifest) ([]string, error) {
 			return warnings, err
 		}
 	}
+	if err := validateCapabilityInfo(skill); err != nil {
+		return warnings, err
+	}
+	if err := validateBillingInfo(skill); err != nil {
+		return warnings, err
+	}
+	if err := validateAttributionInfo(skill); err != nil {
+		return warnings, err
+	}
+	if err := validateSupportInfo(skill); err != nil {
+		return warnings, err
+	}
 	return warnings, nil
+}
+
+func validateCapabilityInfo(skill SkillManifest) error {
+	if skill.Capability == nil {
+		return nil
+	}
+	switch strings.TrimSpace(skill.Capability.Class) {
+	case "", "tool", "workflow", "model_adapter", "connector", "content", "commerce":
+		return nil
+	default:
+		return NewError(CodeInvalidArgument, "unsupported capability class", map[string]any{"skill": skill.Name, "class": skill.Capability.Class})
+	}
+}
+
+func validateBillingInfo(skill SkillManifest) error {
+	if skill.Billing == nil {
+		return nil
+	}
+	for _, meter := range skill.Billing.Meters {
+		if err := validateBillingMeter(skill, meter); err != nil {
+			return err
+		}
+	}
+	if skill.Billing.RevenueShare != nil {
+		if skill.Billing.RevenueShare.ISV < 0 || skill.Billing.RevenueShare.Platform < 0 {
+			return NewError(CodeInvalidArgument, "revenue share must be non-negative", map[string]any{"skill": skill.Name})
+		}
+	}
+	return nil
+}
+
+func validateBillingMeter(skill SkillManifest, meter BillingMeter) error {
+	switch strings.TrimSpace(meter.Meter) {
+	case "call", "task", "page", "minute", "token", "credit", "seat", "storage_gb_day", "success":
+	default:
+		return NewError(CodeInvalidArgument, "unsupported billing meter", map[string]any{"skill": skill.Name, "meter": meter.Meter})
+	}
+	if strings.TrimSpace(meter.Meter) != meter.Meter {
+		return NewError(CodeInvalidArgument, "billing meter must not contain leading or trailing whitespace", map[string]any{"skill": skill.Name, "meter": meter.Meter})
+	}
+	if meter.UnitPrice < 0 || meter.FreeQuota < 0 {
+		return NewError(CodeInvalidArgument, "billing prices and quotas must be non-negative", map[string]any{"skill": skill.Name, "meter": meter.Meter})
+	}
+	if strings.ContainsRune(meter.Currency, 0) {
+		return NewError(CodeInvalidArgument, "billing currency contains NUL byte", map[string]any{"skill": skill.Name})
+	}
+	return nil
+}
+
+func validateAttributionInfo(skill SkillManifest) error {
+	if skill.Attribution == nil {
+		return nil
+	}
+	for _, event := range skill.Attribution.Events {
+		switch strings.TrimSpace(event) {
+		case "lead_created", "account_created", "activation_completed", "checkout_started", "purchase_completed", "subscription_started", "subscription_renewed":
+		default:
+			return NewError(CodeInvalidArgument, "unsupported attribution event", map[string]any{"skill": skill.Name, "event": event})
+		}
+	}
+	for name, days := range skill.Attribution.DefaultWindowDays {
+		if strings.TrimSpace(name) == "" || days <= 0 {
+			return NewError(CodeInvalidArgument, "attribution windows must be positive", map[string]any{"skill": skill.Name, "window": name})
+		}
+	}
+	if skill.Attribution.DefaultCPSRate < 0 {
+		return NewError(CodeInvalidArgument, "default CPS rate must be non-negative", map[string]any{"skill": skill.Name})
+	}
+	return nil
+}
+
+func validateSupportInfo(skill SkillManifest) error {
+	if skill.Support != nil {
+		if strings.TrimSpace(skill.Support.URL) != "" {
+			if err := validateServiceURL("support url", skill.Support.URL); err != nil {
+				return err
+			}
+		}
+		if strings.TrimSpace(skill.Support.PrivacyURL) != "" {
+			if err := validateServiceURL("privacy url", skill.Support.PrivacyURL); err != nil {
+				return err
+			}
+		}
+		if strings.ContainsRune(skill.Support.IncidentEmail, 0) {
+			return NewError(CodeInvalidArgument, "incident email contains NUL byte", map[string]any{"skill": skill.Name})
+		}
+	}
+	if !requiresISVSupport(skill) {
+		return nil
+	}
+	if skill.Support == nil {
+		return NewError(CodeInvalidArgument, "third-party monetized skill requires support metadata", map[string]any{"skill": skill.Name})
+	}
+	if strings.TrimSpace(skill.Support.URL) == "" {
+		return NewError(CodeInvalidArgument, "third-party monetized skill requires support url", map[string]any{"skill": skill.Name})
+	}
+	if strings.TrimSpace(skill.Support.PrivacyURL) == "" {
+		return NewError(CodeInvalidArgument, "third-party monetized skill requires privacy url", map[string]any{"skill": skill.Name})
+	}
+	if strings.TrimSpace(skill.Support.IncidentEmail) == "" {
+		return NewError(CodeInvalidArgument, "third-party monetized skill requires incident email", map[string]any{"skill": skill.Name})
+	}
+	if !strings.Contains(skill.Support.IncidentEmail, "@") {
+		return NewError(CodeInvalidArgument, "incident email is invalid", map[string]any{"skill": skill.Name})
+	}
+	return nil
+}
+
+func requiresISVSupport(skill SkillManifest) bool {
+	vendor := strings.ToLower(strings.TrimSpace(skill.VendorID))
+	if vendor == "" || vendor == "agentex" {
+		return false
+	}
+	if skill.Billing != nil && len(skill.Billing.Meters) > 0 {
+		return true
+	}
+	if skill.Attribution != nil && len(skill.Attribution.Events) > 0 {
+		return true
+	}
+	return skill.Capability != nil && strings.TrimSpace(skill.Capability.Class) == "commerce"
 }
 
 func validatePlatformBundle(skill SkillManifest, bundle PlatformBundle) error {

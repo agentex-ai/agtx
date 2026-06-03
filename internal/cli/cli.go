@@ -396,6 +396,10 @@ func listFlags() []string {
 	return []string{"--json", "--installed", "--available"}
 }
 
+func upgradeFlags() []string {
+	return []string{"--json", "--yes", "-y", "--plan"}
+}
+
 func runUpgrade(ctx context.Context, service *core.Service, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	jsonOut := takeBoolFlag(&args, "--json", "")
 	yes := takeBoolFlag(&args, "--yes", "-y")
@@ -1004,6 +1008,20 @@ func printPlan(stdout io.Writer, plan core.MutationPlan) {
 		}
 		if len(change.Permissions) > 0 {
 			fmt.Fprintf(stdout, "\tpermissions=%s", strings.Join(change.Permissions, ","))
+		}
+		if change.Commerce != nil {
+			if change.Commerce.VendorID != "" {
+				fmt.Fprintf(stdout, "\tvendor=%s", change.Commerce.VendorID)
+			}
+			if change.Commerce.CapabilityClass != "" {
+				fmt.Fprintf(stdout, "\tclass=%s", change.Commerce.CapabilityClass)
+			}
+			if len(change.Commerce.BillingMeters) > 0 {
+				fmt.Fprintf(stdout, "\tmeters=%s", strings.Join(change.Commerce.BillingMeters, ","))
+			}
+			if len(change.Commerce.AttributionEvents) > 0 {
+				fmt.Fprintf(stdout, "\tattribution=%s", strings.Join(change.Commerce.AttributionEvents, ","))
+			}
 		}
 		fmt.Fprintln(stdout)
 	}

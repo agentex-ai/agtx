@@ -83,6 +83,20 @@ Config key discovery is available through `agtx config keys --json` and MCP `lis
 CLI recovery details mirror the MCP path: unknown top-level commands include `supported_commands`, unknown or missing nested subcommands include `supported_subcommands`, missing positional arguments include `expected_args`, and bad, mutually exclusive, or unexpected flags include `supported_flags` along with the offending `flag`, `flags`, or `args` where applicable.
 For `agtx run`, use `--` to stop agtx flag parsing before skill arguments when the skill itself expects `-x` or `--name` style flags. Output-mode flags only count before that separator, so `agtx run demo -- --json` passes `--json` to the skill instead of switching agtx into JSON mode.
 
+## Commerce Metadata
+
+Skill manifests may include optional commerce metadata from
+`docs/standards/capability-commerce-standard.md`: `vendor_id`, `capability`,
+`billing`, `attribution`, and `support`. Agent clients should treat these fields
+as planning signals for cost estimates, budget limits, CPA/CPS attribution, and
+ISV support routing. The fields are optional so older registries and non-monetized
+skills remain valid.
+
+Install and upgrade plans expose a compact `commerce` summary for each target
+skill, including vendor id, capability class, billing meters, attribution events,
+and support URL when present. Agents should show this summary before requesting
+confirmation for paid, metered, or outcome-attributed skills.
+
 ## Config Snippets
 
 Print examples:
