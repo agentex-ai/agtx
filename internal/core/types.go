@@ -146,19 +146,144 @@ type InstalledSkill struct {
 	Manifest SkillManifest `json:"manifest"`
 }
 
+type CapabilityPack struct {
+	SchemaVersion int          `json:"schema_version"`
+	ID            string       `json:"id"`
+	Name          string       `json:"name"`
+	Tier          string       `json:"tier"`
+	Summary       string       `json:"summary"`
+	Description   string       `json:"description"`
+	SkillNames    []string     `json:"skill_names"`
+	Billing       *BillingInfo `json:"billing,omitempty"`
+	Support       *SupportInfo `json:"support,omitempty"`
+}
+
+type CapabilityPackView struct {
+	Pack        CapabilityPack        `json:"pack"`
+	Installed   bool                  `json:"installed"`
+	InstalledAt string                `json:"installed_at,omitempty"`
+	UpdatedAt   string                `json:"updated_at,omitempty"`
+	Skills      []CapabilityPackSkill `json:"skills"`
+}
+
+type CapabilityPackSkill struct {
+	Name             string         `json:"name"`
+	AvailableVersion string         `json:"available_version,omitempty"`
+	InstalledVersion string         `json:"installed_version,omitempty"`
+	Installed        bool           `json:"installed"`
+	Stub             bool           `json:"stub,omitempty"`
+	Path             string         `json:"path,omitempty"`
+	Manifest         *SkillManifest `json:"manifest,omitempty"`
+}
+
+type CapabilityPackInstallResult struct {
+	Pack           CapabilityPackView `json:"pack"`
+	Results        []InstallResult    `json:"results"`
+	InstallRecord  *InstallRecord     `json:"install_record,omitempty"`
+	BillingRecords []BillingRecord    `json:"billing_records,omitempty"`
+}
+
+type CapabilityPackInstallPlan struct {
+	Action         string             `json:"action"`
+	Pack           CapabilityPackView `json:"pack"`
+	Changes        []PlannedChange    `json:"changes"`
+	BillingPreview []BillingRecord    `json:"billing_preview,omitempty"`
+	Totals         []BillingTotal     `json:"totals,omitempty"`
+	Requires       []string           `json:"requires,omitempty"`
+	Warnings       []string           `json:"warnings,omitempty"`
+}
+
+type RecordQueryOptions struct {
+	PackID   string
+	Skill    string
+	Status   string
+	Type     string
+	Currency string
+	From     string
+	To       string
+	Limit    int
+}
+
+type InstallRecord struct {
+	RecordID   string               `json:"record_id"`
+	Action     string               `json:"action"`
+	PackID     string               `json:"pack_id,omitempty"`
+	PackTier   string               `json:"pack_tier,omitempty"`
+	SkillName  string               `json:"skill_name,omitempty"`
+	Skills     []InstallRecordSkill `json:"skills,omitempty"`
+	Status     string               `json:"status"`
+	DeviceID   string               `json:"device_id,omitempty"`
+	OccurredAt string               `json:"occurred_at"`
+}
+
+type InstallRecordSkill struct {
+	Name            string `json:"name"`
+	Version         string `json:"version,omitempty"`
+	PreviousVersion string `json:"previous_version,omitempty"`
+	Status          string `json:"status"`
+	Path            string `json:"path,omitempty"`
+	Stub            bool   `json:"stub,omitempty"`
+}
+
+type BillingRecord struct {
+	RecordID         string  `json:"record_id"`
+	Type             string  `json:"type"`
+	PackID           string  `json:"pack_id,omitempty"`
+	PackTier         string  `json:"pack_tier,omitempty"`
+	SkillName        string  `json:"skill_name,omitempty"`
+	VersionID        string  `json:"version_id,omitempty"`
+	VendorID         string  `json:"vendor_id,omitempty"`
+	Meter            string  `json:"meter"`
+	Quantity         float64 `json:"quantity"`
+	Currency         string  `json:"currency,omitempty"`
+	UnitPriceMinor   int64   `json:"unit_price_minor,omitempty"`
+	GrossAmountMinor int64   `json:"gross_amount_minor,omitempty"`
+	Status           string  `json:"status"`
+	InvocationID     string  `json:"invocation_id,omitempty"`
+	UsageEventID     string  `json:"usage_event_id,omitempty"`
+	Error            string  `json:"error,omitempty"`
+	OccurredAt       string  `json:"occurred_at"`
+}
+
+type BillingRecordListResult struct {
+	Records []BillingRecord `json:"records"`
+	Totals  []BillingTotal  `json:"totals,omitempty"`
+}
+
+type BillingTotal struct {
+	Currency         string `json:"currency"`
+	Records          int    `json:"records"`
+	GrossAmountMinor int64  `json:"gross_amount_minor"`
+}
+
+type CapabilityCommerceSnapshot struct {
+	SchemaVersion  int                     `json:"schema_version"`
+	GeneratedAt    string                  `json:"generated_at"`
+	Packs          []CapabilityPackView    `json:"packs"`
+	InstallRecords []InstallRecord         `json:"install_records,omitempty"`
+	Billing        BillingRecordListResult `json:"billing"`
+}
+
+type CommerceSnapshotExportResult struct {
+	Path     string                     `json:"path"`
+	Snapshot CapabilityCommerceSnapshot `json:"snapshot"`
+}
+
 type RunResult struct {
-	Name             string `json:"name"`
-	Version          string `json:"version"`
-	Stub             bool   `json:"stub"`
-	ExitCode         int    `json:"exit_code"`
-	Stdout           string `json:"stdout,omitempty"`
-	Stderr           string `json:"stderr,omitempty"`
-	StdoutTruncated  bool   `json:"stdout_truncated,omitempty"`
-	StderrTruncated  bool   `json:"stderr_truncated,omitempty"`
-	DurationMS       int64  `json:"duration_ms"`
-	TimedOut         bool   `json:"timed_out,omitempty"`
-	OutputLimitBytes int64  `json:"output_limit_bytes,omitempty"`
-	TimeoutMS        int64  `json:"timeout_ms,omitempty"`
+	Name             string             `json:"name"`
+	Version          string             `json:"version"`
+	Stub             bool               `json:"stub"`
+	InvocationID     string             `json:"invocation_id,omitempty"`
+	ExitCode         int                `json:"exit_code"`
+	Stdout           string             `json:"stdout,omitempty"`
+	Stderr           string             `json:"stderr,omitempty"`
+	StdoutTruncated  bool               `json:"stdout_truncated,omitempty"`
+	StderrTruncated  bool               `json:"stderr_truncated,omitempty"`
+	DurationMS       int64              `json:"duration_ms"`
+	TimedOut         bool               `json:"timed_out,omitempty"`
+	OutputLimitBytes int64              `json:"output_limit_bytes,omitempty"`
+	TimeoutMS        int64              `json:"timeout_ms,omitempty"`
+	UsageEvents      []UsageEventResult `json:"usage_events,omitempty"`
 }
 
 type RunOptions struct {
@@ -166,6 +291,20 @@ type RunOptions struct {
 	Input            []byte
 	Timeout          time.Duration
 	OutputLimitBytes int64
+}
+
+type UsageEventResult struct {
+	EventID          string  `json:"event_id"`
+	PackID           string  `json:"pack_id"`
+	VersionID        string  `json:"version_id,omitempty"`
+	VendorID         string  `json:"vendor_id,omitempty"`
+	Meter            string  `json:"meter"`
+	Quantity         float64 `json:"quantity"`
+	Currency         string  `json:"currency,omitempty"`
+	UnitPriceMinor   int64   `json:"unit_price_minor,omitempty"`
+	GrossAmountMinor int64   `json:"gross_amount_minor,omitempty"`
+	Status           string  `json:"status"`
+	Error            string  `json:"error,omitempty"`
 }
 
 type Status struct {

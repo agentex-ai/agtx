@@ -333,6 +333,75 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		return toolJSON(result), nil
+	case "list_capability_packs":
+		packs, err := s.service.ListCapabilityPacks()
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(packs), nil
+	case "plan_capability_pack_install":
+		pack, err := args.String("pack")
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(pack) == "" {
+			return nil, args.missingRequiredArgument("pack", "non_empty_string")
+		}
+		plan, err := s.service.PlanCapabilityPackInstall(pack)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(plan), nil
+	case "install_capability_pack":
+		pack, err := args.String("pack")
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(pack) == "" {
+			return nil, args.missingRequiredArgument("pack", "non_empty_string")
+		}
+		yes, err := args.Bool("yes", false)
+		if err != nil {
+			return nil, err
+		}
+		if !yes {
+			return nil, args.confirmationRequired("install_capability_pack requires yes=true")
+		}
+		result, err := s.service.InstallCapabilityPack(context.Background(), pack)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(result), nil
+	case "list_install_records":
+		options, err := recordQueryOptions(args, 100)
+		if err != nil {
+			return nil, err
+		}
+		records, err := s.service.ListInstallRecords(options)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(records), nil
+	case "list_billing_records":
+		options, err := recordQueryOptions(args, 100)
+		if err != nil {
+			return nil, err
+		}
+		records, err := s.service.ListBillingRecords(options)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(records), nil
+	case "get_commerce_snapshot":
+		options, err := recordQueryOptions(args, 200)
+		if err != nil {
+			return nil, err
+		}
+		snapshot, err := s.service.CommerceSnapshot(options)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(snapshot), nil
 	case "get_status":
 		status, err := s.service.Status()
 		if err != nil {
@@ -647,6 +716,46 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 	return nil, unknownToolError(request.Name)
 }
 
+func recordQueryOptions(args toolArguments, fallbackLimit int) (core.RecordQueryOptions, error) {
+	packID, err := args.String("pack_id")
+	if err != nil {
+		return core.RecordQueryOptions{}, err
+	}
+	skill, err := args.String("skill")
+	if err != nil {
+		return core.RecordQueryOptions{}, err
+	}
+	status, err := args.String("status")
+	if err != nil {
+		return core.RecordQueryOptions{}, err
+	}
+	recordType, err := args.String("type")
+	if err != nil {
+		return core.RecordQueryOptions{}, err
+	}
+	currency, err := args.String("currency")
+	if err != nil {
+		return core.RecordQueryOptions{}, err
+	}
+	from, err := args.String("from")
+	if err != nil {
+		return core.RecordQueryOptions{}, err
+	}
+	to, err := args.String("to")
+	if err != nil {
+		return core.RecordQueryOptions{}, err
+	}
+	limit, err := args.PositiveInt("limit", fallbackLimit)
+	if err != nil {
+		return core.RecordQueryOptions{}, err
+	}
+	options := core.RecordQueryOptions{PackID: packID, Skill: skill, Status: status, Type: recordType, Currency: currency, From: from, To: to, Limit: limit}
+	if err := core.ValidateRecordQueryOptions(options); err != nil {
+		return core.RecordQueryOptions{}, err
+	}
+	return options, nil
+}
+
 func (s *server) writeResult(id json.RawMessage, result any) error {
 	response := map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(id), "result": result}
 	data, err := json.Marshal(response)
@@ -724,6 +833,25 @@ func tools() []map[string]any {
 			nil,
 			nil,
 		), listResultSchema()),
+		tool("list_capability_packs", "List standard and advanced capability packs with install state for website and marketplace views.", objectSchema(nil, nil, nil), arraySchema(capabilityPackViewSchema(), "Capability packs visible to local website integrations.")),
+		tool("plan_capability_pack_install", "Preview standard or advanced capability-pack skill changes and billing records without mutating local state.", objectSchema(
+			map[string]any{
+				"pack": nonEmptyStringSchema("Capability pack id or tier such as standard, advanced, putong, or gaoji."),
+			},
+			[]string{"pack"},
+			nil,
+		), capabilityPackInstallPlanSchema()),
+		tool("install_capability_pack", "Install a standard or advanced capability pack and record local billing/install history. Requires yes=true.", objectSchema(
+			map[string]any{
+				"pack": nonEmptyStringSchema("Capability pack id or tier such as standard, advanced, putong, or gaoji."),
+				"yes":  booleanSchema("Must be true to perform the pack install; omit or false to receive confirmation_required."),
+			},
+			[]string{"pack"},
+			nil,
+		), capabilityPackInstallResultSchema()),
+		tool("list_install_records", "List local capability pack and skill install records for website account/history views.", recordQueryInputSchema(), arraySchema(installRecordSchema(), "Local install records.")),
+		tool("list_billing_records", "List local billing records and totals produced by pack installs or skill usage.", recordQueryInputSchema(), billingRecordListResultSchema()),
+		tool("get_commerce_snapshot", "Return capability packs, install records, and billing records in one website-friendly snapshot.", recordQueryInputSchema(), commerceSnapshotSchema()),
 		tool("list_agent_targets", "List supported agent integration targets and their setup metadata.", objectSchema(nil, nil, nil), arraySchema(agentTargetSchema(), "Supported agent integration targets.")),
 		tool("get_agent_target", "Return setup metadata and snippets for one supported agent target.", objectSchema(
 			map[string]any{
@@ -1100,6 +1228,7 @@ func runResultSchema() map[string]any {
 			"name":               nonEmptyStringSchema("Executed skill name."),
 			"version":            stringSchema("Resolved installed skill version."),
 			"stub":               booleanSchema("Whether the installed skill is a stub."),
+			"invocation_id":      stringSchema("Stable invocation id shared with usage events."),
 			"exit_code":          schemaWithDescription(map[string]any{"type": "integer"}, "Process exit code returned by the skill."),
 			"stdout":             stringSchema("Captured standard output."),
 			"stderr":             stringSchema("Captured standard error."),
@@ -1109,8 +1238,29 @@ func runResultSchema() map[string]any {
 			"timed_out":          booleanSchema("Whether execution timed out."),
 			"output_limit_bytes": positiveIntegerSchema("Configured output capture limit in bytes."),
 			"timeout_ms":         positiveIntegerSchema("Configured timeout in milliseconds."),
+			"usage_events":       arraySchema(usageEventResultSchema(), "Billing usage events produced by this successful invocation."),
 		},
 		[]string{"name", "exit_code"},
+		nil,
+	)
+}
+
+func usageEventResultSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"event_id":           nonEmptyStringSchema("Idempotent usage event id."),
+			"pack_id":            nonEmptyStringSchema("Capability pack or skill id."),
+			"version_id":         stringSchema("Capability pack version id."),
+			"vendor_id":          stringSchema("Vendor id declared by the skill manifest."),
+			"meter":              nonEmptyStringSchema("Billing meter such as call, task, page, minute, token, credit, seat, storage_gb_day, or success."),
+			"quantity":           numberSchema("Meter quantity recorded for this invocation."),
+			"currency":           stringSchema("ISO 4217 currency or AGTX_CREDIT."),
+			"unit_price_minor":   nonNegativeIntegerSchema("Unit price in minor currency units or credit units."),
+			"gross_amount_minor": nonNegativeIntegerSchema("Gross event amount in minor currency units or credit units."),
+			"status":             nonEmptyStringSchema("Usage recording status such as local_only, recorded, or report_failed."),
+			"error":              stringSchema("Best-effort reporting error when the run itself still succeeded."),
+		},
+		[]string{"event_id", "pack_id", "meter", "quantity", "status"},
 		nil,
 	)
 }
@@ -1494,6 +1644,100 @@ func listResultSchema() map[string]any {
 	)
 }
 
+func recordQueryInputSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"pack_id":  stringSchema("Optional capability pack id filter such as standard or advanced."),
+			"skill":    stringSchema("Optional skill name filter."),
+			"status":   stringSchema("Optional record status filter."),
+			"type":     stringSchema("Optional billing record type filter such as pack_install or skill_usage."),
+			"currency": stringSchema("Optional billing currency filter such as USD or AGTX_CREDIT."),
+			"from":     stringSchema("Optional inclusive RFC3339 start timestamp."),
+			"to":       stringSchema("Optional inclusive RFC3339 end timestamp."),
+			"limit":    positiveIntegerSchema("Maximum number of records to return."),
+		},
+		nil,
+		nil,
+	)
+}
+
+func capabilityPackSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"schema_version": positiveIntegerSchema("Capability pack schema version."),
+			"id":             nonEmptyStringSchema("Stable capability pack id."),
+			"name":           nonEmptyStringSchema("Human-readable capability pack name."),
+			"tier":           nonEmptyStringSchema("Pack tier such as standard or advanced."),
+			"summary":        stringSchema("Short pack summary."),
+			"description":    stringSchema("Longer pack description."),
+			"skill_names":    stringArraySchema("Skill names included in this pack.", false),
+			"billing":        billingInfoSchema(),
+			"support":        supportInfoSchema(),
+		},
+		[]string{"id", "name", "tier", "skill_names"},
+		nil,
+	)
+}
+
+func capabilityPackViewSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"pack":         capabilityPackSchema(),
+			"installed":    booleanSchema("Whether all skills in this pack are currently installed."),
+			"installed_at": stringSchema("Timestamp of the latest local pack install record."),
+			"updated_at":   stringSchema("Timestamp of the latest local pack update/install record."),
+			"skills":       arraySchema(capabilityPackSkillSchema(), "Per-skill availability and install state within the pack."),
+		},
+		[]string{"pack", "installed", "skills"},
+		nil,
+	)
+}
+
+func capabilityPackSkillSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"name":              nonEmptyStringSchema("Skill name included in the pack."),
+			"available_version": stringSchema("Registry version available for installation."),
+			"installed_version": stringSchema("Current installed version when present."),
+			"installed":         booleanSchema("Whether the skill is currently installed."),
+			"stub":              booleanSchema("Whether the installed skill is a stub."),
+			"path":              stringSchema("Filesystem path for the installed skill version."),
+			"manifest":          skillManifestSchema(),
+		},
+		[]string{"name", "installed"},
+		nil,
+	)
+}
+
+func capabilityPackInstallResultSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"pack":            capabilityPackViewSchema(),
+			"results":         arraySchema(installResultSchema(), "Install results for every skill in the pack."),
+			"install_record":  installRecordSchema(),
+			"billing_records": arraySchema(billingRecordSchema(), "Billing records created by the pack install."),
+		},
+		[]string{"pack", "results"},
+		nil,
+	)
+}
+
+func capabilityPackInstallPlanSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"action":          nonEmptyStringSchema("Capability-pack mutation action such as install_pack."),
+			"pack":            capabilityPackViewSchema(),
+			"changes":         arraySchema(plannedChangeSchema(), "Planned skill changes for the pack."),
+			"billing_preview": arraySchema(billingRecordSchema(), "Billing records expected if the pack install proceeds."),
+			"totals":          arraySchema(billingTotalSchema(), "Billing preview totals grouped by currency."),
+			"requires":        stringArraySchema("Preconditions required before mutation, such as confirmation.", false),
+			"warnings":        stringArraySchema("Warnings for the pack install plan.", false),
+		},
+		[]string{"action", "pack", "changes"},
+		nil,
+	)
+}
+
 func installResultSchema() map[string]any {
 	return objectSchema(
 		map[string]any{
@@ -1505,6 +1749,102 @@ func installResultSchema() map[string]any {
 			"stub":             booleanSchema("Whether the installed package is a stub."),
 		},
 		[]string{"name", "version", "status", "path", "stub"},
+		nil,
+	)
+}
+
+func installRecordSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"record_id":   nonEmptyStringSchema("Stable local install record id."),
+			"action":      nonEmptyStringSchema("Install action such as install_skill or install_pack."),
+			"pack_id":     stringSchema("Capability pack id for pack installs."),
+			"pack_tier":   stringSchema("Capability pack tier for pack installs."),
+			"skill_name":  stringSchema("Skill name for direct skill installs."),
+			"skills":      arraySchema(installRecordSkillSchema(), "Skill-level install results captured in this record."),
+			"status":      nonEmptyStringSchema("Install status."),
+			"device_id":   stringSchema("Local Pro device id when available."),
+			"occurred_at": nonEmptyStringSchema("Install record timestamp."),
+		},
+		[]string{"record_id", "action", "status", "occurred_at"},
+		nil,
+	)
+}
+
+func installRecordSkillSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"name":             nonEmptyStringSchema("Installed skill name."),
+			"version":          stringSchema("Installed version."),
+			"previous_version": stringSchema("Previous active version before install."),
+			"status":           nonEmptyStringSchema("Install result status."),
+			"path":             stringSchema("Filesystem path for the installed version."),
+			"stub":             booleanSchema("Whether the installed skill is a stub."),
+		},
+		[]string{"name", "status"},
+		nil,
+	)
+}
+
+func billingRecordSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"record_id":          nonEmptyStringSchema("Stable local billing record id."),
+			"type":               nonEmptyStringSchema("Billing record type such as pack_install or skill_usage."),
+			"pack_id":            stringSchema("Associated capability pack id."),
+			"pack_tier":          stringSchema("Associated capability pack tier."),
+			"skill_name":         stringSchema("Associated skill name for usage billing."),
+			"version_id":         stringSchema("Skill or pack version id."),
+			"vendor_id":          stringSchema("Vendor id declared by the manifest."),
+			"meter":              nonEmptyStringSchema("Billing meter."),
+			"quantity":           numberSchema("Billed quantity."),
+			"currency":           stringSchema("Currency or AGTX_CREDIT."),
+			"unit_price_minor":   nonNegativeIntegerSchema("Unit price in minor currency units or credit units."),
+			"gross_amount_minor": nonNegativeIntegerSchema("Gross billed amount."),
+			"status":             nonEmptyStringSchema("Billing record status."),
+			"invocation_id":      stringSchema("Run invocation id for usage billing."),
+			"usage_event_id":     stringSchema("Usage event id for usage billing."),
+			"error":              stringSchema("Best-effort billing/reporting error."),
+			"occurred_at":        nonEmptyStringSchema("Billing record timestamp."),
+		},
+		[]string{"record_id", "type", "meter", "quantity", "status", "occurred_at"},
+		nil,
+	)
+}
+
+func billingRecordListResultSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"records": arraySchema(billingRecordSchema(), "Local billing records."),
+			"totals":  arraySchema(billingTotalSchema(), "Billing totals grouped by currency."),
+		},
+		[]string{"records"},
+		nil,
+	)
+}
+
+func billingTotalSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"currency":           nonEmptyStringSchema("Currency code or AGTX_CREDIT."),
+			"records":            nonNegativeIntegerSchema("Number of billing records in this currency."),
+			"gross_amount_minor": nonNegativeIntegerSchema("Gross amount across records."),
+		},
+		[]string{"currency", "records", "gross_amount_minor"},
+		nil,
+	)
+}
+
+func commerceSnapshotSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"schema_version":  positiveIntegerSchema("Commerce snapshot schema version."),
+			"generated_at":    nonEmptyStringSchema("Snapshot generation timestamp."),
+			"packs":           arraySchema(capabilityPackViewSchema(), "Capability packs with install state."),
+			"install_records": arraySchema(installRecordSchema(), "Local install records."),
+			"billing":         billingRecordListResultSchema(),
+		},
+		[]string{"schema_version", "generated_at", "packs", "billing"},
 		nil,
 	)
 }
@@ -1618,6 +1958,14 @@ func allowedToolArguments(name string) (map[string]struct{}, bool) {
 		return toolArgumentSet("query", "limit"), true
 	case "list_skills":
 		return toolArgumentSet("installed", "available"), true
+	case "list_capability_packs":
+		return toolArgumentSet(), true
+	case "plan_capability_pack_install":
+		return toolArgumentSet("pack"), true
+	case "install_capability_pack":
+		return toolArgumentSet("pack", "yes"), true
+	case "list_install_records", "list_billing_records", "get_commerce_snapshot":
+		return toolArgumentSet("pack_id", "skill", "status", "type", "currency", "from", "to", "limit"), true
 	case "list_agent_targets":
 		return toolArgumentSet(), true
 	case "get_agent_target":

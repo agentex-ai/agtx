@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -65,6 +67,8 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runVerify(service, args[1:], stdout, stderr)
 	case "registry":
 		return runRegistry(ctx, service, args[1:], stdout, stderr)
+	case "commerce":
+		return runCommerce(ctx, service, args[1:], stdin, stdout, stderr)
 	case "pro":
 		return runPro(ctx, service, args[1:], stdout, stderr)
 	case "mcp":
@@ -83,7 +87,7 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 func supportedCommands() []string {
-	return []string{"config", "search", "install", "run", "uninstall", "list", "upgrade", "rollback", "status", "doctor", "verify", "registry", "pro", "mcp", "agent"}
+	return []string{"config", "search", "install", "run", "uninstall", "list", "upgrade", "rollback", "status", "doctor", "verify", "registry", "commerce", "pro", "mcp", "agent"}
 }
 
 func runConfig(service *core.Service, args []string, stdout, stderr io.Writer) int {
@@ -602,6 +606,238 @@ func registrySubcommands() []string {
 	return []string{"sources", "refresh", "validate"}
 }
 
+func runCommerce(ctx context.Context, service *core.Service, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	jsonOut := wantsJSONOutput(args)
+	if len(args) == 0 || onlyJSONFlag(args) {
+		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "commerce subcommand is required", map[string]any{"supported_subcommands": commerceSubcommands()}))
+	}
+	switch args[0] {
+	case "packs":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected commerce packs arguments", rest, jsonOnlyFlags()))
+		}
+		packs, err := service.ListCapabilityPacks()
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(packs, nil), 0)
+		}
+		printCapabilityPacks(stdout, packs)
+		return 0
+	case "install-pack":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		yes := takeBoolFlag(&rest, "--yes", "-y")
+		planOnly := takeBoolFlag(&rest, "--plan", "")
+		if len(rest) != 1 {
+			return fail(stdout, stderr, jsonOut, argumentCountError("commerce install-pack requires pack id", []string{"pack"}, commerceInstallPackFlags()))
+		}
+		if planOnly {
+			plan, err := service.PlanCapabilityPackInstall(rest[0])
+			if err != nil {
+				return fail(stdout, stderr, jsonOut, err)
+			}
+			if jsonOut {
+				return writeJSON(stdout, core.NewResponse(plan, plan.Warnings), 0)
+			}
+			printCapabilityPackPlan(stdout, plan)
+			return 0
+		}
+		if err := confirmMutation("install-pack", []string{rest[0]}, yes, jsonOut, stdin, stdout); err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		result, err := service.InstallCapabilityPack(ctx, rest[0])
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(result, nil), 0)
+		}
+		printCapabilityPackInstall(stdout, result)
+		return 0
+	case "install-records":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		options := takeRecordQueryFlags(&rest, commerceRecordFlags())
+		if hasInternalInvalidFlag(rest) {
+			return fail(stdout, stderr, jsonOut, internalFlagError(rest, commerceRecordFlags()))
+		}
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected commerce install-records arguments", rest, commerceRecordFlags()))
+		}
+		records, err := service.ListInstallRecords(options)
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(records, nil), 0)
+		}
+		printInstallRecords(stdout, records)
+		return 0
+	case "billing-records":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		options := takeRecordQueryFlags(&rest, commerceRecordFlags())
+		if hasInternalInvalidFlag(rest) {
+			return fail(stdout, stderr, jsonOut, internalFlagError(rest, commerceRecordFlags()))
+		}
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected commerce billing-records arguments", rest, commerceRecordFlags()))
+		}
+		records, err := service.ListBillingRecords(options)
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(records, nil), 0)
+		}
+		printBillingRecords(stdout, records)
+		return 0
+	case "snapshot":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		known := flagSet(commerceSnapshotFlags())
+		outPath := takeStringFlag(&rest, "--out", "", known)
+		options := takeRecordQueryFlagsWithKnown(&rest, known)
+		if hasInternalInvalidFlag(rest) {
+			return fail(stdout, stderr, jsonOut, internalFlagError(rest, commerceSnapshotFlags()))
+		}
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected commerce snapshot arguments", rest, commerceSnapshotFlags()))
+		}
+		if outPath != "" {
+			result, err := service.ExportCommerceSnapshot(outPath, options)
+			if err != nil {
+				return fail(stdout, stderr, jsonOut, err)
+			}
+			if jsonOut {
+				return writeJSON(stdout, core.NewResponse(result, nil), 0)
+			}
+			fmt.Fprintf(stdout, "commerce snapshot exported: %s\n", result.Path)
+			printCommerceSnapshot(stdout, result.Snapshot)
+			return 0
+		}
+		snapshot, err := service.CommerceSnapshot(options)
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(snapshot, nil), 0)
+		}
+		printCommerceSnapshot(stdout, snapshot)
+		return 0
+	case "serve":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		known := flagSet(commerceServeFlags())
+		addr := takeStringFlag(&rest, "--addr", "127.0.0.1:8765", known)
+		allowedOrigin := takeStringFlag(&rest, "--allow-origin", "", known)
+		if hasInternalInvalidFlag(rest) {
+			return fail(stdout, stderr, jsonOut, internalFlagError(rest, commerceServeFlags()))
+		}
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected commerce serve arguments", rest, commerceServeFlags()))
+		}
+		if err := serveCommerceHTTP(ctx, service, addr, allowedOrigin, jsonOut, stdout); err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		return 0
+	default:
+		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unknown commerce subcommand", map[string]any{"subcommand": args[0], "supported_subcommands": commerceSubcommands()}))
+	}
+}
+
+func commerceSubcommands() []string {
+	return []string{"packs", "install-pack", "install-records", "billing-records", "snapshot", "serve"}
+}
+
+func commerceInstallPackFlags() []string {
+	return []string{"--json", "--yes", "-y", "--plan"}
+}
+
+func commerceRecordFlags() []string {
+	return []string{"--json", "--pack-id", "--skill", "--status", "--type", "--currency", "--from", "--to", "--limit"}
+}
+
+func commerceSnapshotFlags() []string {
+	return []string{"--json", "--pack-id", "--skill", "--status", "--type", "--currency", "--from", "--to", "--limit", "--out"}
+}
+
+func commerceServeFlags() []string {
+	return []string{"--json", "--addr", "--allow-origin"}
+}
+
+func takeRecordQueryFlags(args *[]string, flags []string) core.RecordQueryOptions {
+	known := flagSet(flags)
+	return takeRecordQueryFlagsWithKnown(args, known)
+}
+
+func takeRecordQueryFlagsWithKnown(args *[]string, known map[string]bool) core.RecordQueryOptions {
+	packID := takeStringFlag(args, "--pack-id", "", known)
+	skill := takeStringFlag(args, "--skill", "", known)
+	status := takeStringFlag(args, "--status", "", known)
+	recordType := takeStringFlag(args, "--type", "", known)
+	currency := takeStringFlag(args, "--currency", "", known)
+	from := takeStringFlag(args, "--from", "", known)
+	to := takeStringFlag(args, "--to", "", known)
+	limit := takeIntFlag(args, "--limit", 100, known)
+	return core.RecordQueryOptions{PackID: packID, Skill: skill, Status: status, Type: recordType, Currency: currency, From: from, To: to, Limit: limit}
+}
+
+func serveCommerceHTTP(ctx context.Context, service *core.Service, addr, allowedOrigin string, jsonOut bool, stdout io.Writer) error {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return core.NewError(core.CodeInvalidArgument, "--addr requires a value", map[string]any{"flag": "--addr", "supported_flags": commerceServeFlags()})
+	}
+	mutationToken := core.NewTraceID()
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+
+	server := &http.Server{
+		Handler: service.CommerceHTTPHandler(core.CommerceHTTPOptions{AllowedOrigin: allowedOrigin, MutationToken: mutationToken}),
+	}
+	defer server.Close()
+	go func() {
+		<-ctx.Done()
+		_ = server.Close()
+	}()
+
+	actualAddr := listener.Addr().String()
+	if jsonOut {
+		response := core.NewResponse(map[string]any{
+			"addr":            actualAddr,
+			"base_url":        "http://" + actualAddr,
+			"allow_origin":    allowedOrigin,
+			"mutation_header": "X-AGTX-Commerce-Token",
+			"mutation_token":  mutationToken,
+			"endpoints":       core.CommerceHTTPEndpoints(),
+			"dashboard_url":   "http://" + actualAddr + "/commerce",
+			"snapshot_url":    "http://" + actualAddr + "/v1/commerce/snapshot",
+			"healthcheck_url": "http://" + actualAddr + "/healthz",
+		}, nil)
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(response); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintf(stdout, "commerce HTTP API listening on http://%s\n", actualAddr)
+		fmt.Fprintf(stdout, "dashboard: http://%s/commerce\n", actualAddr)
+		fmt.Fprintf(stdout, "snapshot: http://%s/v1/commerce/snapshot\n", actualAddr)
+		fmt.Fprintf(stdout, "mutation_token: %s\n", mutationToken)
+	}
+	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
+}
+
 func runPro(ctx context.Context, service *core.Service, args []string, stdout, stderr io.Writer) int {
 	jsonOut := wantsJSONOutput(args)
 	if len(args) == 0 || onlyJSONFlag(args) {
@@ -934,6 +1170,8 @@ func mutationFlags(action string) []string {
 		return upgradeFlags()
 	case "rollback":
 		return rollbackFlags()
+	case "install-pack":
+		return commerceInstallPackFlags()
 	default:
 		return []string{"--json", "--yes", "-y"}
 	}
@@ -1024,6 +1262,103 @@ func printPlan(stdout io.Writer, plan core.MutationPlan) {
 			}
 		}
 		fmt.Fprintln(stdout)
+	}
+}
+
+func printCapabilityPacks(stdout io.Writer, packs []core.CapabilityPackView) {
+	if len(packs) == 0 {
+		fmt.Fprintln(stdout, "No capability packs found.")
+		return
+	}
+	for _, view := range packs {
+		status := "available"
+		if view.Installed {
+			status = "installed"
+		}
+		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s", view.Pack.ID, view.Pack.Tier, status, view.Pack.Summary)
+		if view.InstalledAt != "" {
+			fmt.Fprintf(stdout, "\tinstalled_at=%s", view.InstalledAt)
+		}
+		fmt.Fprintln(stdout)
+		for _, skill := range view.Skills {
+			skillStatus := "missing"
+			version := valueOrDash(skill.AvailableVersion)
+			if skill.Installed {
+				skillStatus = "installed"
+				version = valueOrDash(skill.InstalledVersion)
+			}
+			fmt.Fprintf(stdout, "  %s\t%s\t%s\n", skill.Name, version, skillStatus)
+		}
+	}
+}
+
+func printCapabilityPackInstall(stdout io.Writer, result core.CapabilityPackInstallResult) {
+	fmt.Fprintf(stdout, "%s %s installed=%t\n", result.Pack.Pack.ID, result.Pack.Pack.Tier, result.Pack.Installed)
+	for _, item := range result.Results {
+		fmt.Fprintf(stdout, "  %s\t%s\t%s\n", item.Name, item.Version, item.Status)
+	}
+	for _, record := range result.BillingRecords {
+		fmt.Fprintf(stdout, "  billing\t%s\t%s\t%s\t%d\n", record.Type, record.Meter, valueOrDash(record.Currency), record.GrossAmountMinor)
+	}
+}
+
+func printCapabilityPackPlan(stdout io.Writer, plan core.CapabilityPackInstallPlan) {
+	fmt.Fprintf(stdout, "%s %s plan:\n", plan.Pack.Pack.ID, plan.Pack.Pack.Tier)
+	for _, change := range plan.Changes {
+		fmt.Fprintf(stdout, "  %s\t%s\t%s -> %s\n", change.Name, change.Status, valueOrDash(change.CurrentVersion), valueOrDash(change.TargetVersion))
+	}
+	for _, record := range plan.BillingPreview {
+		fmt.Fprintf(stdout, "  billing_preview\t%s\t%s\t%s\t%d\n", record.Type, record.Meter, valueOrDash(record.Currency), record.GrossAmountMinor)
+	}
+	for _, warning := range plan.Warnings {
+		fmt.Fprintf(stdout, "  warning\t%s\n", warning)
+	}
+}
+
+func printInstallRecords(stdout io.Writer, records []core.InstallRecord) {
+	if len(records) == 0 {
+		fmt.Fprintln(stdout, "No install records found.")
+		return
+	}
+	for _, record := range records {
+		target := record.PackID
+		if target == "" {
+			target = record.SkillName
+		}
+		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", record.OccurredAt, record.Action, valueOrDash(target), record.Status)
+		for _, skill := range record.Skills {
+			fmt.Fprintf(stdout, "  %s\t%s\t%s\n", skill.Name, valueOrDash(skill.Version), skill.Status)
+		}
+	}
+}
+
+func printBillingRecords(stdout io.Writer, result core.BillingRecordListResult) {
+	if len(result.Records) == 0 {
+		fmt.Fprintln(stdout, "No billing records found.")
+		return
+	}
+	for _, record := range result.Records {
+		target := record.PackID
+		if record.SkillName != "" {
+			target = record.SkillName
+		}
+		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%.4g\t%s\t%d\t%s\n", record.OccurredAt, record.Type, valueOrDash(target), record.Meter, record.Quantity, valueOrDash(record.Currency), record.GrossAmountMinor, record.Status)
+	}
+	if len(result.Totals) > 0 {
+		fmt.Fprintln(stdout, "Totals:")
+		for _, total := range result.Totals {
+			fmt.Fprintf(stdout, "  %s\t%d records\t%d\n", total.Currency, total.Records, total.GrossAmountMinor)
+		}
+	}
+}
+
+func printCommerceSnapshot(stdout io.Writer, snapshot core.CapabilityCommerceSnapshot) {
+	fmt.Fprintf(stdout, "commerce snapshot %s\n", snapshot.GeneratedAt)
+	fmt.Fprintf(stdout, "packs: %d\n", len(snapshot.Packs))
+	fmt.Fprintf(stdout, "install_records: %d\n", len(snapshot.InstallRecords))
+	fmt.Fprintf(stdout, "billing_records: %d\n", len(snapshot.Billing.Records))
+	for _, total := range snapshot.Billing.Totals {
+		fmt.Fprintf(stdout, "billing_total: %s\t%d records\t%d\n", total.Currency, total.Records, total.GrossAmountMinor)
 	}
 }
 
@@ -1352,6 +1687,11 @@ Usage:
   agtx verify <skill> [--json]
   agtx config init|show|path|keys|set|unset [--json]
   agtx registry sources|refresh|validate [--json]
+  agtx commerce packs [--json]
+  agtx commerce install-pack <pack> [--plan] [--yes] [--json]
+  agtx commerce install-records|billing-records [--pack-id id] [--skill name] [--limit N] [--json]
+  agtx commerce snapshot [--pack-id id] [--skill name] [--limit N] [--out path] [--json]
+  agtx commerce serve [--addr host:port] [--allow-origin origin] [--json]
   agtx pro login [--open] [--json]
   agtx pro callback <agtx://pro/callback?...> [--json]
   agtx pro status|setup|logout|devices|register-scheme [--json]

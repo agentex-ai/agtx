@@ -2,6 +2,10 @@
 
 Agents should use `agtx` through MCP when possible, then fall back to JSON CLI.
 
+For complex tasks, agents should assemble a task-scoped capability bundle before
+installing or running individual skills. See `docs/capability-bundles.md` for
+the recommended bundle shape, priorities, roles, stages, and execution behavior.
+
 ## MCP
 
 Run:

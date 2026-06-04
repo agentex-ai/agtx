@@ -703,6 +703,252 @@ func TestProSetupPlainText(t *testing.T) {
 	}
 }
 
+func TestCommercePacksJSON(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"commerce", "packs", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("commerce packs failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var response struct {
+		OK   bool `json:"ok"`
+		Data []struct {
+			Pack struct {
+				ID   string `json:"id"`
+				Tier string `json:"tier"`
+			} `json:"pack"`
+			Installed bool `json:"installed"`
+			Skills    []struct {
+				Name string `json:"name"`
+			} `json:"skills"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid commerce packs json: %v\n%s", err, stdout.String())
+	}
+	if !response.OK || len(response.Data) != 2 || response.Data[0].Pack.ID != "standard" || response.Data[1].Pack.ID != "advanced" {
+		t.Fatalf("unexpected packs response: %s", stdout.String())
+	}
+	if response.Data[0].Installed || len(response.Data[0].Skills) == 0 {
+		t.Fatalf("expected uninstalled pack with skills: %s", stdout.String())
+	}
+}
+
+func TestCommerceInstallPackRequiresConfirmation(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"commerce", "install-pack", "standard", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("expected confirmation exit code, got %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var response struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				Action         string   `json:"action"`
+				SupportedFlags []string `json:"supported_flags"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid confirmation json: %v\n%s", err, stdout.String())
+	}
+	if response.Error.Code != "confirmation_required" || response.Error.Details.Action != "install-pack" || !containsString(response.Error.Details.SupportedFlags, "--yes") {
+		t.Fatalf("unexpected confirmation response: %s", stdout.String())
+	}
+}
+
+func TestCommerceInstallPackPlanJSON(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"commerce", "install-pack", "standard", "--plan", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("pack plan failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var response struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Action string `json:"action"`
+			Pack   struct {
+				Pack struct {
+					ID string `json:"id"`
+				} `json:"pack"`
+			} `json:"pack"`
+			Changes []struct {
+				Name   string `json:"name"`
+				Status string `json:"status"`
+			} `json:"changes"`
+			BillingPreview []struct {
+				Type   string `json:"type"`
+				PackID string `json:"pack_id"`
+			} `json:"billing_preview"`
+			Requires []string `json:"requires"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid pack plan json: %v\n%s", err, stdout.String())
+	}
+	if !response.OK || response.Data.Action != "install_pack" || response.Data.Pack.Pack.ID != "standard" || len(response.Data.Changes) == 0 || len(response.Data.BillingPreview) != 2 || !containsString(response.Data.Requires, "confirmation") {
+		t.Fatalf("unexpected pack plan response: %s", stdout.String())
+	}
+}
+
+func TestCommerceInstallPackSnapshotAndBillingJSON(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"commerce", "install-pack", "standard", "--yes", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("install pack failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"billing_records"`)) || !bytes.Contains(stdout.Bytes(), []byte(`"pack_id": "standard"`)) {
+		t.Fatalf("expected pack install billing result: %s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "billing-records", "--pack-id", "standard", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("billing records failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var billing struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Records []struct {
+				Type   string `json:"type"`
+				PackID string `json:"pack_id"`
+				Meter  string `json:"meter"`
+			} `json:"records"`
+			Totals []struct {
+				Currency string `json:"currency"`
+			} `json:"totals"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &billing); err != nil {
+		t.Fatalf("invalid billing json: %v\n%s", err, stdout.String())
+	}
+	if !billing.OK || len(billing.Data.Records) != 2 || billing.Data.Records[0].Type != "pack_install" || billing.Data.Records[0].PackID != "standard" || len(billing.Data.Totals) != 2 {
+		t.Fatalf("unexpected billing response: %s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "billing-records", "--pack-id", "standard", "--type", "pack_install", "--currency", "USD", "--status", "local_only", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("filtered billing records failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var filteredBilling struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Records []struct {
+				Currency string `json:"currency"`
+			} `json:"records"`
+			Totals []struct {
+				Currency string `json:"currency"`
+			} `json:"totals"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &filteredBilling); err != nil {
+		t.Fatalf("invalid filtered billing json: %v\n%s", err, stdout.String())
+	}
+	if !filteredBilling.OK || len(filteredBilling.Data.Records) != 1 || filteredBilling.Data.Records[0].Currency != "USD" || len(filteredBilling.Data.Totals) != 1 {
+		t.Fatalf("unexpected filtered billing response: %s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "snapshot", "--pack-id", "standard", "--limit", "5", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("snapshot failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"schema_version": 1`)) || !bytes.Contains(stdout.Bytes(), []byte(`"install_records"`)) {
+		t.Fatalf("expected commerce snapshot: %s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	exportPath := filepath.Join(t.TempDir(), "commerce-snapshot.json")
+	code = Main([]string{"commerce", "snapshot", "--pack-id", "standard", "--out", exportPath, "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("snapshot export failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var exportResponse struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Path     string `json:"path"`
+			Snapshot struct {
+				SchemaVersion int `json:"schema_version"`
+				Packs         []struct {
+					Pack struct {
+						ID string `json:"id"`
+					} `json:"pack"`
+				} `json:"packs"`
+			} `json:"snapshot"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &exportResponse); err != nil {
+		t.Fatalf("invalid snapshot export json: %v\n%s", err, stdout.String())
+	}
+	if !exportResponse.OK || exportResponse.Data.Path != exportPath || exportResponse.Data.Snapshot.SchemaVersion != 1 {
+		t.Fatalf("unexpected snapshot export response: %s", stdout.String())
+	}
+	data, err := os.ReadFile(exportPath)
+	if err != nil {
+		t.Fatalf("read exported snapshot: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"schema_version": 1`)) || !bytes.Contains(data, []byte(`"pack_id": "standard"`)) {
+		t.Fatalf("unexpected exported snapshot: %s", string(data))
+	}
+}
+
+func TestCommerceRecordLimitValidation(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"commerce", "billing-records", "--limit", "0", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected invalid limit failure")
+	}
+	var response struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				Flag           string   `json:"flag"`
+				SupportedFlags []string `json:"supported_flags"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid commerce error json: %v\n%s", err, stdout.String())
+	}
+	if response.Error.Code != "invalid_argument" || response.Error.Details.Flag != "--limit" || !containsString(response.Error.Details.SupportedFlags, "--pack-id") {
+		t.Fatalf("unexpected commerce limit error: %s", stdout.String())
+	}
+}
+
+func TestCommerceRecordTimeFilterValidation(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"commerce", "install-records", "--from", "bad", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected invalid from failure")
+	}
+	var response struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				Field string `json:"field"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid time filter error json: %v\n%s", err, stdout.String())
+	}
+	if response.Error.Code != "invalid_argument" || response.Error.Details.Field != "from" {
+		t.Fatalf("unexpected time filter error: %s", stdout.String())
+	}
+}
+
 func TestHelpShowsDetailedProUsage(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -718,6 +964,12 @@ func TestHelpShowsDetailedProUsage(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte(`agtx pro revoke <device-id> [--json]`)) {
 		t.Fatalf("expected pro revoke usage: %s", stdout.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`agtx commerce install-pack <pack> [--plan] [--yes] [--json]`)) {
+		t.Fatalf("expected commerce usage: %s", stdout.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`agtx commerce serve [--addr host:port] [--allow-origin origin] [--json]`)) {
+		t.Fatalf("expected commerce serve usage: %s", stdout.String())
 	}
 }
 
@@ -1185,21 +1437,25 @@ func TestConfigLoadFailureDoesNotHonorAssignedJSONFlag(t *testing.T) {
 
 func TestDiscoveryHelperListsAreStable(t *testing.T) {
 	lists := map[string][]string{
-		"commands":             supportedCommands(),
-		"config subcommands":   configSubcommands(),
-		"registry subcommands": registrySubcommands(),
-		"pro subcommands":      proSubcommands(),
-		"agent subcommands":    agentSubcommands(),
-		"search flags":         searchFlags(),
-		"install flags":        installFlags(),
-		"run flags":            runFlags(),
-		"uninstall flags":      uninstallFlags(),
-		"list flags":           listFlags(),
-		"rollback flags":       rollbackFlags(),
-		"config init flags":    configInitFlags(),
-		"pro login flags":      proLoginFlags(),
-		"agent init flags":     agentInitFlags(),
-		"json only flags":      jsonOnlyFlags(),
+		"commands":                supportedCommands(),
+		"config subcommands":      configSubcommands(),
+		"registry subcommands":    registrySubcommands(),
+		"commerce subcommands":    commerceSubcommands(),
+		"pro subcommands":         proSubcommands(),
+		"agent subcommands":       agentSubcommands(),
+		"search flags":            searchFlags(),
+		"install flags":           installFlags(),
+		"run flags":               runFlags(),
+		"uninstall flags":         uninstallFlags(),
+		"list flags":              listFlags(),
+		"rollback flags":          rollbackFlags(),
+		"config init flags":       configInitFlags(),
+		"pro login flags":         proLoginFlags(),
+		"commerce record flags":   commerceRecordFlags(),
+		"commerce snapshot flags": commerceSnapshotFlags(),
+		"commerce serve flags":    commerceServeFlags(),
+		"agent init flags":        agentInitFlags(),
+		"json only flags":         jsonOnlyFlags(),
 	}
 	for name, values := range lists {
 		t.Run(name, func(t *testing.T) {

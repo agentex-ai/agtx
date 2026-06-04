@@ -123,6 +123,12 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	var runErrorSchema map[string]any
 	var searchSchema map[string]any
 	var listSchema map[string]any
+	var packListSchema map[string]any
+	var packPlanSchema map[string]any
+	var packInstallSchema map[string]any
+	var installRecordsSchema map[string]any
+	var billingRecordsSchema map[string]any
+	var commerceSnapshotSchema map[string]any
 	var configKeysSchema map[string]any
 	var registrySourcesSchema map[string]any
 	var statusSchema map[string]any
@@ -149,6 +155,18 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 			searchSchema = tool.OutputSchema
 		case "list_skills":
 			listSchema = tool.OutputSchema
+		case "list_capability_packs":
+			packListSchema = tool.OutputSchema
+		case "plan_capability_pack_install":
+			packPlanSchema = tool.OutputSchema
+		case "install_capability_pack":
+			packInstallSchema = tool.OutputSchema
+		case "list_install_records":
+			installRecordsSchema = tool.OutputSchema
+		case "list_billing_records":
+			billingRecordsSchema = tool.OutputSchema
+		case "get_commerce_snapshot":
+			commerceSnapshotSchema = tool.OutputSchema
 		case "list_config_keys":
 			configKeysSchema = tool.OutputSchema
 		case "list_registry_sources":
@@ -200,7 +218,7 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 			verifyErrorSchema = tool.ErrorOutputSchema
 		}
 	}
-	if searchSchema == nil || listSchema == nil || configKeysSchema == nil || registrySourcesSchema == nil || statusSchema == nil || proStatusSchema == nil || proSetupSchema == nil || proLoginStartSchema == nil || proLoginCompleteSchema == nil || proDevicesSchema == nil || revokeProDeviceSchema == nil || logoutProSchema == nil || registerProSchemeSchema == nil || refreshSchema == nil || validateRegistrySchema == nil || runSchema == nil || runOutputSchema == nil || runErrorSchema == nil || planSchema == nil || planOutputSchema == nil || installSchema == nil || installErrorSchema == nil || upgradeSchema == nil || rollbackSchema == nil || uninstallSchema == nil || agentSchema == nil || doctorSchema == nil || verifySchema == nil || verifyErrorSchema == nil {
+	if searchSchema == nil || listSchema == nil || packListSchema == nil || packPlanSchema == nil || packInstallSchema == nil || installRecordsSchema == nil || billingRecordsSchema == nil || commerceSnapshotSchema == nil || configKeysSchema == nil || registrySourcesSchema == nil || statusSchema == nil || proStatusSchema == nil || proSetupSchema == nil || proLoginStartSchema == nil || proLoginCompleteSchema == nil || proDevicesSchema == nil || revokeProDeviceSchema == nil || logoutProSchema == nil || registerProSchemeSchema == nil || refreshSchema == nil || validateRegistrySchema == nil || runSchema == nil || runOutputSchema == nil || runErrorSchema == nil || planSchema == nil || planOutputSchema == nil || installSchema == nil || installErrorSchema == nil || upgradeSchema == nil || rollbackSchema == nil || uninstallSchema == nil || agentSchema == nil || doctorSchema == nil || verifySchema == nil || verifyErrorSchema == nil {
 		t.Fatalf("expected schemas for discovery metadata: %s", stdout.String())
 	}
 	if runSchema["additionalProperties"] != false {
@@ -246,6 +264,40 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	}
 	if _, ok := listProps["installed"].(map[string]any); !ok {
 		t.Fatalf("expected list_skills installed schema: %#v", listProps)
+	}
+	packItems, ok := packListSchema["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected list_capability_packs item schema: %#v", packListSchema)
+	}
+	packProps, ok := packItems["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected pack view properties: %#v", packItems)
+	}
+	if _, ok := packProps["pack"].(map[string]any); !ok {
+		t.Fatalf("expected pack schema in pack view: %#v", packProps)
+	}
+	packPlanProps, ok := packPlanSchema["properties"].(map[string]any)
+	if !ok || packPlanProps["billing_preview"] == nil || packPlanProps["requires"] == nil {
+		t.Fatalf("expected plan_capability_pack_install billing preview schema: %#v", packPlanSchema)
+	}
+	packInstallProps, ok := packInstallSchema["properties"].(map[string]any)
+	if !ok || packInstallProps["billing_records"] == nil {
+		t.Fatalf("expected install_capability_pack billing records schema: %#v", packInstallSchema)
+	}
+	installRecordItems, ok := installRecordsSchema["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected list_install_records array schema: %#v", installRecordsSchema)
+	}
+	if installRecordItems["properties"] == nil {
+		t.Fatalf("expected install record properties: %#v", installRecordItems)
+	}
+	billingProps, ok := billingRecordsSchema["properties"].(map[string]any)
+	if !ok || billingProps["totals"] == nil {
+		t.Fatalf("expected list_billing_records totals schema: %#v", billingRecordsSchema)
+	}
+	snapshotProps, ok := commerceSnapshotSchema["properties"].(map[string]any)
+	if !ok || snapshotProps["packs"] == nil || snapshotProps["billing"] == nil {
+		t.Fatalf("expected commerce snapshot schemas: %#v", commerceSnapshotSchema)
 	}
 	configKeysItems, ok := configKeysSchema["items"].(map[string]any)
 	if !ok {
@@ -1133,6 +1185,121 @@ func TestMCPPlanInstall(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `\"action\": \"install\"`) {
 		t.Fatalf("expected install plan: %s", stdout.String())
+	}
+}
+
+func TestMCPCapabilityPackCommerceSnapshot(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	input := strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"install_capability_pack","arguments":{"pack":"gaoji","yes":true}}}` + "\n" +
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_commerce_snapshot","arguments":{"pack_id":"advanced","type":"pack_install","currency":"USD","limit":10}}}` + "\n",
+	)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected two MCP responses, got %d: %s", len(lines), stdout.String())
+	}
+	var install struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				Pack struct {
+					Pack struct {
+						ID string `json:"id"`
+					} `json:"pack"`
+					Installed bool `json:"installed"`
+				} `json:"pack"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &install); err != nil {
+		t.Fatalf("invalid install json: %v\n%s", err, lines[0])
+	}
+	if install.Result.IsError || install.Result.StructuredContent.Pack.Pack.ID != "advanced" || !install.Result.StructuredContent.Pack.Installed {
+		t.Fatalf("expected installed advanced pack response: %s", lines[0])
+	}
+	var snapshot struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				Packs []struct {
+					Pack struct {
+						ID string `json:"id"`
+					} `json:"pack"`
+					Installed bool `json:"installed"`
+				} `json:"packs"`
+				InstallRecords []struct {
+					PackID string `json:"pack_id"`
+				} `json:"install_records"`
+				Billing struct {
+					Records []struct {
+						PackID string `json:"pack_id"`
+						Meter  string `json:"meter"`
+					} `json:"records"`
+				} `json:"billing"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &snapshot); err != nil {
+		t.Fatalf("invalid snapshot json: %v\n%s", err, lines[1])
+	}
+	if snapshot.Result.IsError {
+		t.Fatalf("snapshot should not be an error: %s", lines[1])
+	}
+	if len(snapshot.Result.StructuredContent.Packs) != 2 {
+		t.Fatalf("expected both capability packs in snapshot: %s", lines[1])
+	}
+	if !snapshot.Result.StructuredContent.Packs[1].Installed || snapshot.Result.StructuredContent.Packs[1].Pack.ID != "advanced" {
+		t.Fatalf("expected installed advanced pack: %s", lines[1])
+	}
+	if len(snapshot.Result.StructuredContent.InstallRecords) != 1 || snapshot.Result.StructuredContent.InstallRecords[0].PackID != "advanced" {
+		t.Fatalf("expected advanced install record: %s", lines[1])
+	}
+	if len(snapshot.Result.StructuredContent.Billing.Records) != 1 || snapshot.Result.StructuredContent.Billing.Records[0].PackID != "advanced" || snapshot.Result.StructuredContent.Billing.Records[0].Meter != "seat" {
+		t.Fatalf("expected advanced billing records: %s", lines[1])
+	}
+}
+
+func TestMCPPlanCapabilityPackInstall(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"plan_capability_pack_install","arguments":{"pack":"standard"}}}` + "\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	var response struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				Action string `json:"action"`
+				Pack   struct {
+					Pack struct {
+						ID string `json:"id"`
+					} `json:"pack"`
+				} `json:"pack"`
+				Changes []struct {
+					Name string `json:"name"`
+				} `json:"changes"`
+				BillingPreview []struct {
+					PackID string `json:"pack_id"`
+					Meter  string `json:"meter"`
+				} `json:"billing_preview"`
+				Requires []string `json:"requires"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
+		t.Fatalf("invalid pack plan json: %v\n%s", err, stdout.String())
+	}
+	if response.Result.IsError || response.Result.StructuredContent.Action != "install_pack" || response.Result.StructuredContent.Pack.Pack.ID != "standard" || len(response.Result.StructuredContent.Changes) == 0 || len(response.Result.StructuredContent.BillingPreview) != 2 || !containsString(response.Result.StructuredContent.Requires, "confirmation") {
+		t.Fatalf("unexpected pack plan response: %s", stdout.String())
 	}
 }
 

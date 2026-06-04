@@ -183,6 +183,11 @@ func (s *Service) InstallSkills(ctx context.Context, names []string) ([]InstallR
 				return err
 			}
 			results = append(results, result)
+			if result.Status == "installed" {
+				if err := s.appendInstallRecord(installRecordForSkill(result, s.Auth.DeviceID)); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
 	})
@@ -517,7 +522,7 @@ func (s *Service) RunSkillWithOptions(ctx context.Context, name string, options 
 	if _, err := validateSkillManifest(manifest); err != nil {
 		return RunResult{Name: manifest.Name, Version: manifest.Version, Stub: manifest.Stub}, err
 	}
-	result := RunResult{Name: manifest.Name, Version: manifest.Version, Stub: manifest.Stub}
+	result := RunResult{Name: manifest.Name, Version: manifest.Version, Stub: manifest.Stub, InvocationID: NewTraceID()}
 	if manifest.Stub {
 		result.DurationMS = time.Since(start).Milliseconds()
 		return result, NewError(CodeNotImplemented, "skill is installed as a v1 stub; native package is not published yet", map[string]any{"skill": manifest.Name, "version": manifest.Version})
@@ -533,11 +538,18 @@ func (s *Service) RunSkillWithOptions(ctx context.Context, name string, options 
 	runResult.Name = manifest.Name
 	runResult.Version = manifest.Version
 	runResult.Stub = false
+	runResult.InvocationID = result.InvocationID
 	runResult.DurationMS = time.Since(start).Milliseconds()
 	runResult.TimeoutMS = options.Timeout.Milliseconds()
 	runResult.OutputLimitBytes = options.OutputLimitBytes
 	if err != nil {
 		return runResult, err
+	}
+	runResult.UsageEvents = s.recordRunUsage(ctx, manifest, runResult)
+	if len(runResult.UsageEvents) > 0 {
+		if err := s.appendBillingRecords(billingRecordsForUsage(manifest, runResult, runResult.UsageEvents)); err != nil {
+			return runResult, err
+		}
 	}
 	return runResult, nil
 }

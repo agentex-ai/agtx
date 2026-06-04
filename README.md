@@ -24,6 +24,10 @@ agtx config set package_max_bytes 268435456
 agtx config set extracted_max_bytes 1073741824
 agtx config set extracted_max_files 8192
 agtx registry sources
+agtx commerce packs --json
+agtx commerce install-pack standard --plan --json
+agtx commerce install-pack standard --yes --json
+agtx commerce snapshot --pack-id standard --json
 agtx pro setup
 agtx pro login --open
 agtx pro status --json
@@ -75,11 +79,15 @@ agtx agent init codex --json
 
 Use `agtx agent targets` to discover supported agent names first. Use `--print` for paste-ready snippets and `--json` when another tool needs structured setup metadata, aliases, path hints, and ordered `setup_steps` with `priority` / `blocking` / `verification` / `platforms` / `applies_when` / `writes_files` / `artifacts` hints instead of human-formatted text.
 
-`agtx mcp` implements a minimal newline-delimited JSON-RPC MCP server with tools for search, install, run, list, upgrade, rollback, status, registry inspection/validation, doctor, verify, and Pro auth/device management.
+`agtx mcp` implements a minimal newline-delimited JSON-RPC MCP server with tools for search, install, run, list, upgrade, rollback, status, registry inspection/validation, doctor, verify, capability-pack commerce, and Pro auth/device management.
 
 The server also accepts `Content-Length` framed JSON-RPC messages used by MCP clients.
 Its `tools/list` metadata includes strict JSON Schema with required fields, positive integer minima, and `additionalProperties: false` to help agent clients form valid calls without guessing.
-It also exposes agent-bootstrap helpers so an external client can call `list_agent_targets` and `get_agent_target` over MCP instead of shelling out to `agtx agent ...`, and those tools now advertise output schema for `setup_steps`, `writes_files`, and `artifacts`. Search/list/status/registry/refresh/install-plan/install/upgrade/rollback/uninstall/doctor/verify/run and Pro auth/device tools also publish output schema so setup UIs, confirmation flows, registry panels, local-status panels, login flows, callback-scheme registration, and result viewers can be prepared from discovery metadata alone. `get_pro_setup` adds a no-side-effect preflight path so wrappers can inspect whether `pro_api_url` is configured, whether a login is pending, and which CLI/MCP actions should come next before attempting any auth mutation. Pro-related failures such as `unauthorized`, `subscription_required`, and `device_limit_exceeded` now also carry a structured `error.details.pro_setup` preview plus `error.details.next_actions` recovery steps, so wrappers can recover without hard-coded heuristics. Each tool also exposes `errorOutputSchema` so wrappers can model the shared failure envelope, including partial `data` on preserved-error paths such as verify/run failures.
+It also exposes agent-bootstrap helpers so an external client can call `list_agent_targets` and `get_agent_target` over MCP instead of shelling out to `agtx agent ...`, and those tools now advertise output schema for `setup_steps`, `writes_files`, and `artifacts`. Search/list/status/registry/refresh/install-plan/install/upgrade/rollback/uninstall/doctor/verify/run, capability-pack commerce, and Pro auth/device tools also publish output schema so setup UIs, confirmation flows, registry panels, local-status panels, login flows, callback-scheme registration, website commerce panels, and result viewers can be prepared from discovery metadata alone. `get_pro_setup` adds a no-side-effect preflight path so wrappers can inspect whether `pro_api_url` is configured, whether a login is pending, and which CLI/MCP actions should come next before attempting any auth mutation. Pro-related failures such as `unauthorized`, `subscription_required`, and `device_limit_exceeded` now also carry a structured `error.details.pro_setup` preview plus `error.details.next_actions` recovery steps, so wrappers can recover without hard-coded heuristics. Each tool also exposes `errorOutputSchema` so wrappers can model the shared failure envelope, including partial `data` on preserved-error paths such as verify/run failures.
+
+For multi-skill tasks, agents should assemble a capability bundle before
+installing or running individual skills. See `docs/capability-bundles.md` for
+the recommended task profile, priorities, roles, stages, and execution notes.
 
 ## Pro
 
@@ -156,6 +164,48 @@ usage-metered packs and CPA/CPS outcome packs.
 `agtx install --plan --json` and MCP `plan_install` expose a compact commerce
 summary so agents can show vendor, capability class, billing meters, attribution
 events, and support URL before asking for install confirmation.
+
+The built-in capability-pack layer exposes two first-party bundles:
+
+- `standard` (aliases: `普通`, `标准`, `basic`): web, document, OCR, and research skills.
+- `advanced` (aliases: `高级`, `专业`, `pro`): all built-in first-wave skills, including audio, media generation, and presentation handling.
+
+Website integrations can query pack state, install history, and billing history
+through the CLI, the local HTTP API, or the local MCP server:
+
+```sh
+agtx commerce packs --json
+agtx commerce install-pack standard --plan --json
+agtx commerce install-pack standard --yes --json
+agtx commerce install-records --pack-id standard --json
+agtx commerce billing-records --pack-id standard --json
+agtx commerce billing-records --pack-id standard --type pack_install --currency USD --status local_only --json
+agtx commerce snapshot --pack-id standard --json
+agtx commerce snapshot --pack-id standard --out ./commerce-snapshot.json --json
+agtx commerce serve --addr 127.0.0.1:8765 --allow-origin https://example.com
+```
+
+The HTTP API returns the same response envelope as CLI JSON output. Website
+panels can call:
+
+- `GET /commerce` for the local capability-pack dashboard
+- `GET /v1/commerce/packs`
+- `GET /v1/commerce/install-plan?pack_id=standard`
+- `POST /v1/commerce/install-pack` with header `X-AGTX-Commerce-Token`
+  and body `{"pack_id":"standard","yes":true}`
+- `GET /v1/commerce/install-records?pack_id=standard&status=installed&limit=100`
+- `GET /v1/commerce/billing-records?pack_id=standard&type=pack_install&currency=USD&status=local_only&limit=100`
+- `GET /v1/commerce/snapshot?pack_id=standard&limit=100`
+
+`commerce serve` prints the dashboard URL and one-session mutation token used
+by the dashboard when installing packs.
+
+The matching MCP tools are `list_capability_packs`,
+`plan_capability_pack_install`, `install_capability_pack`,
+`list_install_records`, `list_billing_records`, and `get_commerce_snapshot`.
+Local install and billing ledgers are stored as JSONL under the agtx config
+directory and returned through both surfaces with stable JSON Schema discovery
+metadata on MCP.
 
 Plan before mutating, then refresh a configured remote registry:
 
