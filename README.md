@@ -165,22 +165,56 @@ usage-metered packs and CPA/CPS outcome packs.
 summary so agents can show vendor, capability class, billing meters, attribution
 events, and support URL before asking for install confirmation.
 
-The built-in capability-pack layer exposes two first-party bundles:
+The built-in capability-pack layer mirrors the first-wave packs shown on
+`agentex.cc` and keeps two bundle packs for ordinary and advanced installs.
 
-- `standard` (aliases: `普通`, `标准`, `basic`): web, document, OCR, and research skills.
-- `advanced` (aliases: `高级`, `专业`, `pro`): all built-in first-wave skills, including audio, media generation, and presentation handling.
+Website first-wave packs:
+
+- `web_search`: web discovery and ranked source candidates.
+- `web_fetch`: known-URL reading, article extraction, metadata, and relay fallback.
+- `research`: multi-step evidence gathering, synthesis, analysis, and UI review.
+- `ocr`: screenshots, scans, PDF pages, UI images, and photo text extraction.
+- `audio`: ASR, TTS, meeting notes, and batch audio jobs.
+- `imagen` (alias: `mediagen`): text-to-image, image-to-video, and media generation.
+- `docx`, `xlsx`, `pptx`, and `pdf`: native document-family packs.
+
+Compatibility and bundle packs:
+
+- `documents`: registry-compatible document-family pack for `docx`, `xlsx`, `pptx`, and `pdf`.
+- `standard`: ordinary bundle for web, document, OCR, and research workflows.
+- `advanced`: full bundle with all built-in first-wave skills, including audio, media generation, and presentation handling.
 
 Website integrations can query pack state, install history, and billing history
-through the CLI, the local HTTP API, or the local MCP server:
+through the CLI, the local HTTP API, or the local MCP server. They can also
+query task scenarios such as invoice processing, contract review, meeting-to-deck
+handoff, marketing asset generation, and support knowledge-base creation. Each
+scenario returns the recommended pack, missing skills, real task inputs,
+deliverables, workflow steps, acceptance criteria, install plan, and billing
+preview needed for a website purchase/install flow:
 
 ```sh
 agtx commerce packs --json
+agtx commerce packs --pack-id pdf --json
+agtx commerce scenarios --pack-id standard --json
+agtx commerce scenarios --pack-id pdf --json
+agtx commerce scenarios --scenario-id invoice_processing --json
+agtx commerce install-pack pdf --plan --json
+agtx commerce install-pack pdf --yes --json
 agtx commerce install-pack standard --plan --json
 agtx commerce install-pack standard --yes --json
+agtx commerce install-scenario invoice_processing --plan --json
+agtx commerce install-scenario invoice_processing --yes --json
+agtx commerce scenario-ledger invoice_processing --json
 agtx commerce install-records --pack-id standard --json
+agtx commerce install-records --pack-id pdf --json
 agtx commerce billing-records --pack-id standard --json
+agtx commerce billing-records --pack-id pdf --json
+agtx commerce billing-records --scenario-id invoice_processing --json
 agtx commerce billing-records --pack-id standard --type pack_install --currency USD --status local_only --json
+agtx run <installed-skill> --scenario-id invoice_processing --json
 agtx commerce snapshot --pack-id standard --json
+agtx commerce snapshot --pack-id pdf --json
+agtx commerce snapshot --scenario-id invoice_processing --json
 agtx commerce snapshot --pack-id standard --out ./commerce-snapshot.json --json
 agtx commerce serve --addr 127.0.0.1:8765 --allow-origin https://example.com
 ```
@@ -190,22 +224,49 @@ panels can call:
 
 - `GET /commerce` for the local capability-pack dashboard
 - `GET /v1/commerce/packs`
+- `GET /v1/commerce/packs?pack_id=pdf`
+- `GET /v1/commerce/scenarios?scenario_id=invoice_processing`
+- `GET /v1/commerce/scenarios?pack_id=pdf`
+- `GET /v1/commerce/install-plan?pack_id=pdf`
 - `GET /v1/commerce/install-plan?pack_id=standard`
+- `GET /v1/commerce/scenario-install-plan?scenario_id=invoice_processing`
+- `POST /v1/commerce/install-pack` with header `X-AGTX-Commerce-Token`
+  and body `{"pack_id":"pdf","yes":true}`
 - `POST /v1/commerce/install-pack` with header `X-AGTX-Commerce-Token`
   and body `{"pack_id":"standard","yes":true}`
+- `POST /v1/commerce/install-scenario` with header `X-AGTX-Commerce-Token`
+  and body `{"scenario_id":"invoice_processing","yes":true}`
+- `GET /v1/commerce/scenario-ledger?scenario_id=invoice_processing&limit=100`
 - `GET /v1/commerce/install-records?pack_id=standard&status=installed&limit=100`
+- `GET /v1/commerce/install-records?pack_id=pdf&status=installed&limit=100`
+- `GET /v1/commerce/install-records?scenario_id=invoice_processing&limit=100`
 - `GET /v1/commerce/billing-records?pack_id=standard&type=pack_install&currency=USD&status=local_only&limit=100`
+- `GET /v1/commerce/billing-records?pack_id=pdf&type=pack_install&limit=100`
+- `GET /v1/commerce/billing-records?scenario_id=invoice_processing&limit=100`
 - `GET /v1/commerce/snapshot?pack_id=standard&limit=100`
+- `GET /v1/commerce/snapshot?pack_id=pdf&limit=100`
+- `GET /v1/commerce/snapshot?scenario_id=invoice_processing&limit=100`
 
 `commerce serve` prints the dashboard URL and one-session mutation token used
 by the dashboard when installing packs.
 
 The matching MCP tools are `list_capability_packs`,
+`list_capability_scenarios`, `get_capability_scenario`,
 `plan_capability_pack_install`, `install_capability_pack`,
-`list_install_records`, `list_billing_records`, and `get_commerce_snapshot`.
+`plan_capability_scenario_install`, `install_capability_scenario`,
+`get_capability_scenario_ledger`, `list_install_records`,
+`list_billing_records`, and `get_commerce_snapshot`.
 Local install and billing ledgers are stored as JSONL under the agtx config
 directory and returned through both surfaces with stable JSON Schema discovery
-metadata on MCP.
+metadata on MCP. Scenario-driven installs write `install_scenario` install
+records and tag matching install and billing records with `scenario_id`. Skill
+runs can also pass `--scenario-id`, and MCP `run_skill` accepts `scenario_id`;
+metered usage events and local `skill_usage` billing records carry the
+canonical scenario id for website invoices and workflow history.
+For website account pages, `scenario-ledger` and
+`get_capability_scenario_ledger` return the scenario view, latest install,
+matching install records, billing totals, and a split between pack-install and
+skill-usage records in one response.
 
 Plan before mutating, then refresh a configured remote registry:
 

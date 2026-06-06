@@ -124,8 +124,13 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	var searchSchema map[string]any
 	var listSchema map[string]any
 	var packListSchema map[string]any
+	var scenarioListSchema map[string]any
+	var scenarioSchema map[string]any
 	var packPlanSchema map[string]any
 	var packInstallSchema map[string]any
+	var scenarioPlanSchema map[string]any
+	var scenarioInstallSchema map[string]any
+	var scenarioLedgerSchema map[string]any
 	var installRecordsSchema map[string]any
 	var billingRecordsSchema map[string]any
 	var commerceSnapshotSchema map[string]any
@@ -157,10 +162,20 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 			listSchema = tool.OutputSchema
 		case "list_capability_packs":
 			packListSchema = tool.OutputSchema
+		case "list_capability_scenarios":
+			scenarioListSchema = tool.OutputSchema
+		case "get_capability_scenario":
+			scenarioSchema = tool.OutputSchema
 		case "plan_capability_pack_install":
 			packPlanSchema = tool.OutputSchema
 		case "install_capability_pack":
 			packInstallSchema = tool.OutputSchema
+		case "plan_capability_scenario_install":
+			scenarioPlanSchema = tool.OutputSchema
+		case "install_capability_scenario":
+			scenarioInstallSchema = tool.OutputSchema
+		case "get_capability_scenario_ledger":
+			scenarioLedgerSchema = tool.OutputSchema
 		case "list_install_records":
 			installRecordsSchema = tool.OutputSchema
 		case "list_billing_records":
@@ -218,7 +233,7 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 			verifyErrorSchema = tool.ErrorOutputSchema
 		}
 	}
-	if searchSchema == nil || listSchema == nil || packListSchema == nil || packPlanSchema == nil || packInstallSchema == nil || installRecordsSchema == nil || billingRecordsSchema == nil || commerceSnapshotSchema == nil || configKeysSchema == nil || registrySourcesSchema == nil || statusSchema == nil || proStatusSchema == nil || proSetupSchema == nil || proLoginStartSchema == nil || proLoginCompleteSchema == nil || proDevicesSchema == nil || revokeProDeviceSchema == nil || logoutProSchema == nil || registerProSchemeSchema == nil || refreshSchema == nil || validateRegistrySchema == nil || runSchema == nil || runOutputSchema == nil || runErrorSchema == nil || planSchema == nil || planOutputSchema == nil || installSchema == nil || installErrorSchema == nil || upgradeSchema == nil || rollbackSchema == nil || uninstallSchema == nil || agentSchema == nil || doctorSchema == nil || verifySchema == nil || verifyErrorSchema == nil {
+	if searchSchema == nil || listSchema == nil || packListSchema == nil || scenarioListSchema == nil || scenarioSchema == nil || packPlanSchema == nil || packInstallSchema == nil || scenarioPlanSchema == nil || scenarioInstallSchema == nil || scenarioLedgerSchema == nil || installRecordsSchema == nil || billingRecordsSchema == nil || commerceSnapshotSchema == nil || configKeysSchema == nil || registrySourcesSchema == nil || statusSchema == nil || proStatusSchema == nil || proSetupSchema == nil || proLoginStartSchema == nil || proLoginCompleteSchema == nil || proDevicesSchema == nil || revokeProDeviceSchema == nil || logoutProSchema == nil || registerProSchemeSchema == nil || refreshSchema == nil || validateRegistrySchema == nil || runSchema == nil || runOutputSchema == nil || runErrorSchema == nil || planSchema == nil || planOutputSchema == nil || installSchema == nil || installErrorSchema == nil || upgradeSchema == nil || rollbackSchema == nil || uninstallSchema == nil || agentSchema == nil || doctorSchema == nil || verifySchema == nil || verifyErrorSchema == nil {
 		t.Fatalf("expected schemas for discovery metadata: %s", stdout.String())
 	}
 	if runSchema["additionalProperties"] != false {
@@ -235,6 +250,9 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	timeoutProp, ok := properties["timeout_ms"].(map[string]any)
 	if !ok || timeoutProp["minimum"] != float64(1) {
 		t.Fatalf("expected timeout_ms minimum=1: %#v", properties["timeout_ms"])
+	}
+	if _, ok := properties["scenario_id"].(map[string]any); !ok {
+		t.Fatalf("expected run_skill scenario_id input schema: %#v", properties)
 	}
 	anyOf, ok := planSchema["anyOf"].([]any)
 	if !ok || len(anyOf) != 2 {
@@ -273,8 +291,33 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected pack view properties: %#v", packItems)
 	}
-	if _, ok := packProps["pack"].(map[string]any); !ok {
+	packEnvelope, ok := packProps["pack"].(map[string]any)
+	if !ok {
 		t.Fatalf("expected pack schema in pack view: %#v", packProps)
+	}
+	packEnvelopeProps, ok := packEnvelope["properties"].(map[string]any)
+	if !ok || packEnvelopeProps["capability_class"] == nil || packEnvelopeProps["use_when"] == nil || packEnvelopeProps["inputs"] == nil || packEnvelopeProps["outputs"] == nil || packEnvelopeProps["tags"] == nil {
+		t.Fatalf("expected pack contract metadata schema: %#v", packEnvelope)
+	}
+	scenarioItems, ok := scenarioListSchema["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected list_capability_scenarios item schema: %#v", scenarioListSchema)
+	}
+	scenarioListProps, ok := scenarioItems["properties"].(map[string]any)
+	if !ok || scenarioListProps["scenario"] == nil || scenarioListProps["recommended_pack"] == nil || scenarioListProps["install_plan"] == nil {
+		t.Fatalf("expected scenario view properties: %#v", scenarioItems)
+	}
+	scenarioProps, ok := scenarioSchema["properties"].(map[string]any)
+	if !ok || scenarioProps["missing_skills"] == nil || scenarioProps["billing_preview_totals"] == nil {
+		t.Fatalf("expected get_capability_scenario output properties: %#v", scenarioSchema)
+	}
+	scenarioEnvelope, ok := scenarioListProps["scenario"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested scenario schema: %#v", scenarioListProps)
+	}
+	scenarioEnvelopeProps, ok := scenarioEnvelope["properties"].(map[string]any)
+	if !ok || scenarioEnvelopeProps["inputs"] == nil || scenarioEnvelopeProps["deliverables"] == nil || scenarioEnvelopeProps["workflow"] == nil || scenarioEnvelopeProps["acceptance_criteria"] == nil {
+		t.Fatalf("expected scenario workflow metadata schema: %#v", scenarioEnvelope)
 	}
 	packPlanProps, ok := packPlanSchema["properties"].(map[string]any)
 	if !ok || packPlanProps["billing_preview"] == nil || packPlanProps["requires"] == nil {
@@ -284,19 +327,52 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	if !ok || packInstallProps["billing_records"] == nil {
 		t.Fatalf("expected install_capability_pack billing records schema: %#v", packInstallSchema)
 	}
-	installRecordItems, ok := installRecordsSchema["items"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected list_install_records array schema: %#v", installRecordsSchema)
+	scenarioPlanProps, ok := scenarioPlanSchema["properties"].(map[string]any)
+	if !ok || scenarioPlanProps["scenario"] == nil || scenarioPlanProps["pack_plan"] == nil {
+		t.Fatalf("expected plan_capability_scenario_install schema: %#v", scenarioPlanSchema)
 	}
-	if installRecordItems["properties"] == nil {
+	scenarioInstallProps, ok := scenarioInstallSchema["properties"].(map[string]any)
+	if !ok || scenarioInstallProps["scenario"] == nil || scenarioInstallProps["pack_install"] == nil {
+		t.Fatalf("expected install_capability_scenario schema: %#v", scenarioInstallSchema)
+	}
+	scenarioLedgerProps, ok := scenarioLedgerSchema["properties"].(map[string]any)
+	if !ok || scenarioLedgerProps["scenario"] == nil || scenarioLedgerProps["latest_install"] == nil || scenarioLedgerProps["install_records"] == nil || scenarioLedgerProps["billing"] == nil || scenarioLedgerProps["usage_records"] == nil || scenarioLedgerProps["pack_install_records"] == nil {
+		t.Fatalf("expected get_capability_scenario_ledger schema: %#v", scenarioLedgerSchema)
+	}
+	installRecordsProps, ok := installRecordsSchema["properties"].(map[string]any)
+	if !ok || installRecordsProps["records"] == nil || installRecordsProps["integrity"] == nil {
+		t.Fatalf("expected list_install_records object schema: %#v", installRecordsSchema)
+	}
+	installRecordsArray, ok := installRecordsProps["records"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected list_install_records records schema: %#v", installRecordsSchema)
+	}
+	installRecordItems, ok := installRecordsArray["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected list_install_records item schema: %#v", installRecordsArray)
+	}
+	installRecordProps, ok := installRecordItems["properties"].(map[string]any)
+	if !ok || installRecordProps["scenario_id"] == nil || installRecordProps["integrity"] == nil {
 		t.Fatalf("expected install record properties: %#v", installRecordItems)
 	}
 	billingProps, ok := billingRecordsSchema["properties"].(map[string]any)
-	if !ok || billingProps["totals"] == nil {
+	if !ok || billingProps["totals"] == nil || billingProps["integrity"] == nil {
 		t.Fatalf("expected list_billing_records totals schema: %#v", billingRecordsSchema)
 	}
+	billingRecordsArray, ok := billingProps["records"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected list_billing_records records schema: %#v", billingRecordsSchema)
+	}
+	billingRecordItems, ok := billingRecordsArray["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected billing record items schema: %#v", billingRecordsArray)
+	}
+	billingRecordProps, ok := billingRecordItems["properties"].(map[string]any)
+	if !ok || billingRecordProps["scenario_id"] == nil {
+		t.Fatalf("expected billing record scenario_id schema: %#v", billingRecordItems)
+	}
 	snapshotProps, ok := commerceSnapshotSchema["properties"].(map[string]any)
-	if !ok || snapshotProps["packs"] == nil || snapshotProps["billing"] == nil {
+	if !ok || snapshotProps["packs"] == nil || snapshotProps["scenarios"] == nil || snapshotProps["install_records"] == nil || snapshotProps["billing"] == nil || snapshotProps["integrity"] == nil {
 		t.Fatalf("expected commerce snapshot schemas: %#v", commerceSnapshotSchema)
 	}
 	configKeysItems, ok := configKeysSchema["items"].(map[string]any)
@@ -483,6 +559,21 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	if _, ok := runOutputProps["stdout_truncated"].(map[string]any); !ok {
 		t.Fatalf("expected run output truncation schema: %#v", runOutputProps)
 	}
+	if _, ok := runOutputProps["scenario_id"].(map[string]any); !ok {
+		t.Fatalf("expected run output scenario_id schema: %#v", runOutputProps)
+	}
+	usageEvents, ok := runOutputProps["usage_events"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected run usage_events schema: %#v", runOutputProps)
+	}
+	usageItems, ok := usageEvents["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected run usage event item schema: %#v", usageEvents)
+	}
+	usageProps, ok := usageItems["properties"].(map[string]any)
+	if !ok || usageProps["scenario_id"] == nil {
+		t.Fatalf("expected run usage event scenario_id schema: %#v", usageItems)
+	}
 	runErrorProps, ok := runErrorSchema["properties"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected run error output properties: %#v", runErrorSchema)
@@ -492,7 +583,7 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 		t.Fatalf("expected run error data schema: %#v", runErrorProps)
 	}
 	runErrorDataProps, ok := runErrorData["properties"].(map[string]any)
-	if !ok || runErrorDataProps["exit_code"] == nil {
+	if !ok || runErrorDataProps["exit_code"] == nil || runErrorDataProps["scenario_id"] == nil {
 		t.Fatalf("expected run error partial result schema: %#v", runErrorData)
 	}
 	verifyErrorProps, ok := verifyErrorSchema["properties"].(map[string]any)
@@ -1233,8 +1324,13 @@ func TestMCPCapabilityPackCommerceSnapshot(t *testing.T) {
 					} `json:"pack"`
 					Installed bool `json:"installed"`
 				} `json:"packs"`
-				InstallRecords []struct {
-					PackID string `json:"pack_id"`
+				InstallRecords struct {
+					Records []struct {
+						PackID string `json:"pack_id"`
+					} `json:"records"`
+					Integrity struct {
+						Status string `json:"status"`
+					} `json:"integrity"`
 				} `json:"install_records"`
 				Billing struct {
 					Records []struct {
@@ -1251,13 +1347,13 @@ func TestMCPCapabilityPackCommerceSnapshot(t *testing.T) {
 	if snapshot.Result.IsError {
 		t.Fatalf("snapshot should not be an error: %s", lines[1])
 	}
-	if len(snapshot.Result.StructuredContent.Packs) != 2 {
-		t.Fatalf("expected both capability packs in snapshot: %s", lines[1])
+	if len(snapshot.Result.StructuredContent.Packs) != 1 {
+		t.Fatalf("expected filtered advanced capability pack in snapshot: %s", lines[1])
 	}
-	if !snapshot.Result.StructuredContent.Packs[1].Installed || snapshot.Result.StructuredContent.Packs[1].Pack.ID != "advanced" {
+	if !snapshot.Result.StructuredContent.Packs[0].Installed || snapshot.Result.StructuredContent.Packs[0].Pack.ID != "advanced" {
 		t.Fatalf("expected installed advanced pack: %s", lines[1])
 	}
-	if len(snapshot.Result.StructuredContent.InstallRecords) != 1 || snapshot.Result.StructuredContent.InstallRecords[0].PackID != "advanced" {
+	if len(snapshot.Result.StructuredContent.InstallRecords.Records) != 1 || snapshot.Result.StructuredContent.InstallRecords.Records[0].PackID != "advanced" || snapshot.Result.StructuredContent.InstallRecords.Integrity.Status == "" {
 		t.Fatalf("expected advanced install record: %s", lines[1])
 	}
 	if len(snapshot.Result.StructuredContent.Billing.Records) != 1 || snapshot.Result.StructuredContent.Billing.Records[0].PackID != "advanced" || snapshot.Result.StructuredContent.Billing.Records[0].Meter != "seat" {
@@ -1300,6 +1396,364 @@ func TestMCPPlanCapabilityPackInstall(t *testing.T) {
 	}
 	if response.Result.IsError || response.Result.StructuredContent.Action != "install_pack" || response.Result.StructuredContent.Pack.Pack.ID != "standard" || len(response.Result.StructuredContent.Changes) == 0 || len(response.Result.StructuredContent.BillingPreview) != 2 || !containsString(response.Result.StructuredContent.Requires, "confirmation") {
 		t.Fatalf("unexpected pack plan response: %s", stdout.String())
+	}
+}
+
+func TestMCPWebsiteCapabilityPackPlan(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	input := strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"plan_capability_pack_install","arguments":{"pack":"pdf"}}}` + "\n" +
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"plan_capability_pack_install","arguments":{"pack":"mediagen"}}}` + "\n",
+	)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected two MCP responses, got %d: %s", len(lines), stdout.String())
+	}
+	var pdf struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				Pack struct {
+					Pack struct {
+						ID              string `json:"id"`
+						CapabilityClass string `json:"capability_class"`
+						UseWhen         string `json:"use_when"`
+					} `json:"pack"`
+				} `json:"pack"`
+				Changes []struct {
+					Name string `json:"name"`
+				} `json:"changes"`
+				BillingPreview []struct {
+					PackID string `json:"pack_id"`
+					Meter  string `json:"meter"`
+				} `json:"billing_preview"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &pdf); err != nil {
+		t.Fatalf("invalid pdf plan json: %v\n%s", err, lines[0])
+	}
+	if pdf.Result.IsError || pdf.Result.StructuredContent.Pack.Pack.ID != "pdf" || pdf.Result.StructuredContent.Pack.Pack.CapabilityClass != "tool" || pdf.Result.StructuredContent.Pack.Pack.UseWhen == "" || len(pdf.Result.StructuredContent.Changes) != 1 || len(pdf.Result.StructuredContent.BillingPreview) != 1 || pdf.Result.StructuredContent.BillingPreview[0].PackID != "pdf" || pdf.Result.StructuredContent.BillingPreview[0].Meter != "page" {
+		t.Fatalf("unexpected pdf plan response: %s", lines[0])
+	}
+	var media struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				Pack struct {
+					Pack struct {
+						ID string `json:"id"`
+					} `json:"pack"`
+				} `json:"pack"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &media); err != nil {
+		t.Fatalf("invalid media plan json: %v\n%s", err, lines[1])
+	}
+	if media.Result.IsError || media.Result.StructuredContent.Pack.Pack.ID != "imagen" {
+		t.Fatalf("expected mediagen alias to resolve to imagen: %s", lines[1])
+	}
+}
+
+func TestMCPScenarioInstallPlanAndRecords(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	input := strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"plan_capability_scenario_install","arguments":{"scenario":"invoice"}}}` + "\n" +
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"install_capability_scenario","arguments":{"scenario":"invoice","yes":true}}}` + "\n" +
+			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_install_records","arguments":{"scenario_id":"invoice_processing"}}}` + "\n" +
+			`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_billing_records","arguments":{"scenario_id":"invoice_processing","type":"pack_install","limit":10}}}` + "\n" +
+			`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_capability_scenario_ledger","arguments":{"scenario":"invoice","type":"pack_install","limit":10}}}` + "\n",
+	)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("expected five MCP responses, got %d: %s", len(lines), stdout.String())
+	}
+
+	var plan struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				Action   string `json:"action"`
+				Scenario struct {
+					Scenario struct {
+						ID string `json:"id"`
+					} `json:"scenario"`
+				} `json:"scenario"`
+				PackPlan struct {
+					Pack struct {
+						Pack struct {
+							ID string `json:"id"`
+						} `json:"pack"`
+					} `json:"pack"`
+					BillingPreview []struct {
+						ScenarioID string `json:"scenario_id"`
+					} `json:"billing_preview"`
+					Requires []string `json:"requires"`
+				} `json:"pack_plan"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &plan); err != nil {
+		t.Fatalf("invalid scenario plan json: %v\n%s", err, lines[0])
+	}
+	if plan.Result.IsError || plan.Result.StructuredContent.Action != "install_scenario" || plan.Result.StructuredContent.Scenario.Scenario.ID != "invoice_processing" || plan.Result.StructuredContent.PackPlan.Pack.Pack.ID != "standard" || len(plan.Result.StructuredContent.PackPlan.BillingPreview) != 2 || plan.Result.StructuredContent.PackPlan.BillingPreview[0].ScenarioID != "invoice_processing" || !containsString(plan.Result.StructuredContent.PackPlan.Requires, "confirmation") {
+		t.Fatalf("unexpected scenario plan response: %s", lines[0])
+	}
+
+	var install struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				Scenario struct {
+					Scenario struct {
+						ID string `json:"id"`
+					} `json:"scenario"`
+					Ready bool `json:"ready"`
+				} `json:"scenario"`
+				PackInstall struct {
+					InstallRecord struct {
+						Action     string `json:"action"`
+						PackID     string `json:"pack_id"`
+						ScenarioID string `json:"scenario_id"`
+					} `json:"install_record"`
+					BillingRecords []struct {
+						ScenarioID string `json:"scenario_id"`
+					} `json:"billing_records"`
+				} `json:"pack_install"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &install); err != nil {
+		t.Fatalf("invalid scenario install json: %v\n%s", err, lines[1])
+	}
+	if install.Result.IsError || install.Result.StructuredContent.Scenario.Scenario.ID != "invoice_processing" || !install.Result.StructuredContent.Scenario.Ready || install.Result.StructuredContent.PackInstall.InstallRecord.Action != "install_scenario" || install.Result.StructuredContent.PackInstall.InstallRecord.PackID != "standard" || install.Result.StructuredContent.PackInstall.InstallRecord.ScenarioID != "invoice_processing" || len(install.Result.StructuredContent.PackInstall.BillingRecords) != 2 || install.Result.StructuredContent.PackInstall.BillingRecords[0].ScenarioID != "invoice_processing" {
+		t.Fatalf("unexpected scenario install response: %s", lines[1])
+	}
+
+	var installs struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				Records []struct {
+					Action     string `json:"action"`
+					ScenarioID string `json:"scenario_id"`
+				} `json:"records"`
+				Integrity struct {
+					Status string `json:"status"`
+				} `json:"integrity"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[2]), &installs); err != nil {
+		t.Fatalf("invalid scenario install records json: %v\n%s", err, lines[2])
+	}
+	if installs.Result.IsError || len(installs.Result.StructuredContent.Records) != 1 || installs.Result.StructuredContent.Records[0].Action != "install_scenario" || installs.Result.StructuredContent.Records[0].ScenarioID != "invoice_processing" || installs.Result.StructuredContent.Integrity.Status == "" {
+		t.Fatalf("unexpected scenario install records: %s", lines[2])
+	}
+
+	var billing struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				Records []struct {
+					ScenarioID string `json:"scenario_id"`
+					Type       string `json:"type"`
+				} `json:"records"`
+				Totals []struct {
+					Currency string `json:"currency"`
+				} `json:"totals"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[3]), &billing); err != nil {
+		t.Fatalf("invalid scenario billing records json: %v\n%s", err, lines[3])
+	}
+	if billing.Result.IsError || len(billing.Result.StructuredContent.Records) != 2 || billing.Result.StructuredContent.Records[0].ScenarioID != "invoice_processing" || billing.Result.StructuredContent.Records[0].Type != "pack_install" || len(billing.Result.StructuredContent.Totals) != 2 {
+		t.Fatalf("unexpected scenario billing records: %s", lines[3])
+	}
+
+	var ledger struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				Scenario struct {
+					Scenario struct {
+						ID string `json:"id"`
+					} `json:"scenario"`
+				} `json:"scenario"`
+				LatestInstall struct {
+					Action     string `json:"action"`
+					ScenarioID string `json:"scenario_id"`
+				} `json:"latest_install"`
+				InstallRecords []struct {
+					ScenarioID string `json:"scenario_id"`
+				} `json:"install_records"`
+				Billing struct {
+					Records []struct {
+						ScenarioID string `json:"scenario_id"`
+					} `json:"records"`
+				} `json:"billing"`
+				PackInstallRecords []struct {
+					Type string `json:"type"`
+				} `json:"pack_install_records"`
+				UsageRecords []struct {
+					Type string `json:"type"`
+				} `json:"usage_records"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[4]), &ledger); err != nil {
+		t.Fatalf("invalid scenario ledger json: %v\n%s", err, lines[4])
+	}
+	if ledger.Result.IsError || ledger.Result.StructuredContent.Scenario.Scenario.ID != "invoice_processing" || ledger.Result.StructuredContent.LatestInstall.Action != "install_scenario" || ledger.Result.StructuredContent.LatestInstall.ScenarioID != "invoice_processing" {
+		t.Fatalf("unexpected scenario ledger: %s", lines[4])
+	}
+	if len(ledger.Result.StructuredContent.InstallRecords) != 1 || len(ledger.Result.StructuredContent.Billing.Records) != 2 || len(ledger.Result.StructuredContent.PackInstallRecords) != 2 || len(ledger.Result.StructuredContent.UsageRecords) != 0 {
+		t.Fatalf("unexpected scenario ledger records: %s", lines[4])
+	}
+}
+
+func TestMCPCapabilityScenarios(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	input := strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_capability_scenarios","arguments":{"pack_id":"advanced"}}}` + "\n" +
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_capability_scenario","arguments":{"scenario":"invoice"}}}` + "\n",
+	)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected two MCP responses, got %d: %s", len(lines), stdout.String())
+	}
+	var list struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent []struct {
+				Scenario struct {
+					ID string `json:"id"`
+				} `json:"scenario"`
+				RecommendedPack struct {
+					Pack struct {
+						ID string `json:"id"`
+					} `json:"pack"`
+				} `json:"recommended_pack"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &list); err != nil {
+		t.Fatalf("invalid scenario list json: %v\n%s", err, lines[0])
+	}
+	if list.Result.IsError || len(list.Result.StructuredContent) == 0 {
+		t.Fatalf("expected advanced scenarios: %s", lines[0])
+	}
+	for _, scenario := range list.Result.StructuredContent {
+		if scenario.RecommendedPack.Pack.ID != "advanced" {
+			t.Fatalf("expected only advanced scenarios: %s", lines[0])
+		}
+	}
+	var detail struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				Scenario struct {
+					ID                string `json:"id"`
+					RecommendedPackID string `json:"recommended_pack_id"`
+					Inputs            []struct {
+						ID       string `json:"id"`
+						Required bool   `json:"required"`
+					} `json:"inputs"`
+					Deliverables []struct {
+						ID string `json:"id"`
+					} `json:"deliverables"`
+					Workflow []struct {
+						ID string `json:"id"`
+					} `json:"workflow"`
+					AcceptanceCriteria []string `json:"acceptance_criteria"`
+				} `json:"scenario"`
+				RecommendedPack struct {
+					Pack struct {
+						ID string `json:"id"`
+					} `json:"pack"`
+				} `json:"recommended_pack"`
+				InstallPlan struct {
+					Action string `json:"action"`
+				} `json:"install_plan"`
+				MissingSkills []struct {
+					Name string `json:"name"`
+				} `json:"missing_skills"`
+				Ready                bool `json:"ready"`
+				BillingPreviewTotals []struct {
+					Currency string `json:"currency"`
+				} `json:"billing_preview_totals"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &detail); err != nil {
+		t.Fatalf("invalid scenario detail json: %v\n%s", err, lines[1])
+	}
+	if detail.Result.IsError || detail.Result.StructuredContent.Scenario.ID != "invoice_processing" || detail.Result.StructuredContent.RecommendedPack.Pack.ID != "standard" {
+		t.Fatalf("expected invoice scenario detail: %s", lines[1])
+	}
+	if detail.Result.StructuredContent.Ready || detail.Result.StructuredContent.InstallPlan.Action != "install_pack" || len(detail.Result.StructuredContent.MissingSkills) == 0 || len(detail.Result.StructuredContent.BillingPreviewTotals) != 2 {
+		t.Fatalf("expected invoice scenario readiness and billing preview: %s", lines[1])
+	}
+	if len(detail.Result.StructuredContent.Scenario.Inputs) == 0 || len(detail.Result.StructuredContent.Scenario.Deliverables) == 0 || len(detail.Result.StructuredContent.Scenario.Workflow) == 0 || len(detail.Result.StructuredContent.Scenario.AcceptanceCriteria) == 0 {
+		t.Fatalf("expected invoice scenario workflow metadata: %s", lines[1])
+	}
+}
+
+func TestMCPRunSkillAcceptsScenarioID(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	if _, err := service.InstallSkills(context.Background(), []string{"pdf"}); err != nil {
+		t.Fatalf("install fixture: %v", err)
+	}
+	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_skill","arguments":{"skill":"pdf","scenario_id":"invoice"}}}` + "\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	var response struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				OK   bool `json:"ok"`
+				Data struct {
+					Name       string `json:"name"`
+					ScenarioID string `json:"scenario_id"`
+				} `json:"data"`
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
+		t.Fatalf("invalid run response json: %v\n%s", err, stdout.String())
+	}
+	if !response.Result.IsError || response.Result.StructuredContent.OK || response.Result.StructuredContent.Error.Code != "not_implemented" {
+		t.Fatalf("expected structured run error for stub skill: %s", stdout.String())
+	}
+	if response.Result.StructuredContent.Data.Name != "pdf" || response.Result.StructuredContent.Data.ScenarioID != "invoice_processing" {
+		t.Fatalf("expected canonical scenario id in partial run data: %s", stdout.String())
 	}
 }
 

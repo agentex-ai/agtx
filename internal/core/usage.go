@@ -16,6 +16,7 @@ const usageStatusReportFailed = "report_failed"
 type commerceUsageRequest struct {
 	EventID          string         `json:"event_id"`
 	PackID           string         `json:"pack_id"`
+	ScenarioID       string         `json:"scenario_id,omitempty"`
 	VersionID        string         `json:"version_id,omitempty"`
 	VendorID         string         `json:"vendor_id,omitempty"`
 	Meter            string         `json:"meter"`
@@ -85,6 +86,8 @@ func buildRunUsageEvents(manifest SkillManifest, result RunResult) []UsageEventR
 	if vendorID == "" {
 		vendorID = "agentex"
 	}
+	scenarioID := strings.TrimSpace(result.ScenarioID)
+	packID := packIDForUsage(manifest.Name)
 	events := make([]UsageEventResult, 0, len(manifest.Billing.Meters))
 	for _, meter := range manifest.Billing.Meters {
 		name := strings.TrimSpace(meter.Meter)
@@ -95,7 +98,8 @@ func buildRunUsageEvents(manifest SkillManifest, result RunResult) []UsageEventR
 		unitPriceMinor := billingUnitPriceMinor(meter)
 		events = append(events, UsageEventResult{
 			EventID:          usageEventID(invocationID, manifest.Name, manifest.Version, name, len(events)),
-			PackID:           manifest.Name,
+			PackID:           packID,
+			ScenarioID:       scenarioID,
 			VersionID:        manifest.Version,
 			VendorID:         vendorID,
 			Meter:            name,
@@ -107,6 +111,13 @@ func buildRunUsageEvents(manifest SkillManifest, result RunResult) []UsageEventR
 		})
 	}
 	return events
+}
+
+func packIDForUsage(skillName string) string {
+	if pack := packForSkill(skillName); strings.TrimSpace(pack.ID) != "" {
+		return pack.ID
+	}
+	return strings.TrimSpace(skillName)
 }
 
 func usageRequestForEvent(manifest SkillManifest, result RunResult, event UsageEventResult) commerceUsageRequest {
@@ -121,9 +132,13 @@ func usageRequestForEvent(manifest SkillManifest, result RunResult, event UsageE
 	if manifest.Capability != nil && strings.TrimSpace(manifest.Capability.Class) != "" {
 		evidence["capability_class"] = strings.TrimSpace(manifest.Capability.Class)
 	}
+	if strings.TrimSpace(event.ScenarioID) != "" {
+		evidence["scenario_id"] = strings.TrimSpace(event.ScenarioID)
+	}
 	return commerceUsageRequest{
 		EventID:          event.EventID,
 		PackID:           event.PackID,
+		ScenarioID:       event.ScenarioID,
 		VersionID:        event.VersionID,
 		VendorID:         event.VendorID,
 		Meter:            event.Meter,

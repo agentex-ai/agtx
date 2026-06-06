@@ -339,6 +339,36 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		return toolJSON(packs), nil
+	case "list_capability_scenarios":
+		packID, err := args.String("pack_id")
+		if err != nil {
+			return nil, err
+		}
+		scenarios, err := s.service.ListCapabilityScenarios()
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(packID) != "" {
+			pack, err := s.service.GetCapabilityPack(packID)
+			if err != nil {
+				return nil, err
+			}
+			scenarios = capabilityScenariosForPack(scenarios, pack.Pack)
+		}
+		return toolJSON(scenarios), nil
+	case "get_capability_scenario":
+		scenario, err := args.String("scenario")
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(scenario) == "" {
+			return nil, args.missingRequiredArgument("scenario", "non_empty_string")
+		}
+		view, err := s.service.GetCapabilityScenario(scenario)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(view), nil
 	case "plan_capability_pack_install":
 		pack, err := args.String("pack")
 		if err != nil {
@@ -372,12 +402,62 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		return toolJSON(result), nil
+	case "plan_capability_scenario_install":
+		scenario, err := args.String("scenario")
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(scenario) == "" {
+			return nil, args.missingRequiredArgument("scenario", "non_empty_string")
+		}
+		plan, err := s.service.PlanCapabilityScenarioInstall(scenario)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(plan), nil
+	case "install_capability_scenario":
+		scenario, err := args.String("scenario")
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(scenario) == "" {
+			return nil, args.missingRequiredArgument("scenario", "non_empty_string")
+		}
+		yes, err := args.Bool("yes", false)
+		if err != nil {
+			return nil, err
+		}
+		if !yes {
+			return nil, args.confirmationRequired("install_capability_scenario requires yes=true")
+		}
+		result, err := s.service.InstallCapabilityScenario(context.Background(), scenario)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(result), nil
+	case "get_capability_scenario_ledger":
+		scenario, err := args.String("scenario")
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(scenario) == "" {
+			return nil, args.missingRequiredArgument("scenario", "non_empty_string")
+		}
+		options, err := recordQueryOptions(args, 100)
+		if err != nil {
+			return nil, err
+		}
+		ledger, err := s.service.CapabilityScenarioLedger(scenario, options)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(ledger), nil
 	case "list_install_records":
 		options, err := recordQueryOptions(args, 100)
 		if err != nil {
 			return nil, err
 		}
-		records, err := s.service.ListInstallRecords(options)
+		records, err := s.service.ListInstallRecordsWithIntegrity(options)
 		if err != nil {
 			return nil, err
 		}
@@ -702,11 +782,16 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
+		scenarioID, err := args.String("scenario_id")
+		if err != nil {
+			return nil, err
+		}
 		result, err := s.service.RunSkillWithOptions(context.Background(), skill, core.RunOptions{
 			Args:             skillArgs,
 			Input:            []byte(input),
 			Timeout:          time.Duration(timeoutMS) * time.Millisecond,
 			OutputLimitBytes: outputLimitBytes,
+			ScenarioID:       scenarioID,
 		})
 		if err != nil {
 			return toolError(err, result), nil
@@ -718,6 +803,10 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 
 func recordQueryOptions(args toolArguments, fallbackLimit int) (core.RecordQueryOptions, error) {
 	packID, err := args.String("pack_id")
+	if err != nil {
+		return core.RecordQueryOptions{}, err
+	}
+	scenarioID, err := args.String("scenario_id")
 	if err != nil {
 		return core.RecordQueryOptions{}, err
 	}
@@ -749,7 +838,7 @@ func recordQueryOptions(args toolArguments, fallbackLimit int) (core.RecordQuery
 	if err != nil {
 		return core.RecordQueryOptions{}, err
 	}
-	options := core.RecordQueryOptions{PackID: packID, Skill: skill, Status: status, Type: recordType, Currency: currency, From: from, To: to, Limit: limit}
+	options := core.RecordQueryOptions{PackID: packID, ScenarioID: scenarioID, Skill: skill, Status: status, Type: recordType, Currency: currency, From: from, To: to, Limit: limit}
 	if err := core.ValidateRecordQueryOptions(options); err != nil {
 		return core.RecordQueryOptions{}, err
 	}
@@ -833,15 +922,29 @@ func tools() []map[string]any {
 			nil,
 			nil,
 		), listResultSchema()),
-		tool("list_capability_packs", "List standard and advanced capability packs with install state for website and marketplace views.", objectSchema(nil, nil, nil), arraySchema(capabilityPackViewSchema(), "Capability packs visible to local website integrations.")),
-		tool("plan_capability_pack_install", "Preview standard or advanced capability-pack skill changes and billing records without mutating local state.", objectSchema(
+		tool("list_capability_packs", "List first-wave website capability packs plus standard and advanced bundles with install state for website and marketplace views.", objectSchema(nil, nil, nil), arraySchema(capabilityPackViewSchema(), "Capability packs visible to local website integrations.")),
+		tool("list_capability_scenarios", "List real task scenarios mapped to standard or advanced capability packs with readiness, missing skills, install plans, and billing preview.", objectSchema(
+			map[string]any{
+				"pack_id": stringSchema("Optional capability pack id or alias filter such as standard, advanced, putong, or gaoji."),
+			},
+			nil,
+			nil,
+		), arraySchema(capabilityScenarioViewSchema(), "Task scenarios with recommended capability-pack state.")),
+		tool("get_capability_scenario", "Return one real task scenario by id or alias with recommended pack, missing skills, install plan, and billing preview.", objectSchema(
+			map[string]any{
+				"scenario": nonEmptyStringSchema("Scenario id or alias such as invoice_processing, contract, meeting_deck, or marketing."),
+			},
+			[]string{"scenario"},
+			nil,
+		), capabilityScenarioViewSchema()),
+		tool("plan_capability_pack_install", "Preview capability-pack skill changes and billing records without mutating local state.", objectSchema(
 			map[string]any{
 				"pack": nonEmptyStringSchema("Capability pack id or tier such as standard, advanced, putong, or gaoji."),
 			},
 			[]string{"pack"},
 			nil,
 		), capabilityPackInstallPlanSchema()),
-		tool("install_capability_pack", "Install a standard or advanced capability pack and record local billing/install history. Requires yes=true.", objectSchema(
+		tool("install_capability_pack", "Install a capability pack and record local billing/install history. Requires yes=true.", objectSchema(
 			map[string]any{
 				"pack": nonEmptyStringSchema("Capability pack id or tier such as standard, advanced, putong, or gaoji."),
 				"yes":  booleanSchema("Must be true to perform the pack install; omit or false to receive confirmation_required."),
@@ -849,7 +952,23 @@ func tools() []map[string]any {
 			[]string{"pack"},
 			nil,
 		), capabilityPackInstallResultSchema()),
-		tool("list_install_records", "List local capability pack and skill install records for website account/history views.", recordQueryInputSchema(), arraySchema(installRecordSchema(), "Local install records.")),
+		tool("plan_capability_scenario_install", "Preview the recommended pack install and billing records for a real task scenario without mutating local state.", objectSchema(
+			map[string]any{
+				"scenario": nonEmptyStringSchema("Scenario id or alias such as invoice_processing, contract, meeting_deck, or marketing."),
+			},
+			[]string{"scenario"},
+			nil,
+		), capabilityScenarioInstallPlanSchema()),
+		tool("install_capability_scenario", "Install the recommended capability pack for a real task scenario and tag local install/billing history with scenario_id. Requires yes=true.", objectSchema(
+			map[string]any{
+				"scenario": nonEmptyStringSchema("Scenario id or alias such as invoice_processing, contract, meeting_deck, or marketing."),
+				"yes":      booleanSchema("Must be true to perform the scenario install; omit or false to receive confirmation_required."),
+			},
+			[]string{"scenario"},
+			nil,
+		), capabilityScenarioInstallResultSchema()),
+		tool("get_capability_scenario_ledger", "Return one real task scenario with matching install records, billing records, totals, latest install, and usage/install split for website account views.", scenarioLedgerInputSchema(), capabilityScenarioLedgerSchema()),
+		tool("list_install_records", "List local capability pack and skill install records with ledger integrity for website account/history views.", recordQueryInputSchema(), installRecordListResultSchema()),
 		tool("list_billing_records", "List local billing records and totals produced by pack installs or skill usage.", recordQueryInputSchema(), billingRecordListResultSchema()),
 		tool("get_commerce_snapshot", "Return capability packs, install records, and billing records in one website-friendly snapshot.", recordQueryInputSchema(), commerceSnapshotSchema()),
 		tool("list_agent_targets", "List supported agent integration targets and their setup metadata.", objectSchema(nil, nil, nil), arraySchema(agentTargetSchema(), "Supported agent integration targets.")),
@@ -957,6 +1076,7 @@ func tools() []map[string]any {
 				"input":              stringSchema("UTF-8 input payload forwarded to the skill stdin."),
 				"timeout_ms":         positiveIntegerSchema("Execution timeout in milliseconds."),
 				"output_limit_bytes": positiveIntegerSchema("Maximum captured stdout and stderr bytes."),
+				"scenario_id":        stringSchema("Optional real task scenario id used to tag usage billing records."),
 			},
 			[]string{"skill"},
 			nil,
@@ -1002,6 +1122,42 @@ func tool(name, description string, inputSchema, outputSchema map[string]any) ma
 		value["outputSchema"] = outputSchema
 	}
 	return value
+}
+
+func capabilityScenariosForPack(scenarios []core.CapabilityScenarioView, pack core.CapabilityPack) []core.CapabilityScenarioView {
+	if strings.TrimSpace(pack.ID) == "" {
+		return scenarios
+	}
+	filtered := scenarios[:0]
+	for _, scenario := range scenarios {
+		if capabilityScenarioMatchesPack(scenario, pack) {
+			filtered = append(filtered, scenario)
+		}
+	}
+	return filtered
+}
+
+func capabilityScenarioMatchesPack(scenario core.CapabilityScenarioView, pack core.CapabilityPack) bool {
+	if strings.EqualFold(strings.TrimSpace(scenario.RecommendedPack.Pack.ID), strings.TrimSpace(pack.ID)) || strings.EqualFold(strings.TrimSpace(scenario.Scenario.RecommendedPackID), strings.TrimSpace(pack.ID)) {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(pack.Tier)) {
+	case "standard", "advanced":
+		return false
+	}
+	for _, packSkill := range pack.SkillNames {
+		for _, recommendedSkill := range scenario.RecommendedPack.Pack.SkillNames {
+			if strings.EqualFold(strings.TrimSpace(packSkill), strings.TrimSpace(recommendedSkill)) {
+				return true
+			}
+		}
+		for _, scenarioSkill := range scenario.Scenario.Skills {
+			if strings.EqualFold(strings.TrimSpace(packSkill), strings.TrimSpace(scenarioSkill.Name)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func objectSchema(properties map[string]any, required []string, extras map[string]any) map[string]any {
@@ -1228,6 +1384,7 @@ func runResultSchema() map[string]any {
 			"name":               nonEmptyStringSchema("Executed skill name."),
 			"version":            stringSchema("Resolved installed skill version."),
 			"stub":               booleanSchema("Whether the installed skill is a stub."),
+			"scenario_id":        stringSchema("Canonical real task scenario id used to tag usage billing records."),
 			"invocation_id":      stringSchema("Stable invocation id shared with usage events."),
 			"exit_code":          schemaWithDescription(map[string]any{"type": "integer"}, "Process exit code returned by the skill."),
 			"stdout":             stringSchema("Captured standard output."),
@@ -1250,6 +1407,7 @@ func usageEventResultSchema() map[string]any {
 		map[string]any{
 			"event_id":           nonEmptyStringSchema("Idempotent usage event id."),
 			"pack_id":            nonEmptyStringSchema("Capability pack or skill id."),
+			"scenario_id":        stringSchema("Canonical real task scenario id used to tag this usage event."),
 			"version_id":         stringSchema("Capability pack version id."),
 			"vendor_id":          stringSchema("Vendor id declared by the skill manifest."),
 			"meter":              nonEmptyStringSchema("Billing meter such as call, task, page, minute, token, credit, seat, storage_gb_day, or success."),
@@ -1647,16 +1805,36 @@ func listResultSchema() map[string]any {
 func recordQueryInputSchema() map[string]any {
 	return objectSchema(
 		map[string]any{
-			"pack_id":  stringSchema("Optional capability pack id filter such as standard or advanced."),
-			"skill":    stringSchema("Optional skill name filter."),
-			"status":   stringSchema("Optional record status filter."),
-			"type":     stringSchema("Optional billing record type filter such as pack_install or skill_usage."),
-			"currency": stringSchema("Optional billing currency filter such as USD or AGTX_CREDIT."),
-			"from":     stringSchema("Optional inclusive RFC3339 start timestamp."),
-			"to":       stringSchema("Optional inclusive RFC3339 end timestamp."),
-			"limit":    positiveIntegerSchema("Maximum number of records to return."),
+			"pack_id":     stringSchema("Optional capability pack id filter such as standard or advanced."),
+			"scenario_id": stringSchema("Optional real task scenario id filter such as invoice_processing or meeting_to_presentation."),
+			"skill":       stringSchema("Optional skill name filter."),
+			"status":      stringSchema("Optional record status filter."),
+			"type":        stringSchema("Optional billing record type filter such as pack_install or skill_usage."),
+			"currency":    stringSchema("Optional billing currency filter such as USD or AGTX_CREDIT."),
+			"from":        stringSchema("Optional inclusive RFC3339 start timestamp."),
+			"to":          stringSchema("Optional inclusive RFC3339 end timestamp."),
+			"limit":       positiveIntegerSchema("Maximum number of records to return."),
 		},
 		nil,
+		nil,
+	)
+}
+
+func scenarioLedgerInputSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"scenario":    nonEmptyStringSchema("Scenario id or alias such as invoice_processing, invoice, contract, or meeting_deck."),
+			"pack_id":     stringSchema("Optional capability pack id filter such as standard or advanced."),
+			"scenario_id": stringSchema("Optional real task scenario id filter; the scenario argument is used as the canonical filter."),
+			"skill":       stringSchema("Optional skill name filter."),
+			"status":      stringSchema("Optional record status filter."),
+			"type":        stringSchema("Optional billing record type filter such as pack_install or skill_usage."),
+			"currency":    stringSchema("Optional billing currency filter such as USD or AGTX_CREDIT."),
+			"from":        stringSchema("Optional inclusive RFC3339 start timestamp."),
+			"to":          stringSchema("Optional inclusive RFC3339 end timestamp."),
+			"limit":       positiveIntegerSchema("Maximum number of records to return."),
+		},
+		[]string{"scenario"},
 		nil,
 	)
 }
@@ -1664,15 +1842,20 @@ func recordQueryInputSchema() map[string]any {
 func capabilityPackSchema() map[string]any {
 	return objectSchema(
 		map[string]any{
-			"schema_version": positiveIntegerSchema("Capability pack schema version."),
-			"id":             nonEmptyStringSchema("Stable capability pack id."),
-			"name":           nonEmptyStringSchema("Human-readable capability pack name."),
-			"tier":           nonEmptyStringSchema("Pack tier such as standard or advanced."),
-			"summary":        stringSchema("Short pack summary."),
-			"description":    stringSchema("Longer pack description."),
-			"skill_names":    stringArraySchema("Skill names included in this pack.", false),
-			"billing":        billingInfoSchema(),
-			"support":        supportInfoSchema(),
+			"schema_version":   positiveIntegerSchema("Capability pack schema version."),
+			"id":               nonEmptyStringSchema("Stable capability pack id."),
+			"name":             nonEmptyStringSchema("Human-readable capability pack name."),
+			"tier":             nonEmptyStringSchema("Pack tier such as first_wave, standard, or advanced."),
+			"capability_class": stringSchema("Commerce capability class such as tool, workflow, or content."),
+			"use_when":         stringSchema("Agent-readable trigger condition for this pack."),
+			"summary":          stringSchema("Short pack summary."),
+			"description":      stringSchema("Longer pack description."),
+			"inputs":           stringArraySchema("Agent-readable input contract entries.", false),
+			"outputs":          stringArraySchema("Agent-readable output contract entries.", false),
+			"tags":             stringArraySchema("Capability tags used for discovery and website filtering.", false),
+			"skill_names":      stringArraySchema("Skill names included in this pack.", false),
+			"billing":          billingInfoSchema(),
+			"support":          supportInfoSchema(),
 		},
 		[]string{"id", "name", "tier", "skill_names"},
 		nil,
@@ -1709,6 +1892,104 @@ func capabilityPackSkillSchema() map[string]any {
 	)
 }
 
+func capabilityScenarioSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"schema_version":      positiveIntegerSchema("Capability scenario schema version."),
+			"id":                  nonEmptyStringSchema("Stable task scenario id."),
+			"name":                nonEmptyStringSchema("Human-readable scenario name."),
+			"summary":             stringSchema("Short scenario summary."),
+			"description":         stringSchema("Longer scenario description."),
+			"industry":            stringSchema("Industry or team workflow category."),
+			"recommended_pack_id": nonEmptyStringSchema("Recommended capability pack id for this scenario."),
+			"task_profile":        capabilityTaskProfileSchema(),
+			"inputs":              arraySchema(capabilityScenarioIOSchema(), "Expected task inputs for this scenario."),
+			"deliverables":        arraySchema(capabilityScenarioIOSchema(), "Expected task deliverables for this scenario."),
+			"workflow":            arraySchema(capabilityScenarioStepSchema(), "Business workflow steps for the scenario."),
+			"skills":              arraySchema(capabilityScenarioSkillSchema(), "Scenario skills with role, priority, stage, and reason."),
+			"acceptance_criteria": stringArraySchema("Checks that should be satisfied before the scenario is treated as complete.", false),
+			"execution_notes":     stringArraySchema("Coordination notes for agents running this scenario.", false),
+		},
+		[]string{"id", "name", "recommended_pack_id", "task_profile", "skills"},
+		nil,
+	)
+}
+
+func capabilityTaskProfileSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"intent":              nonEmptyStringSchema("Task intent represented by the scenario."),
+			"domains":             stringArraySchema("Workflow domains covered by the scenario.", false),
+			"needs":               stringArraySchema("Capabilities or outcomes needed by the task.", false),
+			"risk_level":          stringSchema("Risk level such as low, medium, or high."),
+			"requires_user_input": booleanSchema("Whether a human input or approval step is expected."),
+		},
+		[]string{"intent", "requires_user_input"},
+		nil,
+	)
+}
+
+func capabilityScenarioIOSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"id":          nonEmptyStringSchema("Stable input or deliverable id."),
+			"label":       nonEmptyStringSchema("Human-readable input or deliverable label."),
+			"description": stringSchema("Short explanation of the input or deliverable."),
+			"formats":     stringArraySchema("Accepted or produced formats.", false),
+			"required":    booleanSchema("Whether this item is required for the scenario."),
+		},
+		[]string{"id", "label", "required"},
+		nil,
+	)
+}
+
+func capabilityScenarioStepSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"id":          nonEmptyStringSchema("Stable workflow step id."),
+			"title":       nonEmptyStringSchema("Human-readable workflow step title."),
+			"stage":       nonEmptyStringSchema("Execution stage for the step."),
+			"description": stringSchema("Short explanation of the step."),
+			"skills":      stringArraySchema("Skills used by this workflow step.", false),
+		},
+		[]string{"id", "title", "stage"},
+		nil,
+	)
+}
+
+func capabilityScenarioSkillSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"name":      nonEmptyStringSchema("Skill name used by the scenario."),
+			"role":      nonEmptyStringSchema("Scenario role such as discovery, implementation, validation, asset_creation, handoff, or fallback."),
+			"priority":  nonEmptyStringSchema("Priority such as required, recommended, conditional, or fallback."),
+			"stage":     nonEmptyStringSchema("Execution stage such as task_profile, editing, verification, or handoff."),
+			"reason":    stringSchema("Why this skill belongs in the scenario."),
+			"condition": stringSchema("Condition that activates a conditional skill."),
+		},
+		[]string{"name", "role", "priority", "stage"},
+		nil,
+	)
+}
+
+func capabilityScenarioViewSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"scenario":               capabilityScenarioSchema(),
+			"recommended_pack":       capabilityPackViewSchema(),
+			"install_plan":           capabilityPackInstallPlanSchema(),
+			"required_skills":        arraySchema(capabilityScenarioSkillSchema(), "Required scenario skills."),
+			"missing_skills":         arraySchema(capabilityPackSkillSchema(), "Recommended-pack skills missing locally."),
+			"installed_skills":       arraySchema(capabilityPackSkillSchema(), "Recommended-pack skills already installed locally."),
+			"ready":                  booleanSchema("Whether required scenario skills are installed locally."),
+			"billing_preview_totals": arraySchema(billingTotalSchema(), "Install billing preview totals for the recommended pack."),
+			"warnings":               stringArraySchema("Warnings for the scenario install/readiness plan.", false),
+		},
+		[]string{"scenario", "recommended_pack", "install_plan", "ready"},
+		nil,
+	)
+}
+
 func capabilityPackInstallResultSchema() map[string]any {
 	return objectSchema(
 		map[string]any{
@@ -1738,6 +2019,48 @@ func capabilityPackInstallPlanSchema() map[string]any {
 	)
 }
 
+func capabilityScenarioInstallPlanSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"action":    nonEmptyStringSchema("Scenario mutation action, always install_scenario."),
+			"scenario":  capabilityScenarioViewSchema(),
+			"pack_plan": capabilityPackInstallPlanSchema(),
+			"requires":  stringArraySchema("Preconditions required before mutation, such as confirmation.", false),
+			"warnings":  stringArraySchema("Warnings for the scenario install plan.", false),
+		},
+		[]string{"action", "scenario", "pack_plan"},
+		nil,
+	)
+}
+
+func capabilityScenarioInstallResultSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"scenario":     capabilityScenarioViewSchema(),
+			"pack_install": capabilityPackInstallResultSchema(),
+		},
+		[]string{"scenario", "pack_install"},
+		nil,
+	)
+}
+
+func capabilityScenarioLedgerSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"schema_version":       positiveIntegerSchema("Scenario ledger schema version."),
+			"generated_at":         nonEmptyStringSchema("Ledger generation timestamp."),
+			"scenario":             capabilityScenarioViewSchema(),
+			"latest_install":       installRecordSchema(),
+			"install_records":      arraySchema(installRecordSchema(), "Scenario install records matching the filters."),
+			"billing":              billingRecordListResultSchema(),
+			"usage_records":        arraySchema(billingRecordSchema(), "Scenario skill-usage billing records matching the filters."),
+			"pack_install_records": arraySchema(billingRecordSchema(), "Scenario pack-install billing records matching the filters."),
+		},
+		[]string{"schema_version", "generated_at", "scenario", "billing"},
+		nil,
+	)
+}
+
 func installResultSchema() map[string]any {
 	return objectSchema(
 		map[string]any{
@@ -1760,13 +2083,26 @@ func installRecordSchema() map[string]any {
 			"action":      nonEmptyStringSchema("Install action such as install_skill or install_pack."),
 			"pack_id":     stringSchema("Capability pack id for pack installs."),
 			"pack_tier":   stringSchema("Capability pack tier for pack installs."),
+			"scenario_id": stringSchema("Real task scenario id for scenario-driven installs."),
 			"skill_name":  stringSchema("Skill name for direct skill installs."),
 			"skills":      arraySchema(installRecordSkillSchema(), "Skill-level install results captured in this record."),
 			"status":      nonEmptyStringSchema("Install status."),
 			"device_id":   stringSchema("Local Pro device id when available."),
 			"occurred_at": nonEmptyStringSchema("Install record timestamp."),
+			"integrity":   recordIntegritySchema(),
 		},
 		[]string{"record_id", "action", "status", "occurred_at"},
+		nil,
+	)
+}
+
+func installRecordListResultSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"records":   arraySchema(installRecordSchema(), "Local install records."),
+			"integrity": ledgerIntegritySummarySchema(),
+		},
+		[]string{"records"},
 		nil,
 	)
 }
@@ -1793,6 +2129,7 @@ func billingRecordSchema() map[string]any {
 			"type":               nonEmptyStringSchema("Billing record type such as pack_install or skill_usage."),
 			"pack_id":            stringSchema("Associated capability pack id."),
 			"pack_tier":          stringSchema("Associated capability pack tier."),
+			"scenario_id":        stringSchema("Real task scenario id for scenario-driven installs."),
 			"skill_name":         stringSchema("Associated skill name for usage billing."),
 			"version_id":         stringSchema("Skill or pack version id."),
 			"vendor_id":          stringSchema("Vendor id declared by the manifest."),
@@ -1806,6 +2143,7 @@ func billingRecordSchema() map[string]any {
 			"usage_event_id":     stringSchema("Usage event id for usage billing."),
 			"error":              stringSchema("Best-effort billing/reporting error."),
 			"occurred_at":        nonEmptyStringSchema("Billing record timestamp."),
+			"integrity":          recordIntegritySchema(),
 		},
 		[]string{"record_id", "type", "meter", "quantity", "status", "occurred_at"},
 		nil,
@@ -1815,10 +2153,54 @@ func billingRecordSchema() map[string]any {
 func billingRecordListResultSchema() map[string]any {
 	return objectSchema(
 		map[string]any{
-			"records": arraySchema(billingRecordSchema(), "Local billing records."),
-			"totals":  arraySchema(billingTotalSchema(), "Billing totals grouped by currency."),
+			"records":   arraySchema(billingRecordSchema(), "Local billing records."),
+			"totals":    arraySchema(billingTotalSchema(), "Billing totals grouped by currency."),
+			"integrity": ledgerIntegritySummarySchema(),
 		},
 		[]string{"records"},
+		nil,
+	)
+}
+
+func recordIntegritySchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"algorithm":     stringSchema("Local ledger integrity algorithm."),
+			"ledger":        stringSchema("Ledger file covered by this integrity entry."),
+			"key_id":        stringSchema("Local integrity key identifier."),
+			"sequence":      positiveIntegerSchema("Ledger sequence number."),
+			"previous_hash": stringSchema("Previous record hash in the local chain."),
+			"hash":          stringSchema("Current record HMAC hash."),
+			"signed_at":     stringSchema("Timestamp when this record was locally signed."),
+			"verified_at":   stringSchema("Timestamp when this record was verified for the response."),
+			"status":        stringSchema("Integrity status such as verified, failed, or legacy_unsigned."),
+			"reason":        stringSchema("Integrity failure or legacy reason."),
+			"head_hash":     stringSchema("Current signed ledger head hash."),
+			"head_matched":  booleanSchema("Whether this record hash matches the signed ledger head."),
+		},
+		nil,
+		nil,
+	)
+}
+
+func ledgerIntegritySummarySchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"ledger":          nonEmptyStringSchema("Ledger file covered by the summary."),
+			"algorithm":       stringSchema("Local ledger integrity algorithm."),
+			"status":          nonEmptyStringSchema("Overall ledger integrity status."),
+			"records":         nonNegativeIntegerSchema("Number of records inspected."),
+			"verified":        nonNegativeIntegerSchema("Number of verified signed records."),
+			"failed":          nonNegativeIntegerSchema("Number of records with failed integrity checks."),
+			"legacy_unsigned": nonNegativeIntegerSchema("Number of records written before local integrity signing."),
+			"key_id":          stringSchema("Local integrity key identifier."),
+			"last_hash":       stringSchema("Last record hash observed in the ledger."),
+			"head_hash":       stringSchema("Signed ledger head hash."),
+			"head_matched":    booleanSchema("Whether the last record hash matches the signed ledger head."),
+			"verified_at":     stringSchema("Timestamp when the ledger was verified."),
+			"reason":          stringSchema("First failure reason, when any."),
+		},
+		[]string{"ledger", "status", "records", "verified", "failed", "legacy_unsigned", "head_matched"},
 		nil,
 	)
 }
@@ -1841,8 +2223,10 @@ func commerceSnapshotSchema() map[string]any {
 			"schema_version":  positiveIntegerSchema("Commerce snapshot schema version."),
 			"generated_at":    nonEmptyStringSchema("Snapshot generation timestamp."),
 			"packs":           arraySchema(capabilityPackViewSchema(), "Capability packs with install state."),
-			"install_records": arraySchema(installRecordSchema(), "Local install records."),
+			"scenarios":       arraySchema(capabilityScenarioViewSchema(), "Task scenarios mapped to capability packs."),
+			"install_records": installRecordListResultSchema(),
 			"billing":         billingRecordListResultSchema(),
+			"integrity":       arraySchema(ledgerIntegritySummarySchema(), "Local ledger integrity summaries."),
 		},
 		[]string{"schema_version", "generated_at", "packs", "billing"},
 		nil,
@@ -1960,12 +2344,22 @@ func allowedToolArguments(name string) (map[string]struct{}, bool) {
 		return toolArgumentSet("installed", "available"), true
 	case "list_capability_packs":
 		return toolArgumentSet(), true
+	case "list_capability_scenarios":
+		return toolArgumentSet("pack_id"), true
+	case "get_capability_scenario":
+		return toolArgumentSet("scenario"), true
 	case "plan_capability_pack_install":
 		return toolArgumentSet("pack"), true
 	case "install_capability_pack":
 		return toolArgumentSet("pack", "yes"), true
+	case "plan_capability_scenario_install":
+		return toolArgumentSet("scenario"), true
+	case "install_capability_scenario":
+		return toolArgumentSet("scenario", "yes"), true
+	case "get_capability_scenario_ledger":
+		return toolArgumentSet("scenario", "pack_id", "scenario_id", "skill", "status", "type", "currency", "from", "to", "limit"), true
 	case "list_install_records", "list_billing_records", "get_commerce_snapshot":
-		return toolArgumentSet("pack_id", "skill", "status", "type", "currency", "from", "to", "limit"), true
+		return toolArgumentSet("pack_id", "scenario_id", "skill", "status", "type", "currency", "from", "to", "limit"), true
 	case "list_agent_targets":
 		return toolArgumentSet(), true
 	case "get_agent_target":
@@ -1991,7 +2385,7 @@ func allowedToolArguments(name string) (map[string]struct{}, bool) {
 	case "uninstall_skill":
 		return toolArgumentSet("skill", "all_versions", "yes", "plan"), true
 	case "run_skill":
-		return toolArgumentSet("skill", "args", "input", "timeout_ms", "output_limit_bytes"), true
+		return toolArgumentSet("skill", "args", "input", "timeout_ms", "output_limit_bytes", "scenario_id"), true
 	default:
 		return nil, false
 	}

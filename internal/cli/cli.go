@@ -276,6 +276,7 @@ func runSkill(ctx context.Context, service *core.Service, args []string, stdin i
 	inputPath := takeStringFlag(&args, "--input", "", runKnownFlags)
 	timeoutMS := takeIntFlag(&args, "--timeout-ms", service.Config.RunTimeoutMS, runKnownFlags)
 	outputLimit := takeInt64Flag(&args, "--output-limit-bytes", service.Config.RunOutputLimitBytes, runKnownFlags)
+	scenarioID := takeStringFlag(&args, "--scenario-id", "", runKnownFlags)
 	if jsonOut && ndjsonOut {
 		return failRun(stdout, stderr, jsonOut, ndjsonOut, mutuallyExclusiveFlagsError("--json", "--ndjson", runFlags()), core.RunResult{})
 	}
@@ -300,6 +301,7 @@ func runSkill(ctx context.Context, service *core.Service, args []string, stdin i
 		Input:            input,
 		Timeout:          time.Duration(timeoutMS) * time.Millisecond,
 		OutputLimitBytes: outputLimit,
+		ScenarioID:       scenarioID,
 	})
 	if err != nil {
 		if ndjsonOut {
@@ -324,7 +326,7 @@ func runSkill(ctx context.Context, service *core.Service, args []string, stdin i
 }
 
 func runFlags() []string {
-	return []string{"--json", "--ndjson", "--input", "--timeout-ms", "--output-limit-bytes"}
+	return []string{"--json", "--ndjson", "--input", "--timeout-ms", "--output-limit-bytes", "--scenario-id"}
 }
 
 func uninstallFlags() []string {
@@ -615,17 +617,56 @@ func runCommerce(ctx context.Context, service *core.Service, args []string, stdi
 	case "packs":
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
+		known := flagSet(commercePackFlags())
+		packID := takeStringFlag(&rest, "--pack-id", "", known)
+		if hasInternalInvalidFlag(rest) {
+			return fail(stdout, stderr, jsonOut, internalFlagError(rest, commercePackFlags()))
+		}
 		if len(rest) > 0 {
-			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected commerce packs arguments", rest, jsonOnlyFlags()))
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected commerce packs arguments", rest, commercePackFlags()))
 		}
 		packs, err := service.ListCapabilityPacks()
 		if err != nil {
 			return fail(stdout, stderr, jsonOut, err)
 		}
+		if strings.TrimSpace(packID) != "" {
+			pack, err := service.GetCapabilityPack(packID)
+			if err != nil {
+				return fail(stdout, stderr, jsonOut, err)
+			}
+			filtered := packs[:0]
+			for _, view := range packs {
+				if strings.EqualFold(strings.TrimSpace(view.Pack.ID), strings.TrimSpace(pack.Pack.ID)) {
+					filtered = append(filtered, view)
+				}
+			}
+			packs = filtered
+		}
 		if jsonOut {
 			return writeJSON(stdout, core.NewResponse(packs, nil), 0)
 		}
 		printCapabilityPacks(stdout, packs)
+		return 0
+	case "scenarios":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		known := flagSet(commerceScenarioFlags())
+		scenarioID := takeStringFlag(&rest, "--scenario-id", "", known)
+		packID := takeStringFlag(&rest, "--pack-id", "", known)
+		if hasInternalInvalidFlag(rest) {
+			return fail(stdout, stderr, jsonOut, internalFlagError(rest, commerceScenarioFlags()))
+		}
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected commerce scenarios arguments", rest, commerceScenarioFlags()))
+		}
+		scenarios, err := capabilityScenariosForCLI(service, scenarioID, packID)
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(scenarios, nil), 0)
+		}
+		printCapabilityScenarios(stdout, scenarios)
 		return 0
 	case "install-pack":
 		rest := args[1:]
@@ -658,6 +699,56 @@ func runCommerce(ctx context.Context, service *core.Service, args []string, stdi
 		}
 		printCapabilityPackInstall(stdout, result)
 		return 0
+	case "install-scenario":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		yes := takeBoolFlag(&rest, "--yes", "-y")
+		planOnly := takeBoolFlag(&rest, "--plan", "")
+		if len(rest) != 1 {
+			return fail(stdout, stderr, jsonOut, argumentCountError("commerce install-scenario requires scenario id", []string{"scenario"}, commerceInstallScenarioFlags()))
+		}
+		if planOnly {
+			plan, err := service.PlanCapabilityScenarioInstall(rest[0])
+			if err != nil {
+				return fail(stdout, stderr, jsonOut, err)
+			}
+			if jsonOut {
+				return writeJSON(stdout, core.NewResponse(plan, plan.Warnings), 0)
+			}
+			printCapabilityScenarioPlan(stdout, plan)
+			return 0
+		}
+		if err := confirmMutation("install-scenario", []string{rest[0]}, yes, jsonOut, stdin, stdout); err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		result, err := service.InstallCapabilityScenario(ctx, rest[0])
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(result, nil), 0)
+		}
+		printCapabilityScenarioInstall(stdout, result)
+		return 0
+	case "scenario-ledger":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		options := takeRecordQueryFlags(&rest, commerceScenarioLedgerFlags())
+		if hasInternalInvalidFlag(rest) {
+			return fail(stdout, stderr, jsonOut, internalFlagError(rest, commerceScenarioLedgerFlags()))
+		}
+		if len(rest) != 1 {
+			return fail(stdout, stderr, jsonOut, argumentCountError("commerce scenario-ledger requires scenario id", []string{"scenario"}, commerceScenarioLedgerFlags()))
+		}
+		ledger, err := service.CapabilityScenarioLedger(rest[0], options)
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(ledger, nil), 0)
+		}
+		printCapabilityScenarioLedger(stdout, ledger)
+		return 0
 	case "install-records":
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
@@ -668,14 +759,15 @@ func runCommerce(ctx context.Context, service *core.Service, args []string, stdi
 		if len(rest) > 0 {
 			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected commerce install-records arguments", rest, commerceRecordFlags()))
 		}
-		records, err := service.ListInstallRecords(options)
+		result, err := service.ListInstallRecordsWithIntegrity(options)
 		if err != nil {
 			return fail(stdout, stderr, jsonOut, err)
 		}
 		if jsonOut {
-			return writeJSON(stdout, core.NewResponse(records, nil), 0)
+			return writeJSON(stdout, core.NewResponse(result, nil), 0)
 		}
-		printInstallRecords(stdout, records)
+		printInstallRecords(stdout, result.Records)
+		printLedgerIntegrity(stdout, result.Integrity)
 		return 0
 	case "billing-records":
 		rest := args[1:]
@@ -695,6 +787,7 @@ func runCommerce(ctx context.Context, service *core.Service, args []string, stdi
 			return writeJSON(stdout, core.NewResponse(records, nil), 0)
 		}
 		printBillingRecords(stdout, records)
+		printLedgerIntegrity(stdout, records.Integrity)
 		return 0
 	case "snapshot":
 		rest := args[1:]
@@ -751,19 +844,35 @@ func runCommerce(ctx context.Context, service *core.Service, args []string, stdi
 }
 
 func commerceSubcommands() []string {
-	return []string{"packs", "install-pack", "install-records", "billing-records", "snapshot", "serve"}
+	return []string{"packs", "scenarios", "install-pack", "install-scenario", "scenario-ledger", "install-records", "billing-records", "snapshot", "serve"}
+}
+
+func commercePackFlags() []string {
+	return []string{"--json", "--pack-id"}
 }
 
 func commerceInstallPackFlags() []string {
 	return []string{"--json", "--yes", "-y", "--plan"}
 }
 
+func commerceInstallScenarioFlags() []string {
+	return []string{"--json", "--yes", "-y", "--plan"}
+}
+
+func commerceScenarioFlags() []string {
+	return []string{"--json", "--scenario-id", "--pack-id"}
+}
+
+func commerceScenarioLedgerFlags() []string {
+	return []string{"--json", "--pack-id", "--scenario-id", "--skill", "--status", "--type", "--currency", "--from", "--to", "--limit"}
+}
+
 func commerceRecordFlags() []string {
-	return []string{"--json", "--pack-id", "--skill", "--status", "--type", "--currency", "--from", "--to", "--limit"}
+	return []string{"--json", "--pack-id", "--scenario-id", "--skill", "--status", "--type", "--currency", "--from", "--to", "--limit"}
 }
 
 func commerceSnapshotFlags() []string {
-	return []string{"--json", "--pack-id", "--skill", "--status", "--type", "--currency", "--from", "--to", "--limit", "--out"}
+	return []string{"--json", "--pack-id", "--scenario-id", "--skill", "--status", "--type", "--currency", "--from", "--to", "--limit", "--out"}
 }
 
 func commerceServeFlags() []string {
@@ -777,6 +886,7 @@ func takeRecordQueryFlags(args *[]string, flags []string) core.RecordQueryOption
 
 func takeRecordQueryFlagsWithKnown(args *[]string, known map[string]bool) core.RecordQueryOptions {
 	packID := takeStringFlag(args, "--pack-id", "", known)
+	scenarioID := takeStringFlag(args, "--scenario-id", "", known)
 	skill := takeStringFlag(args, "--skill", "", known)
 	status := takeStringFlag(args, "--status", "", known)
 	recordType := takeStringFlag(args, "--type", "", known)
@@ -784,7 +894,62 @@ func takeRecordQueryFlagsWithKnown(args *[]string, known map[string]bool) core.R
 	from := takeStringFlag(args, "--from", "", known)
 	to := takeStringFlag(args, "--to", "", known)
 	limit := takeIntFlag(args, "--limit", 100, known)
-	return core.RecordQueryOptions{PackID: packID, Skill: skill, Status: status, Type: recordType, Currency: currency, From: from, To: to, Limit: limit}
+	return core.RecordQueryOptions{PackID: packID, ScenarioID: scenarioID, Skill: skill, Status: status, Type: recordType, Currency: currency, From: from, To: to, Limit: limit}
+}
+
+func capabilityScenariosForCLI(service *core.Service, scenarioID, packID string) ([]core.CapabilityScenarioView, error) {
+	var scenarios []core.CapabilityScenarioView
+	if strings.TrimSpace(scenarioID) != "" {
+		scenario, err := service.GetCapabilityScenario(scenarioID)
+		if err != nil {
+			return nil, err
+		}
+		scenarios = []core.CapabilityScenarioView{scenario}
+	} else {
+		var err error
+		scenarios, err = service.ListCapabilityScenarios()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if strings.TrimSpace(packID) == "" {
+		return scenarios, nil
+	}
+	pack, err := service.GetCapabilityPack(packID)
+	if err != nil {
+		return nil, err
+	}
+	filtered := scenarios[:0]
+	for _, scenario := range scenarios {
+		if scenarioMatchesPackForCLI(scenario, pack.Pack) {
+			filtered = append(filtered, scenario)
+		}
+	}
+	return filtered, nil
+}
+
+func scenarioMatchesPackForCLI(scenario core.CapabilityScenarioView, pack core.CapabilityPack) bool {
+	if strings.EqualFold(strings.TrimSpace(scenario.RecommendedPack.Pack.ID), strings.TrimSpace(pack.ID)) {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(pack.Tier)) {
+	case "standard", "advanced":
+		return false
+	}
+	recommended := scenario.RecommendedPack.Pack.SkillNames
+	for _, packSkill := range pack.SkillNames {
+		for _, recommendedSkill := range recommended {
+			if strings.EqualFold(strings.TrimSpace(packSkill), strings.TrimSpace(recommendedSkill)) {
+				return true
+			}
+		}
+		for _, scenarioSkill := range scenario.Scenario.Skills {
+			if strings.EqualFold(strings.TrimSpace(packSkill), strings.TrimSpace(scenarioSkill.Name)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func serveCommerceHTTP(ctx context.Context, service *core.Service, addr, allowedOrigin string, jsonOut bool, stdout io.Writer) error {
@@ -1172,6 +1337,8 @@ func mutationFlags(action string) []string {
 		return rollbackFlags()
 	case "install-pack":
 		return commerceInstallPackFlags()
+	case "install-scenario":
+		return commerceInstallScenarioFlags()
 	default:
 		return []string{"--json", "--yes", "-y"}
 	}
@@ -1292,13 +1459,79 @@ func printCapabilityPacks(stdout io.Writer, packs []core.CapabilityPackView) {
 	}
 }
 
+func printCapabilityScenarios(stdout io.Writer, scenarios []core.CapabilityScenarioView) {
+	if len(scenarios) == 0 {
+		fmt.Fprintln(stdout, "No capability scenarios found.")
+		return
+	}
+	for _, view := range scenarios {
+		status := "ready"
+		if !view.Ready {
+			status = "needs_install"
+		}
+		fmt.Fprintf(stdout, "%s\t%s\t%s\tpack=%s\tmissing=%d\t%s\n", view.Scenario.ID, view.Scenario.Industry, status, view.RecommendedPack.Pack.ID, len(view.MissingSkills), view.Scenario.Summary)
+		for _, input := range view.Scenario.Inputs {
+			required := "optional"
+			if input.Required {
+				required = "required"
+			}
+			fmt.Fprintf(stdout, "  input\t%s\t%s", input.ID, required)
+			if len(input.Formats) > 0 {
+				fmt.Fprintf(stdout, "\tformats=%s", strings.Join(input.Formats, ","))
+			}
+			fmt.Fprintf(stdout, "\t%s\n", input.Label)
+		}
+		for _, deliverable := range view.Scenario.Deliverables {
+			required := "optional"
+			if deliverable.Required {
+				required = "required"
+			}
+			fmt.Fprintf(stdout, "  deliverable\t%s\t%s", deliverable.ID, required)
+			if len(deliverable.Formats) > 0 {
+				fmt.Fprintf(stdout, "\tformats=%s", strings.Join(deliverable.Formats, ","))
+			}
+			fmt.Fprintf(stdout, "\t%s\n", deliverable.Label)
+		}
+		for _, step := range view.Scenario.Workflow {
+			fmt.Fprintf(stdout, "  step\t%s\t%s\t%s", step.ID, step.Stage, step.Title)
+			if len(step.Skills) > 0 {
+				fmt.Fprintf(stdout, "\tskills=%s", strings.Join(step.Skills, ","))
+			}
+			fmt.Fprintln(stdout)
+		}
+		for _, skill := range view.Scenario.Skills {
+			line := fmt.Sprintf("  %s\t%s\t%s\t%s", skill.Name, skill.Priority, skill.Role, skill.Stage)
+			if skill.Condition != "" {
+				line += "\tif=" + skill.Condition
+			}
+			fmt.Fprintln(stdout, line)
+		}
+		for _, criterion := range view.Scenario.AcceptanceCriteria {
+			fmt.Fprintf(stdout, "  acceptance\t%s\n", criterion)
+		}
+		for _, total := range view.BillingPreviewTotals {
+			fmt.Fprintf(stdout, "  billing_preview\t%s\t%d records\t%d\n", total.Currency, total.Records, total.GrossAmountMinor)
+		}
+		for _, warning := range view.Warnings {
+			fmt.Fprintf(stdout, "  warning\t%s\n", warning)
+		}
+	}
+}
+
 func printCapabilityPackInstall(stdout io.Writer, result core.CapabilityPackInstallResult) {
 	fmt.Fprintf(stdout, "%s %s installed=%t\n", result.Pack.Pack.ID, result.Pack.Pack.Tier, result.Pack.Installed)
+	if result.InstallRecord != nil && result.InstallRecord.ScenarioID != "" {
+		fmt.Fprintf(stdout, "  install_record\t%s\t%s\tscenario=%s\n", result.InstallRecord.Action, result.InstallRecord.Status, result.InstallRecord.ScenarioID)
+	}
 	for _, item := range result.Results {
 		fmt.Fprintf(stdout, "  %s\t%s\t%s\n", item.Name, item.Version, item.Status)
 	}
 	for _, record := range result.BillingRecords {
-		fmt.Fprintf(stdout, "  billing\t%s\t%s\t%s\t%d\n", record.Type, record.Meter, valueOrDash(record.Currency), record.GrossAmountMinor)
+		fmt.Fprintf(stdout, "  billing\t%s\t%s\t%s\t%d", record.Type, record.Meter, valueOrDash(record.Currency), record.GrossAmountMinor)
+		if record.ScenarioID != "" {
+			fmt.Fprintf(stdout, "\tscenario=%s", record.ScenarioID)
+		}
+		fmt.Fprintln(stdout)
 	}
 }
 
@@ -1315,6 +1548,64 @@ func printCapabilityPackPlan(stdout io.Writer, plan core.CapabilityPackInstallPl
 	}
 }
 
+func printCapabilityScenarioPlan(stdout io.Writer, plan core.CapabilityScenarioInstallPlan) {
+	fmt.Fprintf(stdout, "%s plan:\n", plan.Scenario.Scenario.ID)
+	fmt.Fprintf(stdout, "  scenario\t%s\t%s\n", plan.Scenario.Scenario.Name, plan.Scenario.Scenario.Industry)
+	fmt.Fprintf(stdout, "  pack\t%s\t%s\tready=%t\n", plan.PackPlan.Pack.Pack.ID, plan.PackPlan.Pack.Pack.Tier, plan.Scenario.Ready)
+	for _, change := range plan.PackPlan.Changes {
+		fmt.Fprintf(stdout, "  %s\t%s\t%s -> %s\n", change.Name, change.Status, valueOrDash(change.CurrentVersion), valueOrDash(change.TargetVersion))
+	}
+	for _, record := range plan.PackPlan.BillingPreview {
+		fmt.Fprintf(stdout, "  billing_preview\t%s\t%s\t%s\t%d", record.Type, record.Meter, valueOrDash(record.Currency), record.GrossAmountMinor)
+		if record.ScenarioID != "" {
+			fmt.Fprintf(stdout, "\tscenario=%s", record.ScenarioID)
+		}
+		fmt.Fprintln(stdout)
+	}
+	for _, warning := range plan.Warnings {
+		fmt.Fprintf(stdout, "  warning\t%s\n", warning)
+	}
+}
+
+func printCapabilityScenarioInstall(stdout io.Writer, result core.CapabilityScenarioInstallResult) {
+	fmt.Fprintf(stdout, "%s installed pack=%s ready=%t\n", result.Scenario.Scenario.ID, result.PackInstall.Pack.Pack.ID, result.Scenario.Ready)
+	if result.PackInstall.InstallRecord != nil {
+		record := result.PackInstall.InstallRecord
+		fmt.Fprintf(stdout, "  install_record\t%s\t%s\tpack=%s", record.Action, record.Status, record.PackID)
+		if record.ScenarioID != "" {
+			fmt.Fprintf(stdout, "\tscenario=%s", record.ScenarioID)
+		}
+		fmt.Fprintln(stdout)
+	}
+	for _, item := range result.PackInstall.Results {
+		fmt.Fprintf(stdout, "  %s\t%s\t%s\n", item.Name, item.Version, item.Status)
+	}
+	for _, record := range result.PackInstall.BillingRecords {
+		fmt.Fprintf(stdout, "  billing\t%s\t%s\t%s\t%d", record.Type, record.Meter, valueOrDash(record.Currency), record.GrossAmountMinor)
+		if record.ScenarioID != "" {
+			fmt.Fprintf(stdout, "\tscenario=%s", record.ScenarioID)
+		}
+		fmt.Fprintln(stdout)
+	}
+}
+
+func printCapabilityScenarioLedger(stdout io.Writer, ledger core.CapabilityScenarioLedger) {
+	fmt.Fprintf(stdout, "%s ledger %s\n", ledger.Scenario.Scenario.ID, ledger.GeneratedAt)
+	fmt.Fprintf(stdout, "pack: %s\tready=%t\n", ledger.Scenario.RecommendedPack.Pack.ID, ledger.Scenario.Ready)
+	if ledger.LatestInstall != nil {
+		fmt.Fprintf(stdout, "latest_install: %s\t%s\t%s\n", ledger.LatestInstall.OccurredAt, ledger.LatestInstall.Action, ledger.LatestInstall.Status)
+	} else {
+		fmt.Fprintln(stdout, "latest_install: -")
+	}
+	fmt.Fprintf(stdout, "install_records: %d\n", len(ledger.InstallRecords))
+	fmt.Fprintf(stdout, "billing_records: %d\n", len(ledger.Billing.Records))
+	fmt.Fprintf(stdout, "pack_install_records: %d\n", len(ledger.PackInstallRecords))
+	fmt.Fprintf(stdout, "usage_records: %d\n", len(ledger.UsageRecords))
+	for _, total := range ledger.Billing.Totals {
+		fmt.Fprintf(stdout, "billing_total: %s\t%d records\t%d\n", total.Currency, total.Records, total.GrossAmountMinor)
+	}
+}
+
 func printInstallRecords(stdout io.Writer, records []core.InstallRecord) {
 	if len(records) == 0 {
 		fmt.Fprintln(stdout, "No install records found.")
@@ -1325,7 +1616,11 @@ func printInstallRecords(stdout io.Writer, records []core.InstallRecord) {
 		if target == "" {
 			target = record.SkillName
 		}
-		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", record.OccurredAt, record.Action, valueOrDash(target), record.Status)
+		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s", record.OccurredAt, record.Action, valueOrDash(target), record.Status)
+		if record.ScenarioID != "" {
+			fmt.Fprintf(stdout, "\tscenario=%s", record.ScenarioID)
+		}
+		fmt.Fprintln(stdout)
 		for _, skill := range record.Skills {
 			fmt.Fprintf(stdout, "  %s\t%s\t%s\n", skill.Name, valueOrDash(skill.Version), skill.Status)
 		}
@@ -1342,7 +1637,11 @@ func printBillingRecords(stdout io.Writer, result core.BillingRecordListResult) 
 		if record.SkillName != "" {
 			target = record.SkillName
 		}
-		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%.4g\t%s\t%d\t%s\n", record.OccurredAt, record.Type, valueOrDash(target), record.Meter, record.Quantity, valueOrDash(record.Currency), record.GrossAmountMinor, record.Status)
+		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%.4g\t%s\t%d\t%s", record.OccurredAt, record.Type, valueOrDash(target), record.Meter, record.Quantity, valueOrDash(record.Currency), record.GrossAmountMinor, record.Status)
+		if record.ScenarioID != "" {
+			fmt.Fprintf(stdout, "\tscenario=%s", record.ScenarioID)
+		}
+		fmt.Fprintln(stdout)
 	}
 	if len(result.Totals) > 0 {
 		fmt.Fprintln(stdout, "Totals:")
@@ -1352,13 +1651,27 @@ func printBillingRecords(stdout io.Writer, result core.BillingRecordListResult) 
 	}
 }
 
+func printLedgerIntegrity(stdout io.Writer, integrity *core.LedgerIntegritySummary) {
+	if integrity == nil {
+		return
+	}
+	fmt.Fprintf(stdout, "integrity: %s\tledger=%s\tverified=%d\tfailed=%d\tlegacy_unsigned=%d\n", integrity.Status, integrity.Ledger, integrity.Verified, integrity.Failed, integrity.LegacyUnsigned)
+	if integrity.Reason != "" {
+		fmt.Fprintf(stdout, "integrity_reason: %s\n", integrity.Reason)
+	}
+}
+
 func printCommerceSnapshot(stdout io.Writer, snapshot core.CapabilityCommerceSnapshot) {
 	fmt.Fprintf(stdout, "commerce snapshot %s\n", snapshot.GeneratedAt)
 	fmt.Fprintf(stdout, "packs: %d\n", len(snapshot.Packs))
-	fmt.Fprintf(stdout, "install_records: %d\n", len(snapshot.InstallRecords))
+	fmt.Fprintf(stdout, "install_records: %d\n", len(snapshot.InstallRecords.Records))
 	fmt.Fprintf(stdout, "billing_records: %d\n", len(snapshot.Billing.Records))
 	for _, total := range snapshot.Billing.Totals {
 		fmt.Fprintf(stdout, "billing_total: %s\t%d records\t%d\n", total.Currency, total.Records, total.GrossAmountMinor)
+	}
+	for _, integrity := range snapshot.Integrity {
+		item := integrity
+		printLedgerIntegrity(stdout, &item)
 	}
 }
 
@@ -1688,9 +2001,12 @@ Usage:
   agtx config init|show|path|keys|set|unset [--json]
   agtx registry sources|refresh|validate [--json]
   agtx commerce packs [--json]
+  agtx commerce scenarios [--scenario-id id] [--pack-id id] [--json]
   agtx commerce install-pack <pack> [--plan] [--yes] [--json]
-  agtx commerce install-records|billing-records [--pack-id id] [--skill name] [--limit N] [--json]
-  agtx commerce snapshot [--pack-id id] [--skill name] [--limit N] [--out path] [--json]
+  agtx commerce install-scenario <scenario> [--plan] [--yes] [--json]
+  agtx commerce scenario-ledger <scenario> [--type type] [--limit N] [--json]
+  agtx commerce install-records|billing-records [--pack-id id] [--scenario-id id] [--skill name] [--limit N] [--json]
+  agtx commerce snapshot [--pack-id id] [--scenario-id id] [--skill name] [--limit N] [--out path] [--json]
   agtx commerce serve [--addr host:port] [--allow-origin origin] [--json]
   agtx pro login [--open] [--json]
   agtx pro callback <agtx://pro/callback?...> [--json]

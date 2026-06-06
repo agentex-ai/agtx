@@ -177,6 +177,9 @@ func (s *Service) InstallSkills(ctx context.Context, names []string) ([]InstallR
 	}
 	results := make([]InstallResult, 0, len(names))
 	err := s.withMutationLock(func() error {
+		if err := s.ensureCommerceLedgersAppendable(); err != nil {
+			return err
+		}
 		for _, name := range names {
 			result, err := s.installSkill(ctx, name)
 			if err != nil {
@@ -184,7 +187,7 @@ func (s *Service) InstallSkills(ctx context.Context, names []string) ([]InstallR
 			}
 			results = append(results, result)
 			if result.Status == "installed" {
-				if err := s.appendInstallRecord(installRecordForSkill(result, s.Auth.DeviceID)); err != nil {
+				if _, err := s.appendInstallRecord(installRecordForSkill(result, s.Auth.DeviceID)); err != nil {
 					return err
 				}
 			}
@@ -502,6 +505,11 @@ func (s *Service) RunSkill(ctx context.Context, name string, args []string, inpu
 
 func (s *Service) RunSkillWithOptions(ctx context.Context, name string, options RunOptions) (RunResult, error) {
 	start := time.Now()
+	scenarioID, err := canonicalRunScenarioID(options.ScenarioID)
+	if err != nil {
+		return RunResult{}, err
+	}
+	options.ScenarioID = scenarioID
 	if options.Timeout <= 0 {
 		options.Timeout = time.Duration(s.Config.RunTimeoutMS) * time.Millisecond
 	}
@@ -522,7 +530,7 @@ func (s *Service) RunSkillWithOptions(ctx context.Context, name string, options 
 	if _, err := validateSkillManifest(manifest); err != nil {
 		return RunResult{Name: manifest.Name, Version: manifest.Version, Stub: manifest.Stub}, err
 	}
-	result := RunResult{Name: manifest.Name, Version: manifest.Version, Stub: manifest.Stub, InvocationID: NewTraceID()}
+	result := RunResult{Name: manifest.Name, Version: manifest.Version, Stub: manifest.Stub, ScenarioID: scenarioID, InvocationID: NewTraceID()}
 	if manifest.Stub {
 		result.DurationMS = time.Since(start).Milliseconds()
 		return result, NewError(CodeNotImplemented, "skill is installed as a v1 stub; native package is not published yet", map[string]any{"skill": manifest.Name, "version": manifest.Version})
@@ -538,6 +546,7 @@ func (s *Service) RunSkillWithOptions(ctx context.Context, name string, options 
 	runResult.Name = manifest.Name
 	runResult.Version = manifest.Version
 	runResult.Stub = false
+	runResult.ScenarioID = scenarioID
 	runResult.InvocationID = result.InvocationID
 	runResult.DurationMS = time.Since(start).Milliseconds()
 	runResult.TimeoutMS = options.Timeout.Milliseconds()
@@ -547,11 +556,26 @@ func (s *Service) RunSkillWithOptions(ctx context.Context, name string, options 
 	}
 	runResult.UsageEvents = s.recordRunUsage(ctx, manifest, runResult)
 	if len(runResult.UsageEvents) > 0 {
-		if err := s.appendBillingRecords(billingRecordsForUsage(manifest, runResult, runResult.UsageEvents)); err != nil {
+		if err := s.withMutationLock(func() error {
+			_, err := s.appendBillingRecords(billingRecordsForUsage(manifest, runResult, runResult.UsageEvents))
+			return err
+		}); err != nil {
 			return runResult, err
 		}
 	}
 	return runResult, nil
+}
+
+func canonicalRunScenarioID(id string) (string, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", nil
+	}
+	scenario, ok := findCapabilityScenario(id)
+	if !ok {
+		return "", NewError(CodeNotFound, "capability scenario not found", map[string]any{"scenario": id, "supported_scenarios": capabilityScenarioIDs()})
+	}
+	return scenario.ID, nil
 }
 
 func (s *Service) Status() (Status, error) {

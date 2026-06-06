@@ -715,8 +715,12 @@ func TestCommercePacksJSON(t *testing.T) {
 		OK   bool `json:"ok"`
 		Data []struct {
 			Pack struct {
-				ID   string `json:"id"`
-				Tier string `json:"tier"`
+				ID              string   `json:"id"`
+				Tier            string   `json:"tier"`
+				CapabilityClass string   `json:"capability_class"`
+				UseWhen         string   `json:"use_when"`
+				Inputs          []string `json:"inputs"`
+				Outputs         []string `json:"outputs"`
 			} `json:"pack"`
 			Installed bool `json:"installed"`
 			Skills    []struct {
@@ -727,11 +731,126 @@ func TestCommercePacksJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid commerce packs json: %v\n%s", err, stdout.String())
 	}
-	if !response.OK || len(response.Data) != 2 || response.Data[0].Pack.ID != "standard" || response.Data[1].Pack.ID != "advanced" {
+	if !response.OK || len(response.Data) != 13 || response.Data[0].Pack.ID != "web_search" || response.Data[9].Pack.ID != "pdf" || response.Data[11].Pack.ID != "standard" || response.Data[12].Pack.ID != "advanced" {
 		t.Fatalf("unexpected packs response: %s", stdout.String())
 	}
-	if response.Data[0].Installed || len(response.Data[0].Skills) == 0 {
+	if response.Data[0].Installed || len(response.Data[0].Skills) == 0 || response.Data[0].Pack.UseWhen == "" || len(response.Data[0].Pack.Inputs) == 0 || len(response.Data[0].Pack.Outputs) == 0 {
 		t.Fatalf("expected uninstalled pack with skills: %s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "packs", "--pack-id", "pdf", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("commerce packs filter failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var filtered struct {
+		OK   bool `json:"ok"`
+		Data []struct {
+			Pack struct {
+				ID string `json:"id"`
+			} `json:"pack"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &filtered); err != nil {
+		t.Fatalf("invalid filtered commerce packs json: %v\n%s", err, stdout.String())
+	}
+	if !filtered.OK || len(filtered.Data) != 1 || filtered.Data[0].Pack.ID != "pdf" {
+		t.Fatalf("unexpected filtered packs response: %s", stdout.String())
+	}
+}
+
+func TestCommerceScenariosJSON(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"commerce", "scenarios", "--scenario-id", "meeting_deck", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("commerce scenarios failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var response struct {
+		OK   bool `json:"ok"`
+		Data []struct {
+			Scenario struct {
+				ID                string `json:"id"`
+				RecommendedPackID string `json:"recommended_pack_id"`
+				Inputs            []struct {
+					ID       string `json:"id"`
+					Required bool   `json:"required"`
+				} `json:"inputs"`
+				Deliverables []struct {
+					ID string `json:"id"`
+				} `json:"deliverables"`
+				Workflow []struct {
+					ID string `json:"id"`
+				} `json:"workflow"`
+				AcceptanceCriteria []string `json:"acceptance_criteria"`
+			} `json:"scenario"`
+			RecommendedPack struct {
+				Pack struct {
+					ID string `json:"id"`
+				} `json:"pack"`
+			} `json:"recommended_pack"`
+			InstallPlan struct {
+				Action string `json:"action"`
+			} `json:"install_plan"`
+			MissingSkills []struct {
+				Name string `json:"name"`
+			} `json:"missing_skills"`
+			Ready                bool `json:"ready"`
+			BillingPreviewTotals []struct {
+				Currency string `json:"currency"`
+			} `json:"billing_preview_totals"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid commerce scenarios json: %v\n%s", err, stdout.String())
+	}
+	if !response.OK || len(response.Data) != 1 || response.Data[0].Scenario.ID != "meeting_to_presentation" || response.Data[0].RecommendedPack.Pack.ID != "advanced" {
+		t.Fatalf("unexpected scenario response: %s", stdout.String())
+	}
+	if response.Data[0].Ready || len(response.Data[0].MissingSkills) == 0 || response.Data[0].InstallPlan.Action != "install_pack" || len(response.Data[0].BillingPreviewTotals) != 2 {
+		t.Fatalf("expected scenario install readiness and billing preview: %s", stdout.String())
+	}
+	if len(response.Data[0].Scenario.Inputs) == 0 || len(response.Data[0].Scenario.Deliverables) == 0 || len(response.Data[0].Scenario.Workflow) == 0 || len(response.Data[0].Scenario.AcceptanceCriteria) == 0 {
+		t.Fatalf("expected scenario workflow metadata: %s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "scenarios", "--scenario-id", "invoice"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("commerce scenarios text failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	for _, expected := range []string{"input\tvendor_invoices", "deliverable\tinvoice_extract", "step\tintake_documents", "acceptance\tEvery payable line"} {
+		if !bytes.Contains(stdout.Bytes(), []byte(expected)) {
+			t.Fatalf("expected scenario text output to contain %q: %s", expected, stdout.String())
+		}
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "scenarios", "--pack-id", "standard", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("commerce scenario pack filter failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var filtered struct {
+		OK   bool `json:"ok"`
+		Data []struct {
+			RecommendedPack struct {
+				Pack struct {
+					ID string `json:"id"`
+				} `json:"pack"`
+			} `json:"recommended_pack"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &filtered); err != nil {
+		t.Fatalf("invalid filtered scenario json: %v\n%s", err, stdout.String())
+	}
+	if !filtered.OK || len(filtered.Data) == 0 {
+		t.Fatalf("expected standard scenarios: %s", stdout.String())
+	}
+	for _, scenario := range filtered.Data {
+		if scenario.RecommendedPack.Pack.ID != "standard" {
+			t.Fatalf("pack filter returned non-standard scenario: %s", stdout.String())
+		}
 	}
 }
 
@@ -793,6 +912,186 @@ func TestCommerceInstallPackPlanJSON(t *testing.T) {
 	}
 	if !response.OK || response.Data.Action != "install_pack" || response.Data.Pack.Pack.ID != "standard" || len(response.Data.Changes) == 0 || len(response.Data.BillingPreview) != 2 || !containsString(response.Data.Requires, "confirmation") {
 		t.Fatalf("unexpected pack plan response: %s", stdout.String())
+	}
+}
+
+func TestCommerceInstallScenarioPlanAndRecordsJSON(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"commerce", "install-scenario", "invoice", "--plan", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("scenario plan failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var plan struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Action   string `json:"action"`
+			Scenario struct {
+				Scenario struct {
+					ID string `json:"id"`
+				} `json:"scenario"`
+			} `json:"scenario"`
+			PackPlan struct {
+				Pack struct {
+					Pack struct {
+						ID string `json:"id"`
+					} `json:"pack"`
+				} `json:"pack"`
+				BillingPreview []struct {
+					ScenarioID string `json:"scenario_id"`
+				} `json:"billing_preview"`
+			} `json:"pack_plan"`
+			Requires []string `json:"requires"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("invalid scenario plan json: %v\n%s", err, stdout.String())
+	}
+	if !plan.OK || plan.Data.Action != "install_scenario" || plan.Data.Scenario.Scenario.ID != "invoice_processing" || plan.Data.PackPlan.Pack.Pack.ID != "standard" || len(plan.Data.PackPlan.BillingPreview) != 2 || plan.Data.PackPlan.BillingPreview[0].ScenarioID != "invoice_processing" || !containsString(plan.Data.Requires, "confirmation") {
+		t.Fatalf("unexpected scenario plan response: %s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "install-scenario", "invoice", "--yes", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("scenario install failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var install struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Scenario struct {
+				Scenario struct {
+					ID string `json:"id"`
+				} `json:"scenario"`
+				Ready bool `json:"ready"`
+			} `json:"scenario"`
+			PackInstall struct {
+				InstallRecord struct {
+					Action     string `json:"action"`
+					PackID     string `json:"pack_id"`
+					ScenarioID string `json:"scenario_id"`
+				} `json:"install_record"`
+				BillingRecords []struct {
+					ScenarioID string `json:"scenario_id"`
+				} `json:"billing_records"`
+			} `json:"pack_install"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &install); err != nil {
+		t.Fatalf("invalid scenario install json: %v\n%s", err, stdout.String())
+	}
+	if !install.OK || install.Data.Scenario.Scenario.ID != "invoice_processing" || !install.Data.Scenario.Ready || install.Data.PackInstall.InstallRecord.Action != "install_scenario" || install.Data.PackInstall.InstallRecord.PackID != "standard" || install.Data.PackInstall.InstallRecord.ScenarioID != "invoice_processing" || len(install.Data.PackInstall.BillingRecords) != 2 || install.Data.PackInstall.BillingRecords[0].ScenarioID != "invoice_processing" {
+		t.Fatalf("unexpected scenario install response: %s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "scenario-ledger", "invoice", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("scenario ledger failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var ledger struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Scenario struct {
+				Scenario struct {
+					ID string `json:"id"`
+				} `json:"scenario"`
+			} `json:"scenario"`
+			LatestInstall struct {
+				Action     string `json:"action"`
+				ScenarioID string `json:"scenario_id"`
+			} `json:"latest_install"`
+			InstallRecords []struct {
+				ScenarioID string `json:"scenario_id"`
+			} `json:"install_records"`
+			Billing struct {
+				Records []struct {
+					ScenarioID string `json:"scenario_id"`
+				} `json:"records"`
+				Totals []struct {
+					Currency string `json:"currency"`
+				} `json:"totals"`
+			} `json:"billing"`
+			PackInstallRecords []struct {
+				Type string `json:"type"`
+			} `json:"pack_install_records"`
+			UsageRecords []struct {
+				Type string `json:"type"`
+			} `json:"usage_records"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &ledger); err != nil {
+		t.Fatalf("invalid scenario ledger json: %v\n%s", err, stdout.String())
+	}
+	if !ledger.OK || ledger.Data.Scenario.Scenario.ID != "invoice_processing" || ledger.Data.LatestInstall.Action != "install_scenario" || ledger.Data.LatestInstall.ScenarioID != "invoice_processing" {
+		t.Fatalf("unexpected scenario ledger response: %s", stdout.String())
+	}
+	if len(ledger.Data.InstallRecords) != 1 || len(ledger.Data.Billing.Records) != 2 || len(ledger.Data.Billing.Totals) != 2 || len(ledger.Data.PackInstallRecords) != 2 || len(ledger.Data.UsageRecords) != 0 {
+		t.Fatalf("expected scenario ledger records and totals: %s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "scenario-ledger", "invoice", "--type", "pack_install"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("scenario ledger text failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	for _, expected := range []string{"invoice_processing ledger", "latest_install:", "billing_records: 2", "pack_install_records: 2"} {
+		if !bytes.Contains(stdout.Bytes(), []byte(expected)) {
+			t.Fatalf("expected scenario ledger text output to contain %q: %s", expected, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "install-records", "--scenario-id", "invoice_processing", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("scenario install records failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var installs struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Records []struct {
+				Action     string `json:"action"`
+				ScenarioID string `json:"scenario_id"`
+			} `json:"records"`
+			Integrity struct {
+				Status string `json:"status"`
+			} `json:"integrity"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &installs); err != nil {
+		t.Fatalf("invalid scenario install records json: %v\n%s", err, stdout.String())
+	}
+	if !installs.OK || len(installs.Data.Records) != 1 || installs.Data.Records[0].Action != "install_scenario" || installs.Data.Records[0].ScenarioID != "invoice_processing" || installs.Data.Integrity.Status == "" {
+		t.Fatalf("unexpected scenario install records: %s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "billing-records", "--scenario-id", "invoice_processing", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("scenario billing records failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var billing struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Records []struct {
+				ScenarioID string `json:"scenario_id"`
+			} `json:"records"`
+			Totals []struct {
+				Currency string `json:"currency"`
+			} `json:"totals"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &billing); err != nil {
+		t.Fatalf("invalid scenario billing records json: %v\n%s", err, stdout.String())
+	}
+	if !billing.OK || len(billing.Data.Records) != 2 || billing.Data.Records[0].ScenarioID != "invoice_processing" || len(billing.Data.Totals) != 2 {
+		t.Fatalf("unexpected scenario billing records: %s", stdout.String())
 	}
 }
 
@@ -967,6 +1266,9 @@ func TestHelpShowsDetailedProUsage(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte(`agtx commerce install-pack <pack> [--plan] [--yes] [--json]`)) {
 		t.Fatalf("expected commerce usage: %s", stdout.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`agtx commerce install-scenario <scenario> [--plan] [--yes] [--json]`)) {
+		t.Fatalf("expected commerce scenario install usage: %s", stdout.String())
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte(`agtx commerce serve [--addr host:port] [--allow-origin origin] [--json]`)) {
 		t.Fatalf("expected commerce serve usage: %s", stdout.String())
@@ -1451,6 +1753,9 @@ func TestDiscoveryHelperListsAreStable(t *testing.T) {
 		"rollback flags":          rollbackFlags(),
 		"config init flags":       configInitFlags(),
 		"pro login flags":         proLoginFlags(),
+		"commerce pack flags":     commercePackFlags(),
+		"commerce scenario flags": commerceScenarioFlags(),
+		"commerce ledger flags":   commerceScenarioLedgerFlags(),
 		"commerce record flags":   commerceRecordFlags(),
 		"commerce snapshot flags": commerceSnapshotFlags(),
 		"commerce serve flags":    commerceServeFlags(),
@@ -1475,7 +1780,7 @@ func TestDiscoveryHelperListsAreStable(t *testing.T) {
 		})
 	}
 	runSet := flagSet(runFlags())
-	for _, flag := range []string{"--json", "--ndjson", "--input", "--timeout-ms", "--output-limit-bytes"} {
+	for _, flag := range []string{"--json", "--ndjson", "--input", "--timeout-ms", "--output-limit-bytes", "--scenario-id"} {
 		if !runSet[flag] {
 			t.Fatalf("run flag set missing %s", flag)
 		}

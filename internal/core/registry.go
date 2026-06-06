@@ -9,12 +9,12 @@ func DefaultRegistry() Registry {
 	return Registry{
 		SchemaVersion: 1,
 		Skills: []SkillManifest{
-			defaultSkill("web_search", "0.1.0", "Web search", "Discover pages and return ranked candidate results for agents and human workflows.", []string{"web", "search", "internet"}, []string{"search", "web", "internet", "browser", "discover", "query", "搜索", "网页", "互联网", "查找"}, []string{"call"}),
-			defaultSkill("web_fetch", "0.1.0", "Web fetch", "Fetch web pages, extract readable text, and return metadata when a page is accessible.", []string{"web", "fetch", "reader"}, []string{"fetch", "read", "article", "url", "html", "page", "webpage", "读取", "网页", "正文", "链接", "抓取"}, []string{"page", "call"}),
+			defaultSkill("web_search", "0.1.0", "Web search", "Discover pages and return ranked candidate results for agents and human workflows.", []string{"web", "search", "internet"}, []string{"search", "web", "web_query", "internet", "browser", "discover", "query", "搜索", "网页", "互联网", "查找"}, []string{"call"}),
+			defaultSkill("web_fetch", "0.1.0", "Web fetch", "Fetch web pages, extract readable text, and return metadata when a page is accessible.", []string{"web", "fetch", "reader"}, []string{"fetch", "read", "web_query", "article", "url", "html", "page", "webpage", "读取", "网页", "正文", "链接", "抓取"}, []string{"page", "call"}),
 			defaultSkill("research", "0.1.0", "Research workflow", "Collect evidence, synthesize findings, and produce structured research notes.", []string{"research", "analysis", "report"}, []string{"research", "report", "analysis", "evidence", "compare", "调研", "研究", "报告", "分析", "证据"}, []string{"task"}),
 			defaultSkill("ocr", "0.1.0", "OCR", "Extract text and coordinates from screenshots, scans, images, and PDF pages.", []string{"vision", "ocr", "image"}, []string{"ocr", "image", "screenshot", "scan", "text", "vision", "图片", "截图", "扫描", "文字", "识别"}, []string{"page"}),
 			defaultSkill("audio", "0.1.0", "Audio ASR/TTS", "Handle speech recognition, speech synthesis, and batch audio processing tasks.", []string{"audio", "asr", "tts"}, []string{"audio", "speech", "transcribe", "voice", "meeting", "notes", "录音", "语音", "转写", "会议", "纪要"}, []string{"minute"}),
-			defaultSkill("imagen", "0.1.0", "Media generation", "Expose image and media generation workflows through a lightweight skill entry.", []string{"image", "media", "generation"}, []string{"image", "generate", "media", "picture", "video", "creator", "图片", "生成", "绘图", "视频", "创作"}, []string{"task", "credit"}),
+			defaultSkill("imagen", "0.1.0", "Media generation", "Expose image and media generation workflows through a lightweight skill entry.", []string{"image", "media", "generation"}, []string{"image", "generate", "mediagen", "media", "picture", "video", "creator", "图片", "生成", "绘图", "视频", "创作"}, []string{"task", "credit"}),
 			defaultSkill("docx", "0.1.0", "Word document", "Read, summarize, and extract structured content from Word documents.", []string{"document", "docx", "word"}, []string{"docx", "word", "document", "summary", "summarize", "contract", "文档", "Word", "摘要", "总结", "合同"}, []string{"task"}),
 			defaultSkill("xlsx", "0.1.0", "Excel spreadsheet", "Read sheets, ranges, and cells from Excel workbooks for structured extraction.", []string{"document", "xlsx", "spreadsheet"}, []string{"xlsx", "excel", "sheet", "spreadsheet", "table", "invoice", "表格", "Excel", "发票", "账单", "数据"}, []string{"task"}),
 			defaultSkill("pptx", "0.1.0", "PowerPoint deck", "Extract slide text, notes, placeholders, and structure from presentation decks.", []string{"document", "pptx", "powerpoint", "slides"}, []string{"pptx", "powerpoint", "slides", "deck", "presentation", "演示", "幻灯片", "课件", "备注"}, []string{"task"}),
@@ -24,12 +24,16 @@ func DefaultRegistry() Registry {
 }
 
 func defaultSkill(name, version, summary, description string, tags, keywords, meters []string) SkillManifest {
+	capabilityClass := "tool"
+	if normalizeName(name) == "research" {
+		capabilityClass = "workflow"
+	}
 	return SkillManifest{
 		SchemaVersion: 1,
 		Name:          name,
 		Version:       version,
 		VendorID:      "agentex",
-		Capability:    &CapabilityInfo{Class: "tool", UseWhen: description},
+		Capability:    &CapabilityInfo{Class: capabilityClass, UseWhen: description},
 		Summary:       summary,
 		Description:   description,
 		Tags:          tags,

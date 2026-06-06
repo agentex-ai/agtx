@@ -20,13 +20,252 @@ const (
 func DefaultCapabilityPacks() []CapabilityPack {
 	return []CapabilityPack{
 		{
-			SchemaVersion: 1,
-			ID:            "standard",
-			Name:          "Agentex Standard Capability Pack",
-			Tier:          "standard",
-			Summary:       "Core document, web, OCR, and research capabilities for everyday agent workflows.",
-			Description:   "Installs the default document, web, OCR, and research skills used by ordinary productivity agents.",
-			SkillNames:    []string{"web_search", "web_fetch", "research", "ocr", "docx", "xlsx", "pdf"},
+			SchemaVersion:   1,
+			ID:              "web_search",
+			Name:            "web_search",
+			Tier:            "first_wave",
+			CapabilityClass: "tool",
+			UseWhen:         "Discover relevant web pages, references, candidate sources, or search-result summaries.",
+			Summary:         "Native web search capability pack for discovering pages, returning candidate results, and giving agents the right starting points.",
+			Description:     "Use when an agent needs to discover relevant pages, official references, or candidate sources before reading or synthesizing evidence.",
+			Inputs:          []string{"natural-language query", "locale", "optional freshness constraints"},
+			Outputs:         []string{"ranked results", "source metadata", "short evidence snippets"},
+			Tags:            []string{"web", "search", "research", "sources"},
+			SkillNames:      []string{"web_search"},
+			Billing: &BillingInfo{
+				Meters: []BillingMeter{
+					{Meter: "call", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Failed search invocations are not billed."},
+				},
+				RevenueShare: &RevenueShare{ISV: 70, Platform: 30, Basis: "net_revenue_after_payment_processor_tax_and_refunds"},
+			},
+			Support: firstPartySupport(),
+		},
+		{
+			SchemaVersion:   1,
+			ID:              "web_fetch",
+			Name:            "web_fetch",
+			Tier:            "first_wave",
+			CapabilityClass: "tool",
+			UseWhen:         "Read a known URL or extract article text and metadata.",
+			Summary:         "Native web fetch capability pack for retrieval, article extraction, metadata parsing, and browser relay when pages are hard to read.",
+			Description:     "Use when the agent already has a URL and needs readable content, canonical metadata, or an authenticated/browser-assisted fallback path.",
+			Inputs:          []string{"URL", "optional session context", "optional browser relay requirement"},
+			Outputs:         []string{"title", "canonical URL", "main content", "metadata", "extraction notes"},
+			Tags:            []string{"web", "fetch", "article", "metadata"},
+			SkillNames:      []string{"web_fetch"},
+			Billing: &BillingInfo{
+				Meters: []BillingMeter{
+					{Meter: "call", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Failed fetch invocations are not billed."},
+					{Meter: "page", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Pages that fail extraction are not billed."},
+				},
+				RevenueShare: &RevenueShare{ISV: 70, Platform: 30, Basis: "net_revenue_after_payment_processor_tax_and_refunds"},
+			},
+			Support: firstPartySupport(),
+		},
+		{
+			SchemaVersion:   1,
+			ID:              "research",
+			Name:            "research",
+			Tier:            "first_wave",
+			CapabilityClass: "workflow",
+			UseWhen:         "Handle multi-step evidence gathering, synthesis, product analysis, UI review, or decision support.",
+			Summary:         "Package collection, deep research, UI review, and analysis reports into reusable conclusions.",
+			Description:     "Use when a task needs planning, source selection, evidence synthesis, caveats, comparison, or decision-ready reporting.",
+			Inputs:          []string{"research question", "scope", "depth", "preferred output format"},
+			Outputs:         []string{"structured report", "evidence trail", "caveats", "next actions"},
+			Tags:            []string{"research", "synthesis", "analysis", "report"},
+			SkillNames:      []string{"research"},
+			Billing: &BillingInfo{
+				Meters: []BillingMeter{
+					{Meter: "task", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Failed research tasks are not billed."},
+				},
+				RevenueShare: &RevenueShare{ISV: 70, Platform: 30, Basis: "net_revenue_after_payment_processor_tax_and_refunds"},
+			},
+			Support: firstPartySupport(),
+		},
+		{
+			SchemaVersion:   1,
+			ID:              "ocr",
+			Name:            "ocr",
+			Tier:            "first_wave",
+			CapabilityClass: "tool",
+			UseWhen:         "Extract text from screenshots, scans, PDF pages, UI images, or photos.",
+			Summary:         "Native OCR for screenshots, scans, PDF pages, and UI text, built for document work and automation.",
+			Description:     "Use when text must be recovered from image-like inputs with structure, coordinates, or confidence notes.",
+			Inputs:          []string{"image or page file", "optional language hints"},
+			Outputs:         []string{"text", "structure", "coordinates", "confidence notes"},
+			Tags:            []string{"vision", "ocr", "documents", "screenshots"},
+			SkillNames:      []string{"ocr"},
+			Billing: &BillingInfo{
+				Meters: []BillingMeter{
+					{Meter: "page", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Failed OCR pages are not billed."},
+				},
+				RevenueShare: &RevenueShare{ISV: 70, Platform: 30, Basis: "net_revenue_after_payment_processor_tax_and_refunds"},
+			},
+			Support: firstPartySupport(),
+		},
+		{
+			SchemaVersion:   1,
+			ID:              "audio",
+			Name:            "audio",
+			Tier:            "first_wave",
+			CapabilityClass: "tool",
+			UseWhen:         "Process speech recognition, speech synthesis, meeting notes, or batch audio jobs.",
+			Summary:         "ASR and TTS as native capability packs for speech recognition, synthesis, and batch audio jobs.",
+			Description:     "Use when an agent needs transcripts, synthesized speech, timelines, speaker hints, or audio-derived meeting notes.",
+			Inputs:          []string{"audio file or text", "optional language hints", "optional speaker hints"},
+			Outputs:         []string{"transcript", "synthesized audio", "timeline", "summary notes"},
+			Tags:            []string{"audio", "asr", "tts", "meetings"},
+			SkillNames:      []string{"audio"},
+			Billing: &BillingInfo{
+				Meters: []BillingMeter{
+					{Meter: "minute", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Failed audio minutes are not billed."},
+				},
+				RevenueShare: &RevenueShare{ISV: 70, Platform: 30, Basis: "net_revenue_after_payment_processor_tax_and_refunds"},
+			},
+			Support: firstPartySupport(),
+		},
+		{
+			SchemaVersion:   1,
+			ID:              "imagen",
+			Name:            "imagen",
+			Tier:            "first_wave",
+			CapabilityClass: "tool",
+			UseWhen:         "Generate image, video, or multimodal media assets from prompts or source media.",
+			Summary:         "Text-to-image, image-to-video, and multimodal generation behind one light capability-pack entry.",
+			Description:     "Use when the task is media creation rather than image review, accessibility critique, or generic image search.",
+			Inputs:          []string{"text prompt", "optional source image", "generation category", "optional model or size"},
+			Outputs:         []string{"generated media", "task id", "status", "provider notes"},
+			Tags:            []string{"media", "image", "video", "generation"},
+			SkillNames:      []string{"imagen"},
+			Billing: &BillingInfo{
+				Meters: []BillingMeter{
+					{Meter: "task", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Failed media tasks are not billed."},
+					{Meter: "credit", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Unused or failed generation credits are not billed."},
+				},
+				RevenueShare: &RevenueShare{ISV: 70, Platform: 30, Basis: "net_revenue_after_payment_processor_tax_and_refunds"},
+			},
+			Support: firstPartySupport(),
+		},
+		{
+			SchemaVersion:   1,
+			ID:              "docx",
+			Name:            "docx",
+			Tier:            "first_wave",
+			CapabilityClass: "tool",
+			UseWhen:         "Read, create, edit, template, summarize, convert, or validate Word documents.",
+			Summary:         "Native Word document reading, summarization, structured extraction, and lightweight conversion for contracts, manuals, and long-form notes.",
+			Description:     "Use when a .docx file is the source of truth or final artifact and the task needs native Word-style structure.",
+			Inputs:          []string{"DOCX file", "action", "optional markdown/content", "optional template variables"},
+			Outputs:         []string{"structured text", "metadata", "tables", "comments", "native DOCX artifact"},
+			Tags:            []string{"documents", "docx", "word", "office"},
+			SkillNames:      []string{"docx"},
+			Billing: &BillingInfo{
+				Meters: []BillingMeter{
+					{Meter: "task", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Failed DOCX tasks are not billed."},
+				},
+				RevenueShare: &RevenueShare{ISV: 70, Platform: 30, Basis: "net_revenue_after_payment_processor_tax_and_refunds"},
+			},
+			Support: firstPartySupport(),
+		},
+		{
+			SchemaVersion:   1,
+			ID:              "xlsx",
+			Name:            "xlsx",
+			Tier:            "first_wave",
+			CapabilityClass: "tool",
+			UseWhen:         "Read, create, mutate, analyze, validate, or compare native spreadsheet workbooks.",
+			Summary:         "Native Excel workbook, sheet range, and cell data processing for budgets, operations tables, and batch cleanup.",
+			Description:     "Use when a .xlsx workbook is the source of truth or final artifact and the task needs sheet-aware mutation or analysis.",
+			Inputs:          []string{"XLSX file", "action", "sheet/range/cell references", "optional rows or markdown tables"},
+			Outputs:         []string{"structured rows", "metadata", "tables", "validation findings", "native XLSX artifact"},
+			Tags:            []string{"documents", "xlsx", "spreadsheet", "office"},
+			SkillNames:      []string{"xlsx"},
+			Billing: &BillingInfo{
+				Meters: []BillingMeter{
+					{Meter: "task", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Failed XLSX tasks are not billed."},
+				},
+				RevenueShare: &RevenueShare{ISV: 70, Platform: 30, Basis: "net_revenue_after_payment_processor_tax_and_refunds"},
+			},
+			Support: firstPartySupport(),
+		},
+		{
+			SchemaVersion:   1,
+			ID:              "pptx",
+			Name:            "pptx",
+			Tier:            "first_wave",
+			CapabilityClass: "tool",
+			UseWhen:         "Read, create, edit, duplicate, validate, or update native presentation decks.",
+			Summary:         "Native slide text, speaker notes, image placeholders, and page structure extraction so decks become reliable agent-readable material.",
+			Description:     "Use when a .pptx deck is the source of truth or final artifact and the task needs slide-aware structure or mutation.",
+			Inputs:          []string{"PPTX file", "action", "slide selectors", "optional sections or chart data"},
+			Outputs:         []string{"slide structure", "speaker notes", "placeholders", "chart updates", "native PPTX artifact"},
+			Tags:            []string{"documents", "pptx", "presentation", "slides"},
+			SkillNames:      []string{"pptx"},
+			Billing: &BillingInfo{
+				Meters: []BillingMeter{
+					{Meter: "task", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Failed PPTX tasks are not billed."},
+				},
+				RevenueShare: &RevenueShare{ISV: 70, Platform: 30, Basis: "net_revenue_after_payment_processor_tax_and_refunds"},
+			},
+			Support: firstPartySupport(),
+		},
+		{
+			SchemaVersion:   1,
+			ID:              "pdf",
+			Name:            "pdf",
+			Tier:            "first_wave",
+			CapabilityClass: "tool",
+			UseWhen:         "Read, create, fill, reformat, split, OCR, or index native PDF documents.",
+			Summary:         "Native PDF text extraction, page splitting, OCR fallback, and indexing for papers, bills, scans, and ebooks.",
+			Description:     "Use when the final artifact must be PDF, or when text, metadata, forms, pages, or OCR fallback are needed from PDFs.",
+			Inputs:          []string{"PDF file or URL", "action", "read mode", "optional pages or form fields"},
+			Outputs:         []string{"text", "layout", "pages", "metadata", "forms", "OCR notes", "native PDF artifact"},
+			Tags:            []string{"documents", "pdf", "forms", "ocr"},
+			SkillNames:      []string{"pdf"},
+			Billing: &BillingInfo{
+				Meters: []BillingMeter{
+					{Meter: "page", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Failed PDF pages are not billed."},
+				},
+				RevenueShare: &RevenueShare{ISV: 70, Platform: 30, Basis: "net_revenue_after_payment_processor_tax_and_refunds"},
+			},
+			Support: firstPartySupport(),
+		},
+		{
+			SchemaVersion:   1,
+			ID:              "documents",
+			Name:            "docx / xlsx / pptx / pdf",
+			Tier:            "first_wave",
+			CapabilityClass: "tool",
+			UseWhen:         "Read, summarize, convert, index, or extract structured fields from native documents.",
+			Summary:         "Native document family pack for Word, Excel, PowerPoint, and PDF workflows.",
+			Description:     "Use when the task spans several native document formats and the website wants the registry's document-family capability.",
+			Inputs:          []string{"document file", "extraction goal", "optional schema"},
+			Outputs:         []string{"structured text", "metadata", "tables", "summaries", "extracted fields"},
+			Tags:            []string{"documents", "docx", "xlsx", "pptx", "pdf"},
+			SkillNames:      []string{"docx", "xlsx", "pptx", "pdf"},
+			Billing: &BillingInfo{
+				Meters: []BillingMeter{
+					{Meter: "page", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Failed document pages are not billed."},
+					{Meter: "task", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Failed document tasks are not billed."},
+				},
+				RevenueShare: &RevenueShare{ISV: 70, Platform: 30, Basis: "net_revenue_after_payment_processor_tax_and_refunds"},
+			},
+			Support: firstPartySupport(),
+		},
+		{
+			SchemaVersion:   1,
+			ID:              "standard",
+			Name:            "Agentex Standard Capability Pack",
+			Tier:            "standard",
+			CapabilityClass: "content",
+			UseWhen:         "Install the ordinary first-party working set for everyday document, web, OCR, and research workflows.",
+			Summary:         "Core document, web, OCR, and research capabilities for everyday agent workflows.",
+			Description:     "Installs the default document, web, OCR, and research skills used by ordinary productivity agents.",
+			Inputs:          []string{"ordinary productivity task", "documents", "web sources", "optional scans"},
+			Outputs:         []string{"installed web, research, OCR, and document skills", "local install records", "billing records"},
+			Tags:            []string{"bundle", "standard", "web", "documents", "research"},
+			SkillNames:      []string{"web_search", "web_fetch", "research", "ocr", "docx", "xlsx", "pdf"},
 			Billing: &BillingInfo{
 				Meters: []BillingMeter{
 					{Meter: "seat", UnitPrice: 990, Currency: "USD", HardLimitSupported: true, RefundPolicy: "Seat charges are reversed when provisioning fails."},
@@ -37,13 +276,18 @@ func DefaultCapabilityPacks() []CapabilityPack {
 			Support: firstPartySupport(),
 		},
 		{
-			SchemaVersion: 1,
-			ID:            "advanced",
-			Name:          "Agentex Advanced Capability Pack",
-			Tier:          "advanced",
-			Summary:       "Full productivity and media capability bundle for higher-volume agent workflows.",
-			Description:   "Installs every built-in first-wave skill, including media generation, audio, and presentation handling.",
-			SkillNames:    []string{"web_search", "web_fetch", "research", "ocr", "audio", "imagen", "docx", "xlsx", "pptx", "pdf"},
+			SchemaVersion:   1,
+			ID:              "advanced",
+			Name:            "Agentex Advanced Capability Pack",
+			Tier:            "advanced",
+			CapabilityClass: "content",
+			UseWhen:         "Install the full first-wave working set for higher-volume productivity, media, audio, and presentation workflows.",
+			Summary:         "Full productivity and media capability bundle for higher-volume agent workflows.",
+			Description:     "Installs every built-in first-wave skill, including media generation, audio, and presentation handling.",
+			Inputs:          []string{"advanced productivity task", "media or audio sources", "documents", "presentations"},
+			Outputs:         []string{"installed first-wave skills", "local install records", "billing records"},
+			Tags:            []string{"bundle", "advanced", "audio", "media", "documents"},
+			SkillNames:      []string{"web_search", "web_fetch", "research", "ocr", "audio", "imagen", "docx", "xlsx", "pptx", "pdf"},
 			Billing: &BillingInfo{
 				Meters: []BillingMeter{
 					{Meter: "seat", UnitPrice: 2990, Currency: "USD", HardLimitSupported: true, RefundPolicy: "Seat charges are reversed when provisioning fails."},
@@ -79,7 +323,12 @@ func (s *Service) ListCapabilityPacks() ([]CapabilityPackView, error) {
 		views = append(views, s.capabilityPackView(pack, installed, packRecords[normalizeName(pack.ID)]))
 	}
 	sort.Slice(views, func(i, j int) bool {
-		return packTierRank(views[i].Pack.Tier) < packTierRank(views[j].Pack.Tier)
+		left := packSortRank(views[i].Pack)
+		right := packSortRank(views[j].Pack)
+		if left == right {
+			return views[i].Pack.ID < views[j].Pack.ID
+		}
+		return left < right
 	})
 	return views, nil
 }
@@ -126,14 +375,22 @@ func (s *Service) PlanCapabilityPackInstall(id string) (CapabilityPackInstallPla
 }
 
 func (s *Service) InstallCapabilityPack(ctx context.Context, id string) (CapabilityPackInstallResult, error) {
+	return s.installCapabilityPack(ctx, id, "")
+}
+
+func (s *Service) installCapabilityPack(ctx context.Context, id, scenarioID string) (CapabilityPackInstallResult, error) {
 	pack, ok := findCapabilityPack(id)
 	if !ok {
 		return CapabilityPackInstallResult{}, NewError(CodeNotFound, "capability pack not found", map[string]any{"pack": id, "supported_packs": capabilityPackIDs()})
 	}
+	scenarioID = strings.TrimSpace(scenarioID)
 	results := make([]InstallResult, 0, len(pack.SkillNames))
 	var record InstallRecord
 	var billingRecords []BillingRecord
 	err := s.withMutationLock(func() error {
+		if err := s.ensureCommerceLedgersAppendable(); err != nil {
+			return err
+		}
 		for _, name := range pack.SkillNames {
 			result, err := s.installSkill(ctx, name)
 			if err != nil {
@@ -141,12 +398,18 @@ func (s *Service) InstallCapabilityPack(ctx context.Context, id string) (Capabil
 			}
 			results = append(results, result)
 		}
-		record = installRecordForPack(pack, results, s.Auth.DeviceID)
-		if err := s.appendInstallRecord(record); err != nil {
+		record = installRecordForPack(pack, results, s.Auth.DeviceID, scenarioID)
+		signedRecord, err := s.appendInstallRecord(record)
+		if err != nil {
 			return err
 		}
-		billingRecords = billingRecordsForPackInstall(pack, record, s.Auth.DeviceID)
-		return s.appendBillingRecords(billingRecords)
+		record = signedRecord
+		signedBillingRecords, err := s.appendBillingRecords(billingRecordsForPackInstall(pack, record, s.Auth.DeviceID))
+		if err != nil {
+			return err
+		}
+		billingRecords = signedBillingRecords
+		return nil
 	})
 	if err != nil {
 		return CapabilityPackInstallResult{}, err
@@ -159,16 +422,28 @@ func (s *Service) InstallCapabilityPack(ctx context.Context, id string) (Capabil
 }
 
 func (s *Service) ListInstallRecords(options RecordQueryOptions) ([]InstallRecord, error) {
-	if err := ValidateRecordQueryOptions(options); err != nil {
-		return nil, err
-	}
-	records, err := s.readInstallRecords()
+	result, err := s.ListInstallRecordsWithIntegrity(options)
 	if err != nil {
 		return nil, err
+	}
+	return result.Records, nil
+}
+
+func (s *Service) ListInstallRecordsWithIntegrity(options RecordQueryOptions) (InstallRecordListResult, error) {
+	if err := ValidateRecordQueryOptions(options); err != nil {
+		return InstallRecordListResult{}, err
+	}
+	options = canonicalRecordQueryOptions(options)
+	records, integrity, err := s.readInstallRecordsWithIntegrity()
+	if err != nil {
+		return InstallRecordListResult{}, err
 	}
 	filtered := make([]InstallRecord, 0, len(records))
 	for _, record := range records {
 		if options.PackID != "" && normalizeName(record.PackID) != normalizeName(options.PackID) {
+			continue
+		}
+		if options.ScenarioID != "" && normalizeName(record.ScenarioID) != normalizeName(options.ScenarioID) {
 			continue
 		}
 		if options.Skill != "" && !installRecordMatchesSkill(record, options.Skill) {
@@ -188,20 +463,24 @@ func (s *Service) ListInstallRecords(options RecordQueryOptions) ([]InstallRecor
 	if options.Limit > 0 && len(filtered) > options.Limit {
 		filtered = filtered[:options.Limit]
 	}
-	return filtered, nil
+	return InstallRecordListResult{Records: filtered, Integrity: &integrity}, nil
 }
 
 func (s *Service) ListBillingRecords(options RecordQueryOptions) (BillingRecordListResult, error) {
 	if err := ValidateRecordQueryOptions(options); err != nil {
 		return BillingRecordListResult{}, err
 	}
-	records, err := s.readBillingRecords()
+	options = canonicalRecordQueryOptions(options)
+	records, integrity, err := s.readBillingRecordsWithIntegrity()
 	if err != nil {
 		return BillingRecordListResult{}, err
 	}
 	filtered := make([]BillingRecord, 0, len(records))
 	for _, record := range records {
 		if options.PackID != "" && normalizeName(record.PackID) != normalizeName(options.PackID) {
+			continue
+		}
+		if options.ScenarioID != "" && normalizeName(record.ScenarioID) != normalizeName(options.ScenarioID) {
 			continue
 		}
 		if options.Skill != "" && normalizeName(record.SkillName) != normalizeName(options.Skill) {
@@ -227,7 +506,7 @@ func (s *Service) ListBillingRecords(options RecordQueryOptions) (BillingRecordL
 	if options.Limit > 0 && len(filtered) > options.Limit {
 		filtered = filtered[:options.Limit]
 	}
-	return BillingRecordListResult{Records: filtered, Totals: billingTotals(filtered)}, nil
+	return BillingRecordListResult{Records: filtered, Totals: billingTotals(filtered), Integrity: &integrity}, nil
 }
 
 func ValidateRecordQueryOptions(options RecordQueryOptions) error {
@@ -253,12 +532,33 @@ func ValidateRecordQueryOptions(options RecordQueryOptions) error {
 	return nil
 }
 
+func canonicalRecordQueryOptions(options RecordQueryOptions) RecordQueryOptions {
+	if pack, ok := findCapabilityPack(options.PackID); ok {
+		options.PackID = pack.ID
+	}
+	if scenario, ok := findCapabilityScenario(options.ScenarioID); ok {
+		options.ScenarioID = scenario.ID
+	}
+	return options
+}
+
 func (s *Service) CommerceSnapshot(options RecordQueryOptions) (CapabilityCommerceSnapshot, error) {
 	packs, err := s.ListCapabilityPacks()
 	if err != nil {
 		return CapabilityCommerceSnapshot{}, err
 	}
-	installs, err := s.ListInstallRecords(options)
+	scenarios, err := s.ListCapabilityScenarios()
+	if err != nil {
+		return CapabilityCommerceSnapshot{}, err
+	}
+	if strings.TrimSpace(options.PackID) != "" {
+		packs = filterCapabilityPackViewsByPack(packs, options.PackID)
+		scenarios = filterCapabilityScenarioViewsByPack(scenarios, options.PackID)
+	}
+	if strings.TrimSpace(options.ScenarioID) != "" {
+		scenarios = filterCapabilityScenarioViewsByScenario(scenarios, options.ScenarioID)
+	}
+	installs, err := s.ListInstallRecordsWithIntegrity(options)
 	if err != nil {
 		return CapabilityCommerceSnapshot{}, err
 	}
@@ -266,12 +566,79 @@ func (s *Service) CommerceSnapshot(options RecordQueryOptions) (CapabilityCommer
 	if err != nil {
 		return CapabilityCommerceSnapshot{}, err
 	}
+	integrity := []LedgerIntegritySummary{}
+	if installs.Integrity != nil {
+		integrity = append(integrity, *installs.Integrity)
+	}
+	if billing.Integrity != nil {
+		integrity = append(integrity, *billing.Integrity)
+	}
 	return CapabilityCommerceSnapshot{
 		SchemaVersion:  1,
 		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
 		Packs:          packs,
+		Scenarios:      scenarios,
 		InstallRecords: installs,
 		Billing:        billing,
+		Integrity:      integrity,
+	}, nil
+}
+
+func filterCapabilityPackViewsByPack(packs []CapabilityPackView, packID string) []CapabilityPackView {
+	if pack, ok := findCapabilityPack(packID); ok {
+		packID = pack.ID
+	}
+	filtered := packs[:0]
+	for _, pack := range packs {
+		if normalizeName(pack.Pack.ID) == normalizeName(packID) {
+			filtered = append(filtered, pack)
+		}
+	}
+	return filtered
+}
+
+func (s *Service) CapabilityScenarioLedger(id string, options RecordQueryOptions) (CapabilityScenarioLedger, error) {
+	scenario, ok := findCapabilityScenario(id)
+	if !ok {
+		return CapabilityScenarioLedger{}, NewError(CodeNotFound, "capability scenario not found", map[string]any{"scenario": id, "supported_scenarios": capabilityScenarioIDs()})
+	}
+	options.ScenarioID = scenario.ID
+	view, err := s.GetCapabilityScenario(scenario.ID)
+	if err != nil {
+		return CapabilityScenarioLedger{}, err
+	}
+	installs, err := s.ListInstallRecords(options)
+	if err != nil {
+		return CapabilityScenarioLedger{}, err
+	}
+	billing, err := s.ListBillingRecords(options)
+	if err != nil {
+		return CapabilityScenarioLedger{}, err
+	}
+	var latest *InstallRecord
+	if len(installs) > 0 {
+		latestRecord := installs[0]
+		latest = &latestRecord
+	}
+	usageRecords := make([]BillingRecord, 0, len(billing.Records))
+	packInstallRecords := make([]BillingRecord, 0, len(billing.Records))
+	for _, record := range billing.Records {
+		switch normalizeName(record.Type) {
+		case "skill_usage":
+			usageRecords = append(usageRecords, record)
+		case "pack_install":
+			packInstallRecords = append(packInstallRecords, record)
+		}
+	}
+	return CapabilityScenarioLedger{
+		SchemaVersion:      1,
+		GeneratedAt:        time.Now().UTC().Format(time.RFC3339),
+		Scenario:           view,
+		LatestInstall:      latest,
+		InstallRecords:     installs,
+		Billing:            billing,
+		UsageRecords:       usageRecords,
+		PackInstallRecords: packInstallRecords,
 	}, nil
 }
 
@@ -349,6 +716,28 @@ func findCapabilityPack(id string) (CapabilityPack, bool) {
 
 func capabilityPackAliases(pack CapabilityPack) []string {
 	switch normalizeName(pack.ID) {
+	case "web_search":
+		return []string{"web-search", "search", "web query search", "wangye_sousuo", "sousuo", "\u641c\u7d22", "\u7f51\u9875\u641c\u7d22"}
+	case "web_fetch":
+		return []string{"web-fetch", "web_read", "web-query-read", "fetch", "read_url", "wangye_duqu", "\u7f51\u9875\u8bfb\u53d6", "\u6293\u53d6"}
+	case "research":
+		return []string{"deep_research", "analyze", "advisor", "ui_review", "diaoyan", "\u8c03\u7814", "\u7814\u7a76"}
+	case "ocr":
+		return []string{"vision", "screen_ocr", "image_text", "shibie", "\u8bc6\u522b", "\u6587\u5b57\u8bc6\u522b"}
+	case "audio":
+		return []string{"asr", "tts", "transcribe", "speech", "yuyin", "\u97f3\u9891", "\u8bed\u97f3", "\u8f6c\u5199"}
+	case "imagen":
+		return []string{"mediagen", "media", "image", "image_generation", "imagegen", "t2i", "t2v", "shengcheng", "\u5a92\u4f53", "\u56fe\u7247\u751f\u6210", "\u751f\u6210"}
+	case "docx":
+		return []string{"word", "document", "word_document", "wendang", "\u6587\u6863", "\u6587\u6863\u80fd\u529b\u5305"}
+	case "xlsx":
+		return []string{"excel", "spreadsheet", "sheet", "biaoge", "\u8868\u683c", "\u7535\u5b50\u8868\u683c"}
+	case "pptx":
+		return []string{"powerpoint", "presentation", "slides", "deck", "yanshi", "\u6f14\u793a", "\u5e7b\u706f\u7247"}
+	case "pdf":
+		return []string{"paper", "ebook", "pdf_pack", "pdfpack", "\u8bba\u6587", "\u7535\u5b50\u4e66"}
+	case "documents":
+		return []string{"document", "office", "docx_xlsx_pptx_pdf", "docx/xlsx/pptx/pdf", "wendangzu", "\u6587\u6863\u65cf", "\u6587\u6863"}
 	case "standard":
 		return []string{"ordinary", "normal", "basic", "free", "common", "putong", "biaozhun", "jichu", "\u666e\u901a", "\u6807\u51c6", "\u57fa\u7840"}
 	case "advanced":
@@ -370,6 +759,8 @@ func capabilityPackIDs() []string {
 
 func packTierRank(tier string) int {
 	switch strings.ToLower(strings.TrimSpace(tier)) {
+	case "first_wave":
+		return 5
 	case "standard":
 		return 10
 	case "advanced":
@@ -379,12 +770,50 @@ func packTierRank(tier string) int {
 	}
 }
 
-func installRecordForPack(pack CapabilityPack, results []InstallResult, deviceID string) InstallRecord {
+func packSortRank(pack CapabilityPack) int {
+	switch normalizeName(pack.ID) {
+	case "web_search":
+		return 10
+	case "web_fetch":
+		return 20
+	case "research":
+		return 30
+	case "ocr":
+		return 40
+	case "audio":
+		return 50
+	case "imagen":
+		return 60
+	case "docx":
+		return 70
+	case "xlsx":
+		return 80
+	case "pptx":
+		return 90
+	case "pdf":
+		return 100
+	case "documents":
+		return 110
+	case "standard":
+		return 200
+	case "advanced":
+		return 210
+	default:
+		return 1000 + packTierRank(pack.Tier)
+	}
+}
+
+func installRecordForPack(pack CapabilityPack, results []InstallResult, deviceID, scenarioID string) InstallRecord {
+	action := "install_pack"
+	if strings.TrimSpace(scenarioID) != "" {
+		action = "install_scenario"
+	}
 	record := InstallRecord{
 		RecordID:   "install-" + NewTraceID(),
-		Action:     "install_pack",
+		Action:     action,
 		PackID:     pack.ID,
 		PackTier:   pack.Tier,
+		ScenarioID: strings.TrimSpace(scenarioID),
 		Status:     "installed",
 		DeviceID:   strings.TrimSpace(deviceID),
 		OccurredAt: time.Now().UTC().Format(time.RFC3339),
@@ -450,6 +879,7 @@ func billingRecordsForPackInstall(pack CapabilityPack, record InstallRecord, dev
 			Type:             "pack_install",
 			PackID:           pack.ID,
 			PackTier:         pack.Tier,
+			ScenarioID:       strings.TrimSpace(record.ScenarioID),
 			Meter:            name,
 			Quantity:         quantity,
 			Currency:         strings.TrimSpace(meter.Currency),
@@ -501,11 +931,16 @@ func billingRecordsForUsage(manifest SkillManifest, result RunResult, events []U
 	records := make([]BillingRecord, 0, len(events))
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, event := range events {
+		packID := strings.TrimSpace(event.PackID)
+		if packID == "" {
+			packID = packIDForUsage(manifest.Name)
+		}
 		records = append(records, BillingRecord{
 			RecordID:         "bill-" + sanitizeUsageID(event.EventID),
 			Type:             "skill_usage",
-			PackID:           pack.ID,
+			PackID:           packID,
 			PackTier:         pack.Tier,
+			ScenarioID:       strings.TrimSpace(event.ScenarioID),
 			SkillName:        manifest.Name,
 			VersionID:        manifest.Version,
 			VendorID:         event.VendorID,
@@ -530,6 +965,9 @@ func packForSkill(name string) CapabilityPack {
 	for _, pack := range DefaultCapabilityPacks() {
 		for _, skill := range pack.SkillNames {
 			if normalizeName(skill) == needle {
+				if normalizeName(pack.ID) == needle {
+					return pack
+				}
 				if fallback.ID == "" || packTierRank(pack.Tier) < packTierRank(fallback.Tier) {
 					fallback = pack
 				}
@@ -547,7 +985,7 @@ func localBillingError(deviceID string) string {
 }
 
 func (s *Service) latestPackInstallRecords() (map[string]InstallRecord, error) {
-	records, err := s.readInstallRecords()
+	records, _, err := s.readInstallRecordsWithIntegrity()
 	if err != nil {
 		return nil, err
 	}
@@ -623,33 +1061,42 @@ func billingTotals(records []BillingRecord) []BillingTotal {
 	return totals
 }
 
-func (s *Service) appendInstallRecord(record InstallRecord) error {
-	return appendJSONLine(s.installRecordsPath(), record)
+func (s *Service) appendInstallRecord(record InstallRecord) (InstallRecord, error) {
+	return s.appendSignedInstallRecord(record)
 }
 
-func (s *Service) appendBillingRecords(records []BillingRecord) error {
-	for _, record := range records {
-		if err := appendJSONLine(s.billingRecordsPath(), record); err != nil {
-			return err
-		}
-	}
-	return nil
+func (s *Service) appendBillingRecords(records []BillingRecord) ([]BillingRecord, error) {
+	return s.appendSignedBillingRecords(records)
 }
 
 func (s *Service) readInstallRecords() ([]InstallRecord, error) {
-	var records []InstallRecord
-	if err := readJSONLines(s.installRecordsPath(), &records); err != nil {
-		return nil, err
-	}
-	return records, nil
+	records, _, err := s.readInstallRecordsWithIntegrity()
+	return records, err
 }
 
 func (s *Service) readBillingRecords() ([]BillingRecord, error) {
-	var records []BillingRecord
-	if err := readJSONLines(s.billingRecordsPath(), &records); err != nil {
-		return nil, err
-	}
-	return records, nil
+	records, _, err := s.readBillingRecordsWithIntegrity()
+	return records, err
+}
+
+func (s *Service) InstallRecordIntegrity() (LedgerIntegritySummary, error) {
+	summary, _, err := s.verifyInstallRecordsFromDisk()
+	return summary, err
+}
+
+func (s *Service) BillingRecordIntegrity() (LedgerIntegritySummary, error) {
+	summary, _, err := s.verifyBillingRecordsFromDisk()
+	return summary, err
+}
+
+func (s *Service) verifyInstallRecordsFromDisk() (LedgerIntegritySummary, []InstallRecord, error) {
+	records, summary, err := s.readInstallRecordsWithIntegrity()
+	return summary, records, err
+}
+
+func (s *Service) verifyBillingRecordsFromDisk() (LedgerIntegritySummary, []BillingRecord, error) {
+	records, summary, err := s.readBillingRecordsWithIntegrity()
+	return summary, records, err
 }
 
 func (s *Service) installRecordsPath() string {

@@ -34,12 +34,16 @@ type CommerceHTTPEndpoint struct {
 func CommerceHTTPEndpoints() []CommerceHTTPEndpoint {
 	return []CommerceHTTPEndpoint{
 		{Name: "commerce_index", Method: http.MethodGet, Path: "/v1/commerce", Description: "List website commerce endpoints."},
-		{Name: "list_capability_packs", Method: http.MethodGet, Path: "/v1/commerce/packs", Description: "Return standard and advanced capability-pack state.", Query: []string{"pack_id"}},
-		{Name: "plan_capability_pack_install", Method: http.MethodGet, Path: "/v1/commerce/install-plan", Description: "Preview skill changes and billing records before installing a standard or advanced pack.", Query: []string{"pack_id"}},
-		{Name: "install_capability_pack", Method: http.MethodPost, Path: "/v1/commerce/install-pack", Description: "Install a standard or advanced capability pack after explicit confirmation.", Headers: []string{"X-AGTX-Commerce-Token"}, Body: []string{"pack_id", "yes"}},
-		{Name: "list_install_records", Method: http.MethodGet, Path: "/v1/commerce/install-records", Description: "Return local capability-pack and skill install records.", Query: []string{"pack_id", "skill", "status", "from", "to", "limit"}},
-		{Name: "list_billing_records", Method: http.MethodGet, Path: "/v1/commerce/billing-records", Description: "Return local pack-install and skill-usage billing records.", Query: []string{"pack_id", "skill", "status", "type", "currency", "from", "to", "limit"}},
-		{Name: "get_commerce_snapshot", Method: http.MethodGet, Path: "/v1/commerce/snapshot", Description: "Return packs, install records, and billing records in one website-friendly snapshot.", Query: []string{"pack_id", "skill", "status", "type", "currency", "from", "to", "limit"}},
+		{Name: "list_capability_packs", Method: http.MethodGet, Path: "/v1/commerce/packs", Description: "Return first-wave website capability packs plus standard and advanced bundle state.", Query: []string{"pack_id"}},
+		{Name: "list_capability_scenarios", Method: http.MethodGet, Path: "/v1/commerce/scenarios", Description: "Return real task scenarios mapped to recommended capability packs, install state, and billing preview.", Query: []string{"scenario_id", "pack_id"}},
+		{Name: "plan_capability_pack_install", Method: http.MethodGet, Path: "/v1/commerce/install-plan", Description: "Preview skill changes and billing records before installing a capability pack.", Query: []string{"pack_id"}},
+		{Name: "plan_capability_scenario_install", Method: http.MethodGet, Path: "/v1/commerce/scenario-install-plan", Description: "Preview recommended pack changes and billing records for a real task scenario.", Query: []string{"scenario_id"}},
+		{Name: "install_capability_pack", Method: http.MethodPost, Path: "/v1/commerce/install-pack", Description: "Install a capability pack after explicit confirmation.", Headers: []string{"X-AGTX-Commerce-Token"}, Body: []string{"pack_id", "yes"}},
+		{Name: "install_capability_scenario", Method: http.MethodPost, Path: "/v1/commerce/install-scenario", Description: "Install the recommended pack for a real task scenario and tag install/billing records with scenario_id.", Headers: []string{"X-AGTX-Commerce-Token"}, Body: []string{"scenario_id", "yes"}},
+		{Name: "get_capability_scenario_ledger", Method: http.MethodGet, Path: "/v1/commerce/scenario-ledger", Description: "Return one task scenario with matching install records, billing records, totals, and latest install state.", Query: []string{"scenario_id", "skill", "status", "type", "currency", "from", "to", "limit"}},
+		{Name: "list_install_records", Method: http.MethodGet, Path: "/v1/commerce/install-records", Description: "Return local capability-pack and skill install records.", Query: []string{"pack_id", "scenario_id", "skill", "status", "from", "to", "limit"}},
+		{Name: "list_billing_records", Method: http.MethodGet, Path: "/v1/commerce/billing-records", Description: "Return local pack-install and skill-usage billing records.", Query: []string{"pack_id", "scenario_id", "skill", "status", "type", "currency", "from", "to", "limit"}},
+		{Name: "get_commerce_snapshot", Method: http.MethodGet, Path: "/v1/commerce/snapshot", Description: "Return packs, scenarios, install records, and billing records in one website-friendly snapshot.", Query: []string{"pack_id", "scenario_id", "skill", "status", "type", "currency", "from", "to", "limit"}},
 	}
 }
 
@@ -101,11 +105,21 @@ func (h *commerceHTTPHandler) route(writer http.ResponseWriter, request *http.Re
 			return
 		}
 		h.listCapabilityPacks(writer, request)
+	case "/v1/commerce/scenarios":
+		if !h.requireMethod(writer, request, http.MethodGet) {
+			return
+		}
+		h.listCapabilityScenarios(writer, request)
 	case "/v1/commerce/install-plan":
 		if !h.requireMethod(writer, request, http.MethodGet) {
 			return
 		}
 		h.planCapabilityPackInstall(writer, request)
+	case "/v1/commerce/scenario-install-plan":
+		if !h.requireMethod(writer, request, http.MethodGet) {
+			return
+		}
+		h.planCapabilityScenarioInstall(writer, request)
 	case "/v1/commerce/install-pack":
 		if !h.requireMethod(writer, request, http.MethodPost) {
 			return
@@ -114,6 +128,19 @@ func (h *commerceHTTPHandler) route(writer http.ResponseWriter, request *http.Re
 			return
 		}
 		h.installCapabilityPack(writer, request)
+	case "/v1/commerce/install-scenario":
+		if !h.requireMethod(writer, request, http.MethodPost) {
+			return
+		}
+		if !h.authorizeMutation(writer, request) {
+			return
+		}
+		h.installCapabilityScenario(writer, request)
+	case "/v1/commerce/scenario-ledger":
+		if !h.requireMethod(writer, request, http.MethodGet) {
+			return
+		}
+		h.getCapabilityScenarioLedger(writer, request)
 	case "/v1/commerce/install-records":
 		if !h.requireMethod(writer, request, http.MethodGet) {
 			return
@@ -170,15 +197,37 @@ func (h *commerceHTTPHandler) listCapabilityPacks(writer http.ResponseWriter, re
 		return
 	}
 	if options.PackID != "" {
-		filtered := packs[:0]
-		for _, pack := range packs {
-			if normalizeName(pack.Pack.ID) == normalizeName(options.PackID) {
-				filtered = append(filtered, pack)
-			}
-		}
-		packs = filtered
+		packs = filterCapabilityPackViewsByPack(packs, options.PackID)
 	}
 	h.writeOK(writer, packs)
+}
+
+func (h *commerceHTTPHandler) listCapabilityScenarios(writer http.ResponseWriter, request *http.Request) {
+	options, err := recordQueryOptionsFromURL(request)
+	if err != nil {
+		h.writeError(writer, httpStatusForError(err), err)
+		return
+	}
+	scenarioID := strings.TrimSpace(request.URL.Query().Get("scenario_id"))
+	var scenarios []CapabilityScenarioView
+	if scenarioID != "" {
+		scenario, err := h.service.GetCapabilityScenario(scenarioID)
+		if err != nil {
+			h.writeError(writer, httpStatusForError(err), err)
+			return
+		}
+		scenarios = []CapabilityScenarioView{scenario}
+	} else {
+		scenarios, err = h.service.ListCapabilityScenarios()
+		if err != nil {
+			h.writeError(writer, httpStatusForError(err), err)
+			return
+		}
+	}
+	if options.PackID != "" {
+		scenarios = filterCapabilityScenariosByPack(scenarios, options.PackID)
+	}
+	h.writeOK(writer, scenarios)
 }
 
 func (h *commerceHTTPHandler) planCapabilityPackInstall(writer http.ResponseWriter, request *http.Request) {
@@ -188,6 +237,20 @@ func (h *commerceHTTPHandler) planCapabilityPackInstall(writer http.ResponseWrit
 		return
 	}
 	plan, err := h.service.PlanCapabilityPackInstall(packID)
+	if err != nil {
+		h.writeError(writer, httpStatusForError(err), err)
+		return
+	}
+	h.writeOK(writer, plan)
+}
+
+func (h *commerceHTTPHandler) planCapabilityScenarioInstall(writer http.ResponseWriter, request *http.Request) {
+	scenarioID := strings.TrimSpace(request.URL.Query().Get("scenario_id"))
+	if scenarioID == "" {
+		h.writeError(writer, http.StatusBadRequest, NewError(CodeInvalidArgument, "scenario_id is required", map[string]any{"parameter": "scenario_id"}))
+		return
+	}
+	plan, err := h.service.PlanCapabilityScenarioInstall(scenarioID)
 	if err != nil {
 		h.writeError(writer, httpStatusForError(err), err)
 		return
@@ -220,13 +283,38 @@ func (h *commerceHTTPHandler) installCapabilityPack(writer http.ResponseWriter, 
 	h.writeOK(writer, result)
 }
 
+func (h *commerceHTTPHandler) installCapabilityScenario(writer http.ResponseWriter, request *http.Request) {
+	body, err := decodeCapabilityScenarioInstallRequest(writer, request)
+	if err != nil {
+		h.writeError(writer, httpStatusForError(err), err)
+		return
+	}
+	if !body.Yes {
+		err := NewError(CodeConfirmationRequired, "install-scenario requires explicit confirmation", map[string]any{
+			"action":           "install-scenario",
+			"scenario":         body.ScenarioID,
+			"expected":         "yes=true",
+			"retry_with":       map[string]any{"scenario_id": body.ScenarioID, "yes": true},
+			"supported_fields": []string{"scenario_id", "yes"},
+		})
+		h.writeError(writer, httpStatusForError(err), err)
+		return
+	}
+	result, err := h.service.InstallCapabilityScenario(request.Context(), body.ScenarioID)
+	if err != nil {
+		h.writeError(writer, httpStatusForError(err), err)
+		return
+	}
+	h.writeOK(writer, result)
+}
+
 func (h *commerceHTTPHandler) listInstallRecords(writer http.ResponseWriter, request *http.Request) {
 	options, err := recordQueryOptionsFromURL(request)
 	if err != nil {
 		h.writeError(writer, httpStatusForError(err), err)
 		return
 	}
-	records, err := h.service.ListInstallRecords(options)
+	records, err := h.service.ListInstallRecordsWithIntegrity(options)
 	if err != nil {
 		h.writeError(writer, httpStatusForError(err), err)
 		return
@@ -248,6 +336,25 @@ func (h *commerceHTTPHandler) listBillingRecords(writer http.ResponseWriter, req
 	h.writeOK(writer, records)
 }
 
+func (h *commerceHTTPHandler) getCapabilityScenarioLedger(writer http.ResponseWriter, request *http.Request) {
+	options, err := recordQueryOptionsFromURL(request)
+	if err != nil {
+		h.writeError(writer, httpStatusForError(err), err)
+		return
+	}
+	scenarioID := strings.TrimSpace(request.URL.Query().Get("scenario_id"))
+	if scenarioID == "" {
+		h.writeError(writer, http.StatusBadRequest, NewError(CodeInvalidArgument, "scenario_id is required", map[string]any{"parameter": "scenario_id"}))
+		return
+	}
+	ledger, err := h.service.CapabilityScenarioLedger(scenarioID, options)
+	if err != nil {
+		h.writeError(writer, httpStatusForError(err), err)
+		return
+	}
+	h.writeOK(writer, ledger)
+}
+
 func (h *commerceHTTPHandler) getCommerceSnapshot(writer http.ResponseWriter, request *http.Request) {
 	options, err := recordQueryOptionsFromURL(request)
 	if err != nil {
@@ -260,28 +367,28 @@ func (h *commerceHTTPHandler) getCommerceSnapshot(writer http.ResponseWriter, re
 		return
 	}
 	if options.PackID != "" {
-		filtered := snapshot.Packs[:0]
-		for _, pack := range snapshot.Packs {
-			if normalizeName(pack.Pack.ID) == normalizeName(options.PackID) {
-				filtered = append(filtered, pack)
-			}
-		}
-		snapshot.Packs = filtered
+		snapshot.Packs = filterCapabilityPackViewsByPack(snapshot.Packs, options.PackID)
+		snapshot.Scenarios = filterCapabilityScenariosByPack(snapshot.Scenarios, options.PackID)
 	}
 	h.writeOK(writer, snapshot)
+}
+
+func filterCapabilityScenariosByPack(scenarios []CapabilityScenarioView, packID string) []CapabilityScenarioView {
+	return filterCapabilityScenarioViewsByPack(scenarios, packID)
 }
 
 func recordQueryOptionsFromURL(request *http.Request) (RecordQueryOptions, error) {
 	query := request.URL.Query()
 	options := RecordQueryOptions{
-		PackID:   strings.TrimSpace(query.Get("pack_id")),
-		Skill:    strings.TrimSpace(query.Get("skill")),
-		Status:   strings.TrimSpace(query.Get("status")),
-		Type:     strings.TrimSpace(query.Get("type")),
-		Currency: strings.TrimSpace(query.Get("currency")),
-		From:     strings.TrimSpace(query.Get("from")),
-		To:       strings.TrimSpace(query.Get("to")),
-		Limit:    100,
+		PackID:     strings.TrimSpace(query.Get("pack_id")),
+		ScenarioID: strings.TrimSpace(query.Get("scenario_id")),
+		Skill:      strings.TrimSpace(query.Get("skill")),
+		Status:     strings.TrimSpace(query.Get("status")),
+		Type:       strings.TrimSpace(query.Get("type")),
+		Currency:   strings.TrimSpace(query.Get("currency")),
+		From:       strings.TrimSpace(query.Get("from")),
+		To:         strings.TrimSpace(query.Get("to")),
+		Limit:      100,
 	}
 	if rawLimit := strings.TrimSpace(query.Get("limit")); rawLimit != "" {
 		limit, err := strconv.Atoi(rawLimit)
@@ -301,6 +408,11 @@ type capabilityPackInstallRequest struct {
 	Yes    bool   `json:"yes"`
 }
 
+type capabilityScenarioInstallRequest struct {
+	ScenarioID string `json:"scenario_id"`
+	Yes        bool   `json:"yes"`
+}
+
 func decodeCapabilityPackInstallRequest(writer http.ResponseWriter, request *http.Request) (capabilityPackInstallRequest, error) {
 	defer request.Body.Close()
 	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, defaultConfigMaxBytes))
@@ -318,6 +430,27 @@ func decodeCapabilityPackInstallRequest(writer http.ResponseWriter, request *htt
 	requestBody.PackID = strings.TrimSpace(requestBody.PackID)
 	if requestBody.PackID == "" {
 		return capabilityPackInstallRequest{}, NewError(CodeInvalidArgument, "pack_id is required", map[string]any{"field": "pack_id", "supported_fields": []string{"pack_id", "yes"}})
+	}
+	return requestBody, nil
+}
+
+func decodeCapabilityScenarioInstallRequest(writer http.ResponseWriter, request *http.Request) (capabilityScenarioInstallRequest, error) {
+	defer request.Body.Close()
+	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, defaultConfigMaxBytes))
+	if err != nil {
+		return capabilityScenarioInstallRequest{}, NewError(CodeSizeLimitExceeded, "commerce scenario install request body exceeds size limit", map[string]any{"limit": defaultConfigMaxBytes})
+	}
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		return capabilityScenarioInstallRequest{}, NewError(CodeInvalidArgument, "commerce scenario install request body is required", map[string]any{"supported_fields": []string{"scenario_id", "yes"}})
+	}
+	var requestBody capabilityScenarioInstallRequest
+	if err := decodeJSONStrict(body, &requestBody); err != nil {
+		return capabilityScenarioInstallRequest{}, NewError(CodeInvalidArgument, "invalid commerce scenario install request", map[string]any{"error": err.Error(), "supported_fields": []string{"scenario_id", "yes"}})
+	}
+	requestBody.ScenarioID = strings.TrimSpace(requestBody.ScenarioID)
+	if requestBody.ScenarioID == "" {
+		return capabilityScenarioInstallRequest{}, NewError(CodeInvalidArgument, "scenario_id is required", map[string]any{"field": "scenario_id", "supported_fields": []string{"scenario_id", "yes"}})
 	}
 	return requestBody, nil
 }

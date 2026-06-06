@@ -145,6 +145,7 @@ const commerceDashboardPage = `<!doctype html>
       align-items: start;
     }
     .panel { overflow: hidden; }
+    .scenarios-panel { margin-bottom: 16px; }
     .panel-head {
       display: flex;
       align-items: center;
@@ -164,6 +165,52 @@ const commerceDashboardPage = `<!doctype html>
       display: grid;
       gap: 12px;
       padding: 14px;
+    }
+    .scenario-list {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      padding: 14px;
+    }
+    .scenario {
+      display: grid;
+      gap: 10px;
+      min-height: 196px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fff;
+    }
+    .scenario.ready { border-color: rgba(23, 111, 98, 0.45); }
+    .scenario-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .scenario-title {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    .scenario-title h3 {
+      overflow-wrap: anywhere;
+    }
+    .scenario-meta {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .scenario-meta span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .scenario-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
     }
     .pack {
       border: 1px solid var(--line);
@@ -296,7 +343,7 @@ const commerceDashboardPage = `<!doctype html>
     .toast.bad { border-left-color: var(--bad); }
     @media (max-width: 860px) {
       .topbar { align-items: flex-start; flex-direction: column; }
-      .metrics, .workspace { grid-template-columns: 1fr; }
+      .metrics, .workspace, .scenario-list { grid-template-columns: 1fr; }
       .status { text-align: left; }
     }
     @media (max-width: 560px) {
@@ -321,6 +368,12 @@ const commerceDashboardPage = `<!doctype html>
   </header>
   <main>
     <section class="metrics" id="metrics"></section>
+    <section class="panel scenarios-panel">
+      <div class="panel-head">
+        <h2>Task Scenarios</h2>
+      </div>
+      <div class="scenario-list" id="scenarios"></div>
+    </section>
     <section class="workspace">
       <section class="panel">
         <div class="panel-head">
@@ -336,6 +389,7 @@ const commerceDashboardPage = `<!doctype html>
         </div>
         <div class="filters">
           <select id="packFilter"></select>
+          <select id="scenarioFilter"></select>
           <input id="statusFilter" placeholder="status">
           <select id="typeFilter">
             <option value="">All types</option>
@@ -354,7 +408,7 @@ const commerceDashboardPage = `<!doctype html>
   <div class="toast" id="toast"></div>
   <script>
     const mutationToken = __MUTATION_TOKEN__;
-    const state = { packs: [], installs: [], billing: { records: [], totals: [] }, activeTab: "billing" };
+    const state = { packs: [], allPacks: [], scenarios: [], allScenarios: [], installs: [], billing: { records: [], totals: [] }, scenarioLedger: null, activeTab: "billing" };
     const el = (id) => document.getElementById(id);
     const esc = (value) => String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[ch]));
 
@@ -372,8 +426,10 @@ const commerceDashboardPage = `<!doctype html>
       setStatus("Syncing");
       const params = new URLSearchParams();
       const pack = el("packFilter").value;
+      const scenario = el("scenarioFilter").value;
       const limit = Number(el("limit").value || 100);
       if (pack) params.set("pack_id", pack);
+      if (scenario) params.set("scenario_id", scenario);
       if (el("statusFilter").value.trim()) params.set("status", el("statusFilter").value.trim());
       if (el("typeFilter").value) params.set("type", el("typeFilter").value);
       if (el("currencyFilter").value.trim()) params.set("currency", el("currencyFilter").value.trim());
@@ -382,9 +438,26 @@ const commerceDashboardPage = `<!doctype html>
       if (from) params.set("from", from);
       if (to) params.set("to", to);
       params.set("limit", String(limit > 0 ? limit : 100));
-      const data = await api("/v1/commerce/snapshot?" + params.toString());
-      state.packs = data.packs || [];
-      state.installs = data.install_records || [];
+      const dataPath = scenario ? "/v1/commerce/scenario-ledger?" + params.toString() : "/v1/commerce/snapshot?" + params.toString();
+      const [data, allPacks, allScenarios] = await Promise.all([
+        api(dataPath),
+        api("/v1/commerce/packs"),
+        api("/v1/commerce/scenarios")
+      ]);
+      if (scenario) {
+        state.scenarioLedger = data;
+        state.packs = data.scenario && data.scenario.recommended_pack ? [data.scenario.recommended_pack] : [];
+        state.scenarios = data.scenario ? [data.scenario] : [];
+      } else {
+        state.scenarioLedger = null;
+        state.packs = data.packs || [];
+        state.scenarios = data.scenarios || [];
+      }
+      state.allPacks = allPacks || [];
+      state.allScenarios = allScenarios || [];
+      state.installLedger = Array.isArray(data.install_records) ? { records: data.install_records } : (data.install_records || { records: [] });
+      state.integrity = data.integrity || [];
+      state.installs = state.installLedger.records || [];
       state.billing = data.billing || { records: [], totals: [] };
       render(data.generated_at);
       setStatus("Ready");
@@ -394,22 +467,22 @@ const commerceDashboardPage = `<!doctype html>
       el("generated").textContent = generatedAt ? "Updated " + generatedAt : "Updated";
       renderMetrics();
       renderPackFilter();
+      renderScenarioFilter();
+      renderScenarios();
       renderPacks();
       renderRecords();
     }
 
     function renderMetrics() {
       const installed = state.packs.filter((item) => item.installed).length;
-      const billingRecords = state.billing.records || [];
       const totals = state.billing.totals || [];
       const totalLabel = totals.length ? totals.map((item) => esc(item.currency) + " " + esc(item.gross_amount_minor)).join(" / ") : "0";
       el("metrics").innerHTML = [
         metric("Packs", state.packs.length),
+        metric("Scenarios", state.scenarios.length),
         metric("Installed", installed),
-        metric("Install Records", state.installs.length),
         metric("Billing Total", totalLabel)
       ].join("");
-      void billingRecords;
     }
 
     function metric(label, value) {
@@ -419,12 +492,66 @@ const commerceDashboardPage = `<!doctype html>
     function renderPackFilter() {
       const select = el("packFilter");
       const selected = select.value;
-      const options = ['<option value="">All packs</option>'].concat(state.packs.map((item) => {
+      const options = ['<option value="">All packs</option>'].concat(state.allPacks.map((item) => {
         const id = item.pack && item.pack.id ? item.pack.id : "";
         return '<option value="' + esc(id) + '">' + esc(id || "pack") + '</option>';
       }));
       select.innerHTML = options.join("");
       select.value = selected;
+    }
+
+    function renderScenarioFilter() {
+      const select = el("scenarioFilter");
+      const selected = select.value;
+      const options = ['<option value="">All scenarios</option>'].concat(state.allScenarios.map((item) => {
+        const scenario = item.scenario || {};
+        const id = scenario.id || "";
+        return '<option value="' + esc(id) + '">' + esc(scenario.name || id || "scenario") + '</option>';
+      }));
+      select.innerHTML = options.join("");
+      select.value = selected;
+    }
+
+    function renderScenarios() {
+      if (!state.scenarios.length) {
+        el("scenarios").innerHTML = '<div class="empty">No task scenarios found.</div>';
+        return;
+      }
+      el("scenarios").innerHTML = state.scenarios.map((item) => {
+        const scenario = item.scenario || {};
+        const pack = item.recommended_pack && item.recommended_pack.pack ? item.recommended_pack.pack : {};
+        const packInstalled = item.recommended_pack && item.recommended_pack.installed;
+        const missing = item.missing_skills || [];
+        const totals = item.billing_preview_totals || [];
+        const totalLabel = totals.length ? totals.map((total) => esc(total.currency) + " " + esc(total.gross_amount_minor)).join(" / ") : "0";
+        const status = item.ready ? "Ready" : "Needs install";
+        const inputs = scenario.inputs || [];
+        const deliverables = scenario.deliverables || [];
+        const workflow = scenario.workflow || [];
+        const inputLabel = inputs.length ? inputs.slice(0, 2).map((input) => input.label || input.id).join(", ") : "none";
+        const deliverableLabel = deliverables.length ? deliverables.slice(0, 2).map((item) => item.label || item.id).join(", ") : "none";
+        const workflowLabel = workflow.length ? workflow.slice(0, 2).map((step) => step.title || step.id).join(" -> ") : "none";
+        const button = packInstalled
+          ? '<button class="primary" disabled>Installed</button>'
+          : '<button class="primary" data-install-scenario="' + esc(scenario.id) + '">Install</button>';
+        const missingLabel = missing.length ? missing.slice(0, 4).map((skill) => skill.name).join(", ") : "none";
+        return '<article class="scenario ' + (item.ready ? "ready" : "") + '">' +
+          '<div class="scenario-top">' +
+            '<div class="scenario-title"><h3>' + esc(scenario.name || scenario.id) + '</h3><div><span class="badge">' + esc(scenario.industry || "scenario") + '</span> <span class="badge">' + esc(pack.id || scenario.recommended_pack_id) + '</span> <span class="badge ' + (item.ready ? "good" : "") + '">' + status + '</span></div></div>' +
+            '<div class="scenario-actions">' + button + '</div>' +
+          '</div>' +
+          '<p class="pack-summary">' + esc(scenario.summary || "") + '</p>' +
+          '<div class="scenario-meta">' +
+            '<span>inputs: ' + esc(inputLabel) + '</span>' +
+            '<span>deliverables: ' + esc(deliverableLabel) + '</span>' +
+            '<span>steps: ' + esc(workflowLabel) + '</span>' +
+          '</div>' +
+          '<div class="record-row subtle"><span>missing: ' + esc(missingLabel) + '</span><span>' + esc(totalLabel) + '</span></div>' +
+        '</article>';
+      }).join("");
+      el("scenarios").querySelectorAll("[data-install-scenario]").forEach((button) => {
+        button.addEventListener("click", () => installScenario(button.getAttribute("data-install-scenario")));
+      });
     }
 
     function renderPacks() {
@@ -448,7 +575,7 @@ const commerceDashboardPage = `<!doctype html>
           '<div class="skills">' + skills.map((skill) => '<div class="skill"><span>' + esc(skill.name) + '</span><span class="badge ' + (skill.installed ? "good" : "") + '">' + (skill.installed ? "on" : "off") + '</span></div>').join("") + '</div>' +
         '</article>';
       }).join("");
-      document.querySelectorAll("[data-install]").forEach((button) => {
+      el("packs").querySelectorAll("[data-install]").forEach((button) => {
         button.addEventListener("click", () => installPack(button.getAttribute("data-install")));
       });
     }
@@ -466,21 +593,33 @@ const commerceDashboardPage = `<!doctype html>
     function billingRecord(record) {
       const target = record.skill_name || record.pack_id || "-";
       const amount = (record.currency || "-") + " " + (record.gross_amount_minor || 0);
+      const scenario = record.scenario_id ? "scenario=" + record.scenario_id : "scenario=-";
+      const integrity = recordIntegrityLabel(record);
       return '<article class="record">' +
         '<div class="record-row"><strong>' + esc(target) + '</strong><span class="amount">' + esc(amount) + '</span></div>' +
         '<div class="record-row subtle"><span>' + esc(record.type || "-") + " / " + esc(record.meter || "-") + '</span><span>' + esc(record.occurred_at || "") + '</span></div>' +
-        '<div class="record-row subtle"><span>' + esc(record.status || "-") + '</span><span>' + esc(record.record_id || "") + '</span></div>' +
+        '<div class="record-row subtle"><span>' + esc(record.status || "-") + '</span><span>' + esc(scenario) + '</span></div>' +
+        '<div class="record-row subtle"><span>' + esc(integrity) + '</span><span>' + esc(record.record_id || "") + '</span></div>' +
       '</article>';
     }
 
     function installRecord(record) {
       const target = record.pack_id || record.skill_name || "-";
       const skills = (record.skills || []).map((skill) => skill.name).join(", ");
+      const scenario = record.scenario_id ? "scenario=" + record.scenario_id : "scenario=-";
+      const integrity = recordIntegrityLabel(record);
       return '<article class="record">' +
         '<div class="record-row"><strong>' + esc(target) + '</strong><span>' + esc(record.status || "-") + '</span></div>' +
         '<div class="record-row subtle"><span>' + esc(record.action || "-") + '</span><span>' + esc(record.occurred_at || "") + '</span></div>' +
-        '<div class="record-row subtle"><span>' + esc(skills || "-") + '</span><span>' + esc(record.record_id || "") + '</span></div>' +
+        '<div class="record-row subtle"><span>' + esc(skills || "-") + '</span><span>' + esc(scenario) + '</span></div>' +
+        '<div class="record-row subtle"><span>' + esc(integrity) + '</span><span>' + esc(record.record_id || "") + '</span></div>' +
       '</article>';
+    }
+
+    function recordIntegrityLabel(record) {
+      const integrity = record.integrity || {};
+      if (!integrity.status) return "integrity=-";
+      return "integrity=" + integrity.status;
     }
 
     async function installPack(packID) {
@@ -500,6 +639,31 @@ const commerceDashboardPage = `<!doctype html>
           body: JSON.stringify({ pack_id: packID, yes: true })
         });
         toast("Installed " + packID);
+        await load();
+      } catch (err) {
+        setStatus("Ready");
+        toast(err.message, true);
+      }
+    }
+
+    async function installScenario(scenarioID) {
+      try {
+        setStatus("Installing");
+        const plan = await api("/v1/commerce/scenario-install-plan?scenario_id=" + encodeURIComponent(scenarioID));
+        const packID = plan.scenario && plan.scenario.recommended_pack && plan.scenario.recommended_pack.pack ? plan.scenario.recommended_pack.pack.id : "";
+        const total = plan.pack_plan && plan.pack_plan.totals ? plan.pack_plan.totals.map((item) => item.currency + " " + item.gross_amount_minor).join(" / ") : "0";
+        const changes = plan.pack_plan && plan.pack_plan.changes ? plan.pack_plan.changes.length : 0;
+        const ok = window.confirm("Install scenario " + scenarioID + "?\n\nRecommended pack: " + packID + "\nSkill changes: " + changes + "\nBilling preview: " + (total || "0"));
+        if (!ok) {
+          setStatus("Ready");
+          return;
+        }
+        await api("/v1/commerce/install-scenario", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-AGTX-Commerce-Token": mutationToken },
+          body: JSON.stringify({ scenario_id: scenarioID, yes: true })
+        });
+        toast("Installed " + scenarioID);
         await load();
       } catch (err) {
         setStatus("Ready");
@@ -536,6 +700,7 @@ const commerceDashboardPage = `<!doctype html>
     });
     el("refresh").addEventListener("click", () => load().catch((err) => { setStatus("Error"); toast(err.message, true); }));
     el("packFilter").addEventListener("change", () => load().catch((err) => toast(err.message, true)));
+    el("scenarioFilter").addEventListener("change", () => load().catch((err) => toast(err.message, true)));
     el("statusFilter").addEventListener("change", () => load().catch((err) => toast(err.message, true)));
     el("typeFilter").addEventListener("change", () => load().catch((err) => toast(err.message, true)));
     el("currencyFilter").addEventListener("change", () => load().catch((err) => toast(err.message, true)));

@@ -38,8 +38,12 @@ func TestDefaultRegistrySkillsDeclareBillingMeters(t *testing.T) {
 			if skill.VendorID != "agentex" {
 				t.Fatalf("expected agentex vendor, got %q", skill.VendorID)
 			}
-			if skill.Capability == nil || skill.Capability.Class != "tool" {
-				t.Fatalf("expected tool capability, got %#v", skill.Capability)
+			expectedClass := "tool"
+			if name == "research" {
+				expectedClass = "workflow"
+			}
+			if skill.Capability == nil || skill.Capability.Class != expectedClass {
+				t.Fatalf("expected %s capability, got %#v", expectedClass, skill.Capability)
 			}
 			if skill.Billing == nil {
 				t.Fatal("expected billing metadata")
@@ -77,26 +81,112 @@ func TestPlanInstallIncludesCommerceSummary(t *testing.T) {
 	}
 }
 
-func TestDefaultCapabilityPacksExposeStandardAndAdvanced(t *testing.T) {
+func TestDefaultCapabilityPacksExposeWebsiteFirstWaveAndBundles(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
 	packs, err := service.ListCapabilityPacks()
 	if err != nil {
 		t.Fatalf("list capability packs: %v", err)
 	}
-	if len(packs) != 2 {
-		t.Fatalf("expected standard and advanced packs, got %#v", packs)
+	expected := []string{"web_search", "web_fetch", "research", "ocr", "audio", "imagen", "docx", "xlsx", "pptx", "pdf", "documents", "standard", "advanced"}
+	if len(packs) != len(expected) {
+		t.Fatalf("expected website first-wave packs and bundles, got %#v", packs)
 	}
-	if packs[0].Pack.ID != "standard" || packs[0].Pack.Tier != "standard" {
-		t.Fatalf("expected standard pack first, got %#v", packs[0].Pack)
+	for index, id := range expected {
+		if packs[index].Pack.ID != id {
+			t.Fatalf("expected pack %s at index %d, got %#v", id, index, packs[index].Pack)
+		}
+		if packs[index].Pack.UseWhen == "" || len(packs[index].Pack.Inputs) == 0 || len(packs[index].Pack.Outputs) == 0 {
+			t.Fatalf("expected website contract metadata for %s: %#v", id, packs[index].Pack)
+		}
 	}
-	if packs[1].Pack.ID != "advanced" || packs[1].Pack.Tier != "advanced" {
-		t.Fatalf("expected advanced pack second, got %#v", packs[1].Pack)
-	}
-	if packs[0].Installed || packs[1].Installed {
+	if packs[0].Installed || packs[len(packs)-1].Installed {
 		t.Fatalf("fresh service should not have packs installed: %#v", packs)
 	}
-	if packs[0].Pack.Billing == nil || !hasBillingMeter(packs[0].Pack.Billing.Meters, "seat") || !hasBillingMeter(packs[0].Pack.Billing.Meters, "credit") {
-		t.Fatalf("expected standard pack billing metadata: %#v", packs[0].Pack.Billing)
+	pdf, err := service.GetCapabilityPack("pdf")
+	if err != nil {
+		t.Fatalf("get pdf pack: %v", err)
+	}
+	if pdf.Pack.CapabilityClass != "tool" || len(pdf.Pack.SkillNames) != 1 || pdf.Pack.SkillNames[0] != "pdf" || !hasBillingMeter(pdf.Pack.Billing.Meters, "page") {
+		t.Fatalf("expected single pdf capability pack metadata: %#v", pdf.Pack)
+	}
+	media, err := service.GetCapabilityPack("mediagen")
+	if err != nil {
+		t.Fatalf("get mediagen alias: %v", err)
+	}
+	if media.Pack.ID != "imagen" {
+		t.Fatalf("expected mediagen alias to resolve to imagen, got %#v", media.Pack)
+	}
+	standard, err := service.GetCapabilityPack("standard")
+	if err != nil {
+		t.Fatalf("get standard pack: %v", err)
+	}
+	if standard.Pack.Billing == nil || !hasBillingMeter(standard.Pack.Billing.Meters, "seat") || !hasBillingMeter(standard.Pack.Billing.Meters, "credit") {
+		t.Fatalf("expected standard pack billing metadata: %#v", standard.Pack.Billing)
+	}
+}
+
+func TestCapabilityScenariosMapRealTasksToPacksAndPlans(t *testing.T) {
+	service := NewService(PathsForRoot(t.TempDir()))
+	scenarios, err := service.ListCapabilityScenarios()
+	if err != nil {
+		t.Fatalf("list capability scenarios: %v", err)
+	}
+	if len(scenarios) < 6 {
+		t.Fatalf("expected built-in real task scenarios, got %#v", scenarios)
+	}
+	invoice, err := service.GetCapabilityScenario("invoice")
+	if err != nil {
+		t.Fatalf("get invoice scenario: %v", err)
+	}
+	if invoice.Scenario.ID != "invoice_processing" || invoice.RecommendedPack.Pack.ID != "standard" {
+		t.Fatalf("unexpected invoice scenario mapping: %#v", invoice)
+	}
+	if invoice.Ready || len(invoice.MissingSkills) == 0 {
+		t.Fatalf("fresh invoice scenario should need install: %#v", invoice)
+	}
+	if invoice.InstallPlan.Action != "install_pack" || len(invoice.InstallPlan.Changes) == 0 || len(invoice.BillingPreviewTotals) != 2 {
+		t.Fatalf("expected install plan and billing preview: %#v", invoice)
+	}
+	if len(invoice.Scenario.Inputs) < 2 || len(invoice.Scenario.Deliverables) < 2 || len(invoice.Scenario.Workflow) < 3 || len(invoice.Scenario.AcceptanceCriteria) < 2 {
+		t.Fatalf("expected website-ready scenario workflow metadata: %#v", invoice.Scenario)
+	}
+	if invoice.Scenario.Inputs[0].ID != "vendor_invoices" || !invoice.Scenario.Inputs[0].Required || invoice.Scenario.Deliverables[0].ID != "invoice_extract" {
+		t.Fatalf("unexpected invoice scenario IO metadata: %#v", invoice.Scenario)
+	}
+	if invoice.Scenario.Workflow[0].ID != "intake_documents" || len(invoice.Scenario.Workflow[0].Skills) == 0 {
+		t.Fatalf("unexpected invoice workflow metadata: %#v", invoice.Scenario.Workflow)
+	}
+	for _, record := range invoice.InstallPlan.BillingPreview {
+		if record.ScenarioID != "invoice_processing" {
+			t.Fatalf("scenario billing preview should carry scenario_id: %#v", invoice.InstallPlan.BillingPreview)
+		}
+	}
+	if !scenarioHasRequiredSkill(invoice, "pdf") || !scenarioHasRequiredSkill(invoice, "ocr") || !scenarioHasRequiredSkill(invoice, "xlsx") {
+		t.Fatalf("invoice scenario should require document extraction skills: %#v", invoice.RequiredSkills)
+	}
+	meeting, err := service.GetCapabilityScenario("meeting_deck")
+	if err != nil {
+		t.Fatalf("get meeting scenario alias: %v", err)
+	}
+	if meeting.Scenario.ID != "meeting_to_presentation" || meeting.RecommendedPack.Pack.ID != "advanced" || !scenarioHasRequiredSkill(meeting, "audio") || !scenarioHasRequiredSkill(meeting, "pptx") {
+		t.Fatalf("unexpected meeting scenario mapping: %#v", meeting)
+	}
+}
+
+func TestCapabilityScenarioReadinessFollowsInstalledPack(t *testing.T) {
+	service := NewService(PathsForRoot(t.TempDir()))
+	if _, err := service.InstallCapabilityPack(context.Background(), "standard"); err != nil {
+		t.Fatalf("install standard pack: %v", err)
+	}
+	invoice, err := service.GetCapabilityScenario("invoice_processing")
+	if err != nil {
+		t.Fatalf("get invoice scenario: %v", err)
+	}
+	if !invoice.Ready || !invoice.RecommendedPack.Installed || len(invoice.MissingSkills) != 0 {
+		t.Fatalf("expected invoice scenario ready after standard install: %#v", invoice)
+	}
+	if len(invoice.BillingPreviewTotals) != 0 || len(invoice.InstallPlan.BillingPreview) != 0 {
+		t.Fatalf("installed scenario should not preview new pack billing: %#v", invoice)
 	}
 }
 
@@ -144,6 +234,103 @@ func TestPlanCapabilityPackInstallOmitsBillingPreviewWhenAlreadyInstalled(t *tes
 	}
 }
 
+func TestInstallCapabilityScenarioRecordsScenarioInstallAndBilling(t *testing.T) {
+	service := NewService(PathsForRoot(t.TempDir()))
+	plan, err := service.PlanCapabilityScenarioInstall("invoice")
+	if err != nil {
+		t.Fatalf("plan scenario install: %v", err)
+	}
+	if plan.Action != "install_scenario" || plan.Scenario.Scenario.ID != "invoice_processing" || plan.PackPlan.Pack.Pack.ID != "standard" {
+		t.Fatalf("unexpected scenario install plan: %#v", plan)
+	}
+	if len(plan.PackPlan.BillingPreview) != 2 || plan.PackPlan.BillingPreview[0].ScenarioID != "invoice_processing" {
+		t.Fatalf("expected scenario-tagged billing preview: %#v", plan.PackPlan.BillingPreview)
+	}
+
+	result, err := service.InstallCapabilityScenario(context.Background(), "invoice")
+	if err != nil {
+		t.Fatalf("install scenario: %v", err)
+	}
+	if result.Scenario.Scenario.ID != "invoice_processing" || result.PackInstall.Pack.Pack.ID != "standard" || !result.Scenario.Ready {
+		t.Fatalf("unexpected scenario install result: %#v", result)
+	}
+	record := result.PackInstall.InstallRecord
+	if record == nil || record.Action != "install_scenario" || record.PackID != "standard" || record.ScenarioID != "invoice_processing" {
+		t.Fatalf("expected scenario install record: %#v", record)
+	}
+	if len(result.PackInstall.BillingRecords) != 2 {
+		t.Fatalf("expected scenario install billing records: %#v", result.PackInstall.BillingRecords)
+	}
+	for _, billing := range result.PackInstall.BillingRecords {
+		if billing.ScenarioID != "invoice_processing" || billing.PackID != "standard" || billing.Type != "pack_install" {
+			t.Fatalf("expected scenario-tagged billing record: %#v", billing)
+		}
+	}
+
+	installs, err := service.ListInstallRecords(RecordQueryOptions{ScenarioID: "invoice_processing"})
+	if err != nil {
+		t.Fatalf("list scenario install records: %v", err)
+	}
+	if len(installs) != 1 || installs[0].RecordID != record.RecordID || installs[0].Action != "install_scenario" {
+		t.Fatalf("unexpected scenario install records: %#v", installs)
+	}
+	aliasInstalls, err := service.ListInstallRecords(RecordQueryOptions{ScenarioID: "invoice"})
+	if err != nil {
+		t.Fatalf("list scenario alias install records: %v", err)
+	}
+	if len(aliasInstalls) != 1 || aliasInstalls[0].ScenarioID != "invoice_processing" {
+		t.Fatalf("expected alias scenario install records: %#v", aliasInstalls)
+	}
+	billing, err := service.ListBillingRecords(RecordQueryOptions{ScenarioID: "invoice_processing"})
+	if err != nil {
+		t.Fatalf("list scenario billing records: %v", err)
+	}
+	if len(billing.Records) != 2 || len(billing.Totals) != 2 || billing.Records[0].ScenarioID != "invoice_processing" {
+		t.Fatalf("unexpected scenario billing records: %#v", billing)
+	}
+	aliasBilling, err := service.ListBillingRecords(RecordQueryOptions{ScenarioID: "invoice"})
+	if err != nil {
+		t.Fatalf("list scenario alias billing records: %v", err)
+	}
+	if len(aliasBilling.Records) != 2 || aliasBilling.Records[0].ScenarioID != "invoice_processing" {
+		t.Fatalf("expected alias scenario billing records: %#v", aliasBilling)
+	}
+	emptyBilling, err := service.ListBillingRecords(RecordQueryOptions{ScenarioID: "meeting_to_presentation"})
+	if err != nil {
+		t.Fatalf("list unrelated scenario billing records: %v", err)
+	}
+	if len(emptyBilling.Records) != 0 || len(emptyBilling.Totals) != 0 {
+		t.Fatalf("unrelated scenario filter should be empty: %#v", emptyBilling)
+	}
+	snapshot, err := service.CommerceSnapshot(RecordQueryOptions{ScenarioID: "invoice_processing"})
+	if err != nil {
+		t.Fatalf("scenario snapshot: %v", err)
+	}
+	if len(snapshot.InstallRecords.Records) != 1 || len(snapshot.Billing.Records) != 2 {
+		t.Fatalf("expected scenario snapshot ledgers: %#v", snapshot)
+	}
+	if len(snapshot.Scenarios) != 1 || snapshot.Scenarios[0].Scenario.ID != "invoice_processing" {
+		t.Fatalf("expected scenario snapshot view filter: %#v", snapshot.Scenarios)
+	}
+	ledger, err := service.CapabilityScenarioLedger("invoice", RecordQueryOptions{})
+	if err != nil {
+		t.Fatalf("scenario ledger: %v", err)
+	}
+	if ledger.Scenario.Scenario.ID != "invoice_processing" || ledger.LatestInstall == nil || ledger.LatestInstall.RecordID != record.RecordID {
+		t.Fatalf("unexpected scenario ledger identity/latest install: %#v", ledger)
+	}
+	if len(ledger.InstallRecords) != 1 || len(ledger.Billing.Records) != 2 || len(ledger.Billing.Totals) != 2 || len(ledger.PackInstallRecords) != 2 || len(ledger.UsageRecords) != 0 {
+		t.Fatalf("unexpected scenario ledger records: %#v", ledger)
+	}
+	usageOnly, err := service.CapabilityScenarioLedger("invoice", RecordQueryOptions{Type: "skill_usage"})
+	if err != nil {
+		t.Fatalf("scenario usage-only ledger: %v", err)
+	}
+	if len(usageOnly.Billing.Records) != 0 || len(usageOnly.PackInstallRecords) != 0 || len(usageOnly.InstallRecords) != 1 {
+		t.Fatalf("expected usage-only ledger to filter billing records but keep scenario installs: %#v", usageOnly)
+	}
+}
+
 func TestInstallCapabilityPackRecordsInstallAndBilling(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
 	result, err := service.InstallCapabilityPack(context.Background(), "advanced")
@@ -176,6 +363,21 @@ func TestInstallCapabilityPackRecordsInstallAndBilling(t *testing.T) {
 	if len(billing.Records) != 2 || len(billing.Totals) != 2 {
 		t.Fatalf("unexpected billing ledger: %#v", billing)
 	}
+	if billing.Integrity == nil || billing.Integrity.Status != integrityStatusVerified {
+		t.Fatalf("expected verified billing ledger: %#v", billing.Integrity)
+	}
+	for _, record := range billing.Records {
+		if record.Integrity == nil || record.Integrity.Status != integrityStatusVerified {
+			t.Fatalf("expected verified billing record integrity: %#v", record)
+		}
+	}
+	installLedger, err := service.ListInstallRecordsWithIntegrity(RecordQueryOptions{PackID: "advanced"})
+	if err != nil {
+		t.Fatalf("list install records with integrity: %v", err)
+	}
+	if installLedger.Integrity == nil || installLedger.Integrity.Status != integrityStatusVerified || installLedger.Records[0].Integrity == nil {
+		t.Fatalf("expected verified install ledger: %#v", installLedger)
+	}
 	filteredInstalls, err := service.ListInstallRecords(RecordQueryOptions{PackID: "advanced", Status: "installed", From: result.InstallRecord.OccurredAt, To: result.InstallRecord.OccurredAt})
 	if err != nil {
 		t.Fatalf("filter install records: %v", err)
@@ -192,6 +394,94 @@ func TestInstallCapabilityPackRecordsInstallAndBilling(t *testing.T) {
 	}
 	if _, err := service.ListBillingRecords(RecordQueryOptions{From: "not-a-time"}); !IsErrorCode(err, CodeInvalidArgument) {
 		t.Fatalf("expected invalid time filter error, got %v", err)
+	}
+}
+
+func TestLedgerIntegrityDetectsTamperedBillingRecords(t *testing.T) {
+	root := t.TempDir()
+	service := NewService(PathsForRoot(root))
+	if _, err := service.InstallCapabilityPack(context.Background(), "advanced"); err != nil {
+		t.Fatalf("install advanced pack: %v", err)
+	}
+	billing, err := service.ListBillingRecords(RecordQueryOptions{PackID: "advanced"})
+	if err != nil {
+		t.Fatalf("list billing records: %v", err)
+	}
+	if billing.Integrity == nil || billing.Integrity.Status != integrityStatusVerified {
+		t.Fatalf("expected verified billing ledger before tamper: %#v", billing.Integrity)
+	}
+
+	path := filepath.Join(service.Paths.ConfigDir, billingRecordsFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read billing ledger: %v", err)
+	}
+	tampered := bytes.Replace(data, []byte(`"gross_amount_minor":2990`), []byte(`"gross_amount_minor":1`), 1)
+	if bytes.Equal(data, tampered) {
+		t.Fatalf("test did not modify billing ledger:\n%s", string(data))
+	}
+	if err := os.WriteFile(path, tampered, 0o644); err != nil {
+		t.Fatalf("write tampered billing ledger: %v", err)
+	}
+
+	billing, err = service.ListBillingRecords(RecordQueryOptions{PackID: "advanced"})
+	if err != nil {
+		t.Fatalf("list tampered billing records: %v", err)
+	}
+	if billing.Integrity == nil || billing.Integrity.Status != integrityStatusFailed || billing.Integrity.Failed == 0 {
+		t.Fatalf("expected failed integrity after tamper: %#v", billing.Integrity)
+	}
+	if billing.Records[0].Integrity == nil || billing.Records[0].Integrity.Status != integrityStatusFailed {
+		t.Fatalf("expected tampered record integrity failure: %#v", billing.Records[0])
+	}
+
+	if _, err := service.InstallCapabilityPack(context.Background(), "pdf"); !IsErrorCode(err, CodeIntegrityFailed) {
+		t.Fatalf("expected append to fail after tampered billing ledger, got %v", err)
+	}
+}
+
+func TestInstallWebsiteCapabilityPackRecordsInstallAndBilling(t *testing.T) {
+	service := NewService(PathsForRoot(t.TempDir()))
+	plan, err := service.PlanCapabilityPackInstall("pdf")
+	if err != nil {
+		t.Fatalf("plan pdf pack install: %v", err)
+	}
+	if plan.Pack.Pack.ID != "pdf" || len(plan.Changes) != 1 || len(plan.BillingPreview) != 1 || plan.BillingPreview[0].PackID != "pdf" || plan.BillingPreview[0].Meter != "page" {
+		t.Fatalf("unexpected pdf plan: %#v", plan)
+	}
+	result, err := service.InstallCapabilityPack(context.Background(), "pdf")
+	if err != nil {
+		t.Fatalf("install pdf pack: %v", err)
+	}
+	if result.Pack.Pack.ID != "pdf" || !result.Pack.Installed || len(result.Results) != 1 {
+		t.Fatalf("unexpected pdf install result: %#v", result)
+	}
+	if result.InstallRecord == nil || result.InstallRecord.PackID != "pdf" || result.InstallRecord.Action != "install_pack" {
+		t.Fatalf("expected pdf install record: %#v", result.InstallRecord)
+	}
+	if len(result.BillingRecords) != 1 || result.BillingRecords[0].PackID != "pdf" || result.BillingRecords[0].Meter != "page" {
+		t.Fatalf("expected pdf billing record: %#v", result.BillingRecords)
+	}
+	installs, err := service.ListInstallRecords(RecordQueryOptions{PackID: "pdf"})
+	if err != nil {
+		t.Fatalf("list pdf installs: %v", err)
+	}
+	if len(installs) != 1 || installs[0].PackID != "pdf" || !installRecordMatchesSkill(installs[0], "pdf") {
+		t.Fatalf("unexpected pdf install records: %#v", installs)
+	}
+	billing, err := service.ListBillingRecords(RecordQueryOptions{PackID: "pdf"})
+	if err != nil {
+		t.Fatalf("list pdf billing: %v", err)
+	}
+	if len(billing.Records) != 1 || len(billing.Totals) != 1 || billing.Records[0].PackID != "pdf" {
+		t.Fatalf("unexpected pdf billing records: %#v", billing)
+	}
+	snapshot, err := service.CommerceSnapshot(RecordQueryOptions{PackID: "pdf"})
+	if err != nil {
+		t.Fatalf("pdf snapshot: %v", err)
+	}
+	if len(snapshot.Packs) != 1 || snapshot.Packs[0].Pack.ID != "pdf" || len(snapshot.InstallRecords.Records) != 1 || len(snapshot.Billing.Records) != 1 {
+		t.Fatalf("unexpected pdf snapshot: %#v", snapshot)
 	}
 }
 
@@ -229,8 +519,16 @@ func TestCommerceHTTPHandlerExposesWebsiteQueries(t *testing.T) {
 	if !snapshotResponse.OK || len(snapshotResponse.Data.Packs) != 1 || snapshotResponse.Data.Packs[0].Pack.ID != "standard" {
 		t.Fatalf("unexpected snapshot response: %#v", snapshotResponse)
 	}
-	if len(snapshotResponse.Data.InstallRecords) != 1 || len(snapshotResponse.Data.Billing.Records) != 2 {
+	if len(snapshotResponse.Data.InstallRecords.Records) != 1 || len(snapshotResponse.Data.Billing.Records) != 2 {
 		t.Fatalf("expected install and billing records in snapshot: %#v", snapshotResponse.Data)
+	}
+	if len(snapshotResponse.Data.Scenarios) == 0 {
+		t.Fatalf("expected website snapshot scenarios: %#v", snapshotResponse.Data)
+	}
+	for _, scenario := range snapshotResponse.Data.Scenarios {
+		if scenario.RecommendedPack.Pack.ID != "standard" {
+			t.Fatalf("pack_id filter should keep only standard scenarios: %#v", scenario)
+		}
 	}
 
 	response, err = http.Get(server.URL + "/v1/commerce/install-records?skill=pdf")
@@ -239,13 +537,13 @@ func TestCommerceHTTPHandlerExposesWebsiteQueries(t *testing.T) {
 	}
 	defer response.Body.Close()
 	var installsResponse struct {
-		OK   bool            `json:"ok"`
-		Data []InstallRecord `json:"data"`
+		OK   bool                    `json:"ok"`
+		Data InstallRecordListResult `json:"data"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&installsResponse); err != nil {
 		t.Fatalf("decode install records: %v", err)
 	}
-	if !installsResponse.OK || len(installsResponse.Data) != 1 || !installRecordMatchesSkill(installsResponse.Data[0], "pdf") {
+	if !installsResponse.OK || len(installsResponse.Data.Records) != 1 || !installRecordMatchesSkill(installsResponse.Data.Records[0], "pdf") || installsResponse.Data.Integrity == nil {
 		t.Fatalf("unexpected install records response: %#v", installsResponse)
 	}
 
@@ -280,6 +578,70 @@ func TestCommerceHTTPHandlerExposesWebsiteQueries(t *testing.T) {
 	if !filteredBillingResponse.OK || len(filteredBillingResponse.Data.Records) != 1 || filteredBillingResponse.Data.Records[0].Currency != "USD" {
 		t.Fatalf("unexpected filtered billing records response: %#v", filteredBillingResponse)
 	}
+
+	response, err = http.Get(server.URL + "/v1/commerce/packs?pack_id=pdf")
+	if err != nil {
+		t.Fatalf("get pdf pack: %v", err)
+	}
+	defer response.Body.Close()
+	var packsResponse struct {
+		OK   bool                 `json:"ok"`
+		Data []CapabilityPackView `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&packsResponse); err != nil {
+		t.Fatalf("decode packs response: %v", err)
+	}
+	if !packsResponse.OK || len(packsResponse.Data) != 1 || packsResponse.Data[0].Pack.ID != "pdf" || packsResponse.Data[0].Pack.UseWhen == "" {
+		t.Fatalf("unexpected pdf pack response: %#v", packsResponse)
+	}
+
+	response, err = http.Get(server.URL + "/v1/commerce/packs?pack_id=mediagen")
+	if err != nil {
+		t.Fatalf("get mediagen pack alias: %v", err)
+	}
+	defer response.Body.Close()
+	var mediaPacksResponse struct {
+		OK   bool                 `json:"ok"`
+		Data []CapabilityPackView `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&mediaPacksResponse); err != nil {
+		t.Fatalf("decode media packs response: %v", err)
+	}
+	if !mediaPacksResponse.OK || len(mediaPacksResponse.Data) != 1 || mediaPacksResponse.Data[0].Pack.ID != "imagen" {
+		t.Fatalf("unexpected mediagen pack response: %#v", mediaPacksResponse)
+	}
+
+	response, err = http.Get(server.URL + "/v1/commerce/scenarios?pack_id=pdf")
+	if err != nil {
+		t.Fatalf("get pdf scenarios: %v", err)
+	}
+	defer response.Body.Close()
+	var pdfScenariosResponse struct {
+		OK   bool                     `json:"ok"`
+		Data []CapabilityScenarioView `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&pdfScenariosResponse); err != nil {
+		t.Fatalf("decode pdf scenarios: %v", err)
+	}
+	if !pdfScenariosResponse.OK || len(pdfScenariosResponse.Data) == 0 {
+		t.Fatalf("expected pdf-related scenarios: %#v", pdfScenariosResponse)
+	}
+
+	response, err = http.Get(server.URL + "/v1/commerce/scenarios?scenario_id=meeting_deck")
+	if err != nil {
+		t.Fatalf("get capability scenarios: %v", err)
+	}
+	defer response.Body.Close()
+	var scenariosResponse struct {
+		OK   bool                     `json:"ok"`
+		Data []CapabilityScenarioView `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&scenariosResponse); err != nil {
+		t.Fatalf("decode capability scenarios: %v", err)
+	}
+	if !scenariosResponse.OK || len(scenariosResponse.Data) != 1 || scenariosResponse.Data[0].Scenario.ID != "meeting_to_presentation" || scenariosResponse.Data[0].RecommendedPack.Pack.ID != "advanced" {
+		t.Fatalf("unexpected capability scenarios response: %#v", scenariosResponse)
+	}
 }
 
 func TestCommerceHTTPHandlerPlansCapabilityPackInstall(t *testing.T) {
@@ -304,6 +666,139 @@ func TestCommerceHTTPHandlerPlansCapabilityPackInstall(t *testing.T) {
 	}
 	if !planResponse.OK || planResponse.Data.Pack.Pack.ID != "standard" || len(planResponse.Data.Changes) == 0 || len(planResponse.Data.BillingPreview) != 2 {
 		t.Fatalf("unexpected install plan response: %#v", planResponse)
+	}
+
+	response, err = http.Get(server.URL + "/v1/commerce/install-plan?pack_id=pdf")
+	if err != nil {
+		t.Fatalf("get pdf install plan: %v", err)
+	}
+	defer response.Body.Close()
+	var pdfPlanResponse struct {
+		OK   bool                      `json:"ok"`
+		Data CapabilityPackInstallPlan `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&pdfPlanResponse); err != nil {
+		t.Fatalf("decode pdf install plan: %v", err)
+	}
+	if !pdfPlanResponse.OK || pdfPlanResponse.Data.Pack.Pack.ID != "pdf" || len(pdfPlanResponse.Data.Changes) != 1 || len(pdfPlanResponse.Data.BillingPreview) != 1 {
+		t.Fatalf("unexpected pdf install plan response: %#v", pdfPlanResponse)
+	}
+}
+
+func TestCommerceHTTPHandlerInstallsCapabilityScenarioWithScenarioRecords(t *testing.T) {
+	service := NewService(PathsForRoot(t.TempDir()))
+	server := httptest.NewServer(service.CommerceHTTPHandler(CommerceHTTPOptions{MutationToken: "token"}))
+	defer server.Close()
+
+	response, err := http.Get(server.URL + "/v1/commerce/scenario-install-plan?scenario_id=invoice")
+	if err != nil {
+		t.Fatalf("get scenario install plan: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected scenario plan status: %s", response.Status)
+	}
+	var planResponse struct {
+		OK   bool                          `json:"ok"`
+		Data CapabilityScenarioInstallPlan `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&planResponse); err != nil {
+		t.Fatalf("decode scenario plan: %v", err)
+	}
+	if !planResponse.OK || planResponse.Data.Action != "install_scenario" || planResponse.Data.Scenario.Scenario.ID != "invoice_processing" || len(planResponse.Data.PackPlan.BillingPreview) != 2 || planResponse.Data.PackPlan.BillingPreview[0].ScenarioID != "invoice_processing" {
+		t.Fatalf("unexpected scenario plan response: %#v", planResponse)
+	}
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/v1/commerce/install-scenario", bytes.NewBufferString(`{"scenario_id":"invoice","yes":true}`))
+	if err != nil {
+		t.Fatalf("new scenario install request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-AGTX-Commerce-Token", "token")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("post scenario install: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected scenario install status: %s", response.Status)
+	}
+	var installResponse struct {
+		OK   bool                            `json:"ok"`
+		Data CapabilityScenarioInstallResult `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&installResponse); err != nil {
+		t.Fatalf("decode scenario install: %v", err)
+	}
+	if !installResponse.OK || installResponse.Data.Scenario.Scenario.ID != "invoice_processing" || installResponse.Data.PackInstall.InstallRecord == nil || installResponse.Data.PackInstall.InstallRecord.ScenarioID != "invoice_processing" || installResponse.Data.PackInstall.InstallRecord.Action != "install_scenario" {
+		t.Fatalf("unexpected scenario install response: %#v", installResponse)
+	}
+
+	response, err = http.Get(server.URL + "/v1/commerce/install-records?scenario_id=invoice_processing")
+	if err != nil {
+		t.Fatalf("get scenario install records: %v", err)
+	}
+	defer response.Body.Close()
+	var installsResponse struct {
+		OK   bool                    `json:"ok"`
+		Data InstallRecordListResult `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&installsResponse); err != nil {
+		t.Fatalf("decode scenario install records: %v", err)
+	}
+	if !installsResponse.OK || len(installsResponse.Data.Records) != 1 || installsResponse.Data.Records[0].ScenarioID != "invoice_processing" || installsResponse.Data.Records[0].Action != "install_scenario" || installsResponse.Data.Integrity == nil {
+		t.Fatalf("unexpected scenario install records response: %#v", installsResponse)
+	}
+
+	response, err = http.Get(server.URL + "/v1/commerce/billing-records?scenario_id=invoice_processing")
+	if err != nil {
+		t.Fatalf("get scenario billing records: %v", err)
+	}
+	defer response.Body.Close()
+	var billingResponse struct {
+		OK   bool                    `json:"ok"`
+		Data BillingRecordListResult `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&billingResponse); err != nil {
+		t.Fatalf("decode scenario billing records: %v", err)
+	}
+	if !billingResponse.OK || len(billingResponse.Data.Records) != 2 || billingResponse.Data.Records[0].ScenarioID != "invoice_processing" || len(billingResponse.Data.Totals) != 2 {
+		t.Fatalf("unexpected scenario billing records response: %#v", billingResponse)
+	}
+
+	response, err = http.Get(server.URL + "/v1/commerce/scenario-ledger?scenario_id=invoice&type=pack_install")
+	if err != nil {
+		t.Fatalf("get scenario ledger: %v", err)
+	}
+	defer response.Body.Close()
+	var ledgerResponse struct {
+		OK   bool                     `json:"ok"`
+		Data CapabilityScenarioLedger `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&ledgerResponse); err != nil {
+		t.Fatalf("decode scenario ledger: %v", err)
+	}
+	if !ledgerResponse.OK || ledgerResponse.Data.Scenario.Scenario.ID != "invoice_processing" || ledgerResponse.Data.LatestInstall == nil || ledgerResponse.Data.LatestInstall.ScenarioID != "invoice_processing" {
+		t.Fatalf("unexpected scenario ledger response: %#v", ledgerResponse)
+	}
+	if len(ledgerResponse.Data.InstallRecords) != 1 || len(ledgerResponse.Data.Billing.Records) != 2 || len(ledgerResponse.Data.PackInstallRecords) != 2 || len(ledgerResponse.Data.UsageRecords) != 0 {
+		t.Fatalf("unexpected scenario ledger records response: %#v", ledgerResponse.Data)
+	}
+
+	response, err = http.Get(server.URL + "/v1/commerce/snapshot?scenario_id=invoice_processing")
+	if err != nil {
+		t.Fatalf("get scenario snapshot: %v", err)
+	}
+	defer response.Body.Close()
+	var snapshotResponse struct {
+		OK   bool                       `json:"ok"`
+		Data CapabilityCommerceSnapshot `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&snapshotResponse); err != nil {
+		t.Fatalf("decode scenario snapshot: %v", err)
+	}
+	if !snapshotResponse.OK || len(snapshotResponse.Data.InstallRecords.Records) != 1 || len(snapshotResponse.Data.Billing.Records) != 2 {
+		t.Fatalf("unexpected scenario snapshot response: %#v", snapshotResponse)
 	}
 }
 
@@ -367,7 +862,7 @@ func TestCommerceHTTPHandlerInstallsCapabilityPackWithConfirmation(t *testing.T)
 	if err := json.NewDecoder(response.Body).Decode(&snapshotResponse); err != nil {
 		t.Fatalf("decode snapshot after install: %v", err)
 	}
-	if !snapshotResponse.OK || len(snapshotResponse.Data.InstallRecords) != 1 || len(snapshotResponse.Data.Billing.Records) != 2 {
+	if !snapshotResponse.OK || len(snapshotResponse.Data.InstallRecords.Records) != 1 || len(snapshotResponse.Data.Billing.Records) != 2 {
 		t.Fatalf("expected installed pack in website snapshot: %#v", snapshotResponse.Data)
 	}
 }
@@ -392,7 +887,16 @@ func TestCommerceHTTPHandlerServesDashboard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read dashboard body: %v", err)
 	}
-	if !bytes.Contains(body, []byte("agtx Commerce")) || !bytes.Contains(body, []byte("/v1/commerce/install-pack")) || !bytes.Contains(body, []byte("dashboard-token")) {
+	if !bytes.Contains(body, []byte("agtx Commerce")) ||
+		!bytes.Contains(body, []byte("scenarioFilter")) ||
+		!bytes.Contains(body, []byte("deliverables:")) ||
+		!bytes.Contains(body, []byte("steps:")) ||
+		!bytes.Contains(body, []byte("/v1/commerce/scenario-install-plan")) ||
+		!bytes.Contains(body, []byte("/v1/commerce/install-scenario")) ||
+		!bytes.Contains(body, []byte("scenario-ledger")) ||
+		!bytes.Contains(body, []byte("scenario_id")) ||
+		!bytes.Contains(body, []byte("/v1/commerce/install-pack")) ||
+		!bytes.Contains(body, []byte("dashboard-token")) {
 		t.Fatalf("dashboard missing expected content: %s", string(body))
 	}
 }
@@ -544,6 +1048,15 @@ func TestCapabilityPackAliasesSupportChineseNames(t *testing.T) {
 	}
 }
 
+func scenarioHasRequiredSkill(view CapabilityScenarioView, name string) bool {
+	for _, skill := range view.RequiredSkills {
+		if skill.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRunSkillRecordsLocalUsageEvents(t *testing.T) {
 	service := installBillableEchoSkill(t, nil)
 	result, err := service.RunSkill(context.Background(), "echo_metered", []string{"hello"}, nil)
@@ -572,6 +1085,45 @@ func TestRunSkillRecordsLocalUsageEvents(t *testing.T) {
 	if len(billing.Records) != 1 || billing.Records[0].Type != "skill_usage" || billing.Records[0].UsageEventID != result.UsageEvents[0].EventID {
 		t.Fatalf("expected usage billing record: %#v", billing)
 	}
+
+	scenarioResult, err := service.RunSkillWithOptions(context.Background(), "echo_metered", RunOptions{
+		Args:       []string{"invoice"},
+		ScenarioID: "invoice",
+	})
+	if err != nil {
+		t.Fatalf("run scenario billable skill: %v", err)
+	}
+	if scenarioResult.ScenarioID != "invoice_processing" || len(scenarioResult.UsageEvents) != 1 || scenarioResult.UsageEvents[0].ScenarioID != "invoice_processing" {
+		t.Fatalf("expected scenario-tagged usage event: %#v", scenarioResult)
+	}
+	scenarioBilling, err := service.ListBillingRecords(RecordQueryOptions{ScenarioID: "invoice", Skill: "echo_metered", Type: "skill_usage"})
+	if err != nil {
+		t.Fatalf("list scenario usage billing records: %v", err)
+	}
+	if len(scenarioBilling.Records) != 1 || scenarioBilling.Records[0].ScenarioID != "invoice_processing" || scenarioBilling.Records[0].UsageEventID != scenarioResult.UsageEvents[0].EventID {
+		t.Fatalf("expected scenario usage billing record: %#v", scenarioBilling)
+	}
+	if _, err := service.RunSkillWithOptions(context.Background(), "echo_metered", RunOptions{ScenarioID: "unknown_scenario"}); !IsErrorCode(err, CodeNotFound) {
+		t.Fatalf("expected unknown scenario to fail before run, got %v", err)
+	}
+}
+
+func TestBuiltInSkillUsageRecordsWebsitePackID(t *testing.T) {
+	service := installBillablePDFSkill(t, nil)
+	result, err := service.RunSkillWithOptions(context.Background(), "pdf", RunOptions{ScenarioID: "invoice"})
+	if err != nil {
+		t.Fatalf("run pdf skill: %v", err)
+	}
+	if len(result.UsageEvents) != 1 || result.UsageEvents[0].PackID != "pdf" || result.UsageEvents[0].ScenarioID != "invoice_processing" {
+		t.Fatalf("expected pdf usage to use website pack id: %#v", result.UsageEvents)
+	}
+	billing, err := service.ListBillingRecords(RecordQueryOptions{PackID: "pdf", ScenarioID: "invoice", Skill: "pdf", Type: "skill_usage"})
+	if err != nil {
+		t.Fatalf("list pdf usage billing: %v", err)
+	}
+	if len(billing.Records) != 1 || billing.Records[0].PackID != "pdf" || billing.Records[0].ScenarioID != "invoice_processing" {
+		t.Fatalf("expected pdf usage billing under pdf pack: %#v", billing)
+	}
 }
 
 func TestRunSkillReportsUsageEventsToPro(t *testing.T) {
@@ -598,7 +1150,7 @@ func TestRunSkillReportsUsageEventsToPro(t *testing.T) {
 			t.Fatalf("save auth: %v", err)
 		}
 	})
-	result, err := service.RunSkill(context.Background(), "echo_metered", nil, nil)
+	result, err := service.RunSkillWithOptions(context.Background(), "echo_metered", RunOptions{ScenarioID: "invoice"})
 	if err != nil {
 		t.Fatalf("run billable skill: %v", err)
 	}
@@ -608,16 +1160,19 @@ func TestRunSkillReportsUsageEventsToPro(t *testing.T) {
 	if got.EventID == "" || got.PackID != "echo_metered" || got.VersionID != "1.0.0" || got.VendorID != "agentex" || got.Meter != "call" {
 		t.Fatalf("unexpected usage payload: %#v", got)
 	}
+	if got.ScenarioID != "invoice_processing" || result.ScenarioID != "invoice_processing" {
+		t.Fatalf("expected scenario-tagged usage payload: request=%#v result=%#v", got, result)
+	}
 	if got.InvocationID == "" || got.InvocationID != result.InvocationID {
 		t.Fatalf("expected invocation id in payload: request=%#v result=%#v", got, result)
 	}
 	if got.Quantity != 1 || got.UnitPriceMinor != 3 || got.GrossAmountMinor != 3 || got.Currency != "AGTX_CREDIT" {
 		t.Fatalf("unexpected usage amount payload: %#v", got)
 	}
-	if got.Evidence["source"] != "agtx_cli" || got.Evidence["skill"] != "echo_metered" {
+	if got.Evidence["source"] != "agtx_cli" || got.Evidence["skill"] != "echo_metered" || got.Evidence["scenario_id"] != "invoice_processing" {
 		t.Fatalf("unexpected usage evidence: %#v", got.Evidence)
 	}
-	if len(result.UsageEvents) != 1 || result.UsageEvents[0].Status != "recorded" || result.UsageEvents[0].EventID != "server-event" || result.UsageEvents[0].GrossAmountMinor != 42 {
+	if len(result.UsageEvents) != 1 || result.UsageEvents[0].Status != "recorded" || result.UsageEvents[0].EventID != "server-event" || result.UsageEvents[0].ScenarioID != "invoice_processing" || result.UsageEvents[0].GrossAmountMinor != 42 {
 		t.Fatalf("unexpected reported usage events: %#v", result.UsageEvents)
 	}
 }
@@ -841,6 +1396,48 @@ func installBillableEchoSkill(t *testing.T, configure func(*Service)) *Service {
 	}}}
 	if _, err := service.InstallSkills(context.Background(), []string{"echo_metered"}); err != nil {
 		t.Fatalf("install billable skill: %v", err)
+	}
+	return service
+}
+
+func installBillablePDFSkill(t *testing.T, configure func(*Service)) *Service {
+	t.Helper()
+	root := t.TempDir()
+	entrypoint := "pdf.sh"
+	if runtime.GOOS == "windows" {
+		entrypoint = "pdf.bat"
+	}
+	archivePath := filepath.Join(root, "pdf.zip")
+	sum := writeEchoPackage(t, archivePath, entrypoint)
+	service := NewService(PathsForRoot(root))
+	if configure != nil {
+		configure(service)
+	}
+	service.Registry = Registry{SchemaVersion: 1, Skills: []SkillManifest{{
+		SchemaVersion: 1,
+		Name:          "pdf",
+		Version:       "1.0.0",
+		VendorID:      "agentex",
+		Capability:    &CapabilityInfo{Class: "tool"},
+		Summary:       "PDF",
+		Description:   "PDF test package",
+		Platforms: []PlatformBundle{{
+			OS:         runtime.GOOS,
+			Arch:       runtime.GOARCH,
+			URL:        archivePath,
+			SHA256:     sum,
+			Archive:    "zip",
+			Entrypoint: entrypoint,
+		}},
+		Billing: &BillingInfo{
+			Meters: []BillingMeter{
+				{Meter: "page", Currency: "AGTX_CREDIT", UnitPrice: 5, RefundPolicy: "Do not bill failed invocations."},
+			},
+			RevenueShare: &RevenueShare{ISV: 70, Platform: 30, Basis: "net_revenue_after_payment_processor_tax_and_refunds"},
+		},
+	}}}
+	if _, err := service.InstallSkills(context.Background(), []string{"pdf"}); err != nil {
+		t.Fatalf("install billable pdf skill: %v", err)
 	}
 	return service
 }
