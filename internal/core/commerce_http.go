@@ -43,6 +43,10 @@ func CommerceHTTPEndpoints() []CommerceHTTPEndpoint {
 		{Name: "get_capability_scenario_ledger", Method: http.MethodGet, Path: "/v1/commerce/scenario-ledger", Description: "Return one task scenario with matching install records, billing records, totals, and latest install state.", Query: []string{"scenario_id", "skill", "status", "type", "currency", "from", "to", "limit"}},
 		{Name: "list_install_records", Method: http.MethodGet, Path: "/v1/commerce/install-records", Description: "Return local capability-pack and skill install records.", Query: []string{"pack_id", "scenario_id", "skill", "status", "from", "to", "limit"}},
 		{Name: "list_billing_records", Method: http.MethodGet, Path: "/v1/commerce/billing-records", Description: "Return local pack-install and skill-usage billing records.", Query: []string{"pack_id", "scenario_id", "skill", "status", "type", "currency", "from", "to", "limit"}},
+		{Name: "list_commerce_receipts", Method: http.MethodGet, Path: "/v1/commerce/receipts", Description: "Return local server receipt records for submitted commerce proofs.", Query: []string{"status", "from", "to", "limit"}},
+		{Name: "get_commerce_integrity", Method: http.MethodGet, Path: "/v1/commerce/integrity", Description: "Return local commerce ledger integrity, anchor, and private-file checks for website account/security views."},
+		{Name: "get_commerce_proof", Method: http.MethodGet, Path: "/v1/commerce/proof", Description: "Return a challenge-bound Ed25519 proof over local commerce ledger integrity for website verification.", Query: []string{"challenge"}},
+		{Name: "submit_commerce_proof", Method: http.MethodPost, Path: "/v1/commerce/proof/submit", Description: "Submit a challenge-bound commerce proof to Pro for a server receipt and record the signed receipt locally.", Headers: []string{"X-AGTX-Commerce-Token"}, Body: []string{"challenge", "yes"}},
 		{Name: "get_commerce_snapshot", Method: http.MethodGet, Path: "/v1/commerce/snapshot", Description: "Return packs, scenarios, install records, and billing records in one website-friendly snapshot.", Query: []string{"pack_id", "scenario_id", "skill", "status", "type", "currency", "from", "to", "limit"}},
 	}
 }
@@ -64,7 +68,7 @@ func (h *commerceHTTPHandler) route(writer http.ResponseWriter, request *http.Re
 	if allowedOrigin != "" {
 		writer.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
 		writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-AGTX-Commerce-Token")
+		writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-AGTX-Commerce-Token, X-AGTX-Commerce-Challenge")
 		writer.Header().Set("Access-Control-Max-Age", "600")
 		if allowedOrigin != "*" {
 			writer.Header().Add("Vary", "Origin")
@@ -151,6 +155,29 @@ func (h *commerceHTTPHandler) route(writer http.ResponseWriter, request *http.Re
 			return
 		}
 		h.listBillingRecords(writer, request)
+	case "/v1/commerce/receipts":
+		if !h.requireMethod(writer, request, http.MethodGet) {
+			return
+		}
+		h.listCommerceReceipts(writer, request)
+	case "/v1/commerce/integrity":
+		if !h.requireMethod(writer, request, http.MethodGet) {
+			return
+		}
+		h.getCommerceIntegrity(writer, request)
+	case "/v1/commerce/proof":
+		if !h.requireMethod(writer, request, http.MethodGet) {
+			return
+		}
+		h.getCommerceProof(writer, request)
+	case "/v1/commerce/proof/submit":
+		if !h.requireMethod(writer, request, http.MethodPost) {
+			return
+		}
+		if !h.authorizeMutation(writer, request) {
+			return
+		}
+		h.submitCommerceProof(writer, request)
 	case "/v1/commerce/snapshot":
 		if !h.requireMethod(writer, request, http.MethodGet) {
 			return
@@ -336,6 +363,20 @@ func (h *commerceHTTPHandler) listBillingRecords(writer http.ResponseWriter, req
 	h.writeOK(writer, records)
 }
 
+func (h *commerceHTTPHandler) listCommerceReceipts(writer http.ResponseWriter, request *http.Request) {
+	options, err := recordQueryOptionsFromURL(request)
+	if err != nil {
+		h.writeError(writer, httpStatusForError(err), err)
+		return
+	}
+	records, err := h.service.ListCommerceReceipts(options)
+	if err != nil {
+		h.writeError(writer, httpStatusForError(err), err)
+		return
+	}
+	h.writeOK(writer, records)
+}
+
 func (h *commerceHTTPHandler) getCapabilityScenarioLedger(writer http.ResponseWriter, request *http.Request) {
 	options, err := recordQueryOptionsFromURL(request)
 	if err != nil {
@@ -371,6 +412,53 @@ func (h *commerceHTTPHandler) getCommerceSnapshot(writer http.ResponseWriter, re
 		snapshot.Scenarios = filterCapabilityScenariosByPack(snapshot.Scenarios, options.PackID)
 	}
 	h.writeOK(writer, snapshot)
+}
+
+func (h *commerceHTTPHandler) getCommerceIntegrity(writer http.ResponseWriter, request *http.Request) {
+	result, err := h.service.CommerceIntegrity()
+	if err != nil {
+		h.writeError(writer, httpStatusForError(err), err)
+		return
+	}
+	h.writeOK(writer, result)
+}
+
+func (h *commerceHTTPHandler) getCommerceProof(writer http.ResponseWriter, request *http.Request) {
+	challenge := strings.TrimSpace(request.URL.Query().Get("challenge"))
+	if challenge == "" {
+		challenge = strings.TrimSpace(request.Header.Get("X-AGTX-Commerce-Challenge"))
+	}
+	result, err := h.service.CommerceProof(challenge)
+	if err != nil {
+		h.writeError(writer, httpStatusForError(err), err)
+		return
+	}
+	h.writeOK(writer, result)
+}
+
+func (h *commerceHTTPHandler) submitCommerceProof(writer http.ResponseWriter, request *http.Request) {
+	body, err := decodeCommerceProofSubmitRequest(writer, request)
+	if err != nil {
+		h.writeError(writer, httpStatusForError(err), err)
+		return
+	}
+	if !body.Yes {
+		err := NewError(CodeConfirmationRequired, "submit-proof requires explicit confirmation", map[string]any{
+			"action":           "submit-proof",
+			"challenge":        body.Challenge,
+			"expected":         "yes=true",
+			"retry_with":       map[string]any{"challenge": body.Challenge, "yes": true},
+			"supported_fields": []string{"challenge", "yes"},
+		})
+		h.writeError(writer, httpStatusForError(err), err)
+		return
+	}
+	result, err := h.service.SubmitCommerceProof(request.Context(), body.Challenge)
+	if err != nil {
+		h.writeError(writer, httpStatusForError(err), err)
+		return
+	}
+	h.writeOK(writer, result)
 }
 
 func filterCapabilityScenariosByPack(scenarios []CapabilityScenarioView, packID string) []CapabilityScenarioView {
@@ -413,6 +501,11 @@ type capabilityScenarioInstallRequest struct {
 	Yes        bool   `json:"yes"`
 }
 
+type commerceProofSubmitHTTPRequest struct {
+	Challenge string `json:"challenge"`
+	Yes       bool   `json:"yes"`
+}
+
 func decodeCapabilityPackInstallRequest(writer http.ResponseWriter, request *http.Request) (capabilityPackInstallRequest, error) {
 	defer request.Body.Close()
 	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, defaultConfigMaxBytes))
@@ -451,6 +544,27 @@ func decodeCapabilityScenarioInstallRequest(writer http.ResponseWriter, request 
 	requestBody.ScenarioID = strings.TrimSpace(requestBody.ScenarioID)
 	if requestBody.ScenarioID == "" {
 		return capabilityScenarioInstallRequest{}, NewError(CodeInvalidArgument, "scenario_id is required", map[string]any{"field": "scenario_id", "supported_fields": []string{"scenario_id", "yes"}})
+	}
+	return requestBody, nil
+}
+
+func decodeCommerceProofSubmitRequest(writer http.ResponseWriter, request *http.Request) (commerceProofSubmitHTTPRequest, error) {
+	defer request.Body.Close()
+	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, defaultConfigMaxBytes))
+	if err != nil {
+		return commerceProofSubmitHTTPRequest{}, NewError(CodeSizeLimitExceeded, "commerce proof submit request body exceeds size limit", map[string]any{"limit": defaultConfigMaxBytes})
+	}
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		return commerceProofSubmitHTTPRequest{}, NewError(CodeInvalidArgument, "commerce proof submit request body is required", map[string]any{"supported_fields": []string{"challenge", "yes"}})
+	}
+	var requestBody commerceProofSubmitHTTPRequest
+	if err := decodeJSONStrict(body, &requestBody); err != nil {
+		return commerceProofSubmitHTTPRequest{}, NewError(CodeInvalidArgument, "invalid commerce proof submit request", map[string]any{"error": err.Error(), "supported_fields": []string{"challenge", "yes"}})
+	}
+	requestBody.Challenge = strings.TrimSpace(requestBody.Challenge)
+	if requestBody.Challenge == "" {
+		return commerceProofSubmitHTTPRequest{}, NewError(CodeInvalidArgument, "challenge is required", map[string]any{"field": "challenge", "supported_fields": []string{"challenge", "yes"}})
 	}
 	return requestBody, nil
 }

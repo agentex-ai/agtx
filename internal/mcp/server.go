@@ -472,6 +472,16 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		return toolJSON(records), nil
+	case "list_commerce_receipts":
+		options, err := recordQueryOptions(args, 100)
+		if err != nil {
+			return nil, err
+		}
+		records, err := s.service.ListCommerceReceipts(options)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(records), nil
 	case "get_commerce_snapshot":
 		options, err := recordQueryOptions(args, 200)
 		if err != nil {
@@ -482,6 +492,45 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 			return nil, err
 		}
 		return toolJSON(snapshot), nil
+	case "get_commerce_integrity":
+		result, err := s.service.CommerceIntegrity()
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(result), nil
+	case "get_commerce_proof":
+		challenge, err := args.String("challenge")
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(challenge) == "" {
+			return nil, args.missingRequiredArgument("challenge", "non_empty_string")
+		}
+		result, err := s.service.CommerceProof(challenge)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(result), nil
+	case "submit_commerce_proof":
+		challenge, err := args.String("challenge")
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(challenge) == "" {
+			return nil, args.missingRequiredArgument("challenge", "non_empty_string")
+		}
+		yes, err := args.Bool("yes", false)
+		if err != nil {
+			return nil, err
+		}
+		if !yes {
+			return nil, args.confirmationRequired("submit_commerce_proof requires yes=true")
+		}
+		result, err := s.service.SubmitCommerceProof(context.Background(), challenge)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(result), nil
 	case "get_status":
 		status, err := s.service.Status()
 		if err != nil {
@@ -970,7 +1019,24 @@ func tools() []map[string]any {
 		tool("get_capability_scenario_ledger", "Return one real task scenario with matching install records, billing records, totals, latest install, and usage/install split for website account views.", scenarioLedgerInputSchema(), capabilityScenarioLedgerSchema()),
 		tool("list_install_records", "List local capability pack and skill install records with ledger integrity for website account/history views.", recordQueryInputSchema(), installRecordListResultSchema()),
 		tool("list_billing_records", "List local billing records and totals produced by pack installs or skill usage.", recordQueryInputSchema(), billingRecordListResultSchema()),
-		tool("get_commerce_snapshot", "Return capability packs, install records, and billing records in one website-friendly snapshot.", recordQueryInputSchema(), commerceSnapshotSchema()),
+		tool("list_commerce_receipts", "List local Pro server receipts for submitted commerce proofs with local ledger integrity.", recordQueryInputSchema(), commerceReceiptListResultSchema()),
+		tool("get_commerce_snapshot", "Return capability packs, install records, billing records, and commerce receipts in one website-friendly snapshot.", recordQueryInputSchema(), commerceSnapshotSchema()),
+		tool("get_commerce_integrity", "Return local commerce ledger integrity, anchor, and private-file checks for website account/security views.", objectSchema(nil, nil, nil), commerceIntegritySchema()),
+		tool("get_commerce_proof", "Return a challenge-bound Ed25519 proof over local commerce ledger integrity for website account/security verification.", objectSchema(
+			map[string]any{
+				"challenge": nonEmptyStringSchema("Website-provided nonce or challenge that must be echoed and signed in the proof."),
+			},
+			[]string{"challenge"},
+			nil,
+		), commerceProofSchema()),
+		tool("submit_commerce_proof", "Submit a challenge-bound commerce proof to Pro for a server receipt and store the signed receipt locally. Requires yes=true.", objectSchema(
+			map[string]any{
+				"challenge": nonEmptyStringSchema("Website-provided nonce or challenge that must be echoed and signed in the proof."),
+				"yes":       booleanSchema("Must be true to submit the proof to Pro and write the local receipt record."),
+			},
+			[]string{"challenge"},
+			nil,
+		), commerceReceiptSubmitResultSchema()),
 		tool("list_agent_targets", "List supported agent integration targets and their setup metadata.", objectSchema(nil, nil, nil), arraySchema(agentTargetSchema(), "Supported agent integration targets.")),
 		tool("get_agent_target", "Return setup metadata and snippets for one supported agent target.", objectSchema(
 			map[string]any{
@@ -2193,6 +2259,8 @@ func ledgerIntegritySummarySchema() map[string]any {
 			"verified":        nonNegativeIntegerSchema("Number of verified signed records."),
 			"failed":          nonNegativeIntegerSchema("Number of records with failed integrity checks."),
 			"legacy_unsigned": nonNegativeIntegerSchema("Number of records written before local integrity signing."),
+			"anchors":         nonNegativeIntegerSchema("Number of local ledger anchors inspected."),
+			"anchor_matched":  booleanSchema("Whether local ledger anchors match the current ledger head."),
 			"key_id":          stringSchema("Local integrity key identifier."),
 			"last_hash":       stringSchema("Last record hash observed in the ledger."),
 			"head_hash":       stringSchema("Signed ledger head hash."),
@@ -2200,7 +2268,7 @@ func ledgerIntegritySummarySchema() map[string]any {
 			"verified_at":     stringSchema("Timestamp when the ledger was verified."),
 			"reason":          stringSchema("First failure reason, when any."),
 		},
-		[]string{"ledger", "status", "records", "verified", "failed", "legacy_unsigned", "head_matched"},
+		[]string{"ledger", "status", "records", "verified", "failed", "legacy_unsigned", "anchors", "anchor_matched", "head_matched"},
 		nil,
 	)
 }
@@ -2226,9 +2294,141 @@ func commerceSnapshotSchema() map[string]any {
 			"scenarios":       arraySchema(capabilityScenarioViewSchema(), "Task scenarios mapped to capability packs."),
 			"install_records": installRecordListResultSchema(),
 			"billing":         billingRecordListResultSchema(),
+			"receipts":        commerceReceiptListResultSchema(),
 			"integrity":       arraySchema(ledgerIntegritySummarySchema(), "Local ledger integrity summaries."),
 		},
-		[]string{"schema_version", "generated_at", "packs", "billing"},
+		[]string{"schema_version", "generated_at", "packs", "billing", "receipts"},
+		nil,
+	)
+}
+
+func commerceIntegritySchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"schema_version": positiveIntegerSchema("Commerce integrity result schema version."),
+			"generated_at":   nonEmptyStringSchema("Integrity verification timestamp."),
+			"ok":             booleanSchema("Whether all commerce ledger integrity and private-path checks passed."),
+			"summary":        diagnosticSummarySchema(),
+			"ledgers":        arraySchema(ledgerIntegritySummarySchema(), "Local commerce ledger integrity summaries."),
+			"checks":         arraySchema(doctorCheckSchema(), "Commerce ledger integrity and private-path checks."),
+		},
+		[]string{"schema_version", "generated_at", "ok", "summary", "ledgers", "checks"},
+		nil,
+	)
+}
+
+func commerceProofPayloadSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"schema_version": positiveIntegerSchema("Commerce proof payload schema version."),
+			"generated_at":   nonEmptyStringSchema("Proof payload generation timestamp."),
+			"challenge":      nonEmptyStringSchema("Website-provided nonce or challenge covered by the signature."),
+			"subject":        nonEmptyStringSchema("Signed proof subject."),
+			"trust_level":    nonEmptyStringSchema("Local proof trust level."),
+			"receipt_status": nonEmptyStringSchema("Whether the proof has only local signing or a server receipt."),
+			"algorithm":      nonEmptyStringSchema("Signature algorithm covered by the payload."),
+			"key_id":         nonEmptyStringSchema("Local proof signing key identifier."),
+			"public_key":     nonEmptyStringSchema("Base64 Ed25519 public key covered by the payload."),
+			"device_id":      stringSchema("Optional local Pro device id."),
+			"ok":             booleanSchema("Whether all commerce ledger integrity and private-path checks passed."),
+			"summary":        diagnosticSummarySchema(),
+			"ledgers":        arraySchema(ledgerIntegritySummarySchema(), "Local commerce ledger integrity summaries covered by the proof."),
+			"checks":         arraySchema(doctorCheckSchema(), "Commerce ledger checks covered by the proof."),
+		},
+		[]string{"schema_version", "generated_at", "challenge", "subject", "trust_level", "receipt_status", "algorithm", "key_id", "public_key", "ok", "summary", "ledgers", "checks"},
+		nil,
+	)
+}
+
+func commerceProofSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"schema_version": positiveIntegerSchema("Commerce proof schema version."),
+			"generated_at":   nonEmptyStringSchema("Proof generation timestamp."),
+			"challenge":      nonEmptyStringSchema("Website-provided nonce or challenge covered by the proof."),
+			"subject":        nonEmptyStringSchema("Signed proof subject."),
+			"trust_level":    nonEmptyStringSchema("Local proof trust level."),
+			"receipt_status": nonEmptyStringSchema("Whether the proof has only local signing or a server receipt."),
+			"algorithm":      nonEmptyStringSchema("Signature algorithm."),
+			"key_id":         nonEmptyStringSchema("Local proof signing key identifier."),
+			"public_key":     nonEmptyStringSchema("Base64 Ed25519 public key."),
+			"payload_hash":   nonEmptyStringSchema("SHA-256 hash of the canonical proof payload."),
+			"signature":      nonEmptyStringSchema("Base64 Ed25519 signature over the canonical proof payload."),
+			"payload":        commerceProofPayloadSchema(),
+		},
+		[]string{"schema_version", "generated_at", "challenge", "subject", "trust_level", "receipt_status", "algorithm", "key_id", "public_key", "payload_hash", "signature", "payload"},
+		nil,
+	)
+}
+
+func commerceReceiptSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"schema_version":     positiveIntegerSchema("Commerce receipt schema version."),
+			"receipt_id":         nonEmptyStringSchema("Stable server receipt id."),
+			"status":             nonEmptyStringSchema("Receipt status such as server_received."),
+			"received_at":        nonEmptyStringSchema("Server receipt timestamp."),
+			"issuer":             stringSchema("Receipt issuer."),
+			"server_ledger_id":   stringSchema("Server-side ledger identifier."),
+			"server_sequence":    nonNegativeIntegerSchema("Server-side receipt sequence when available."),
+			"algorithm":          nonEmptyStringSchema("Server receipt signature algorithm."),
+			"key_id":             nonEmptyStringSchema("Server receipt signing key id."),
+			"public_key":         nonEmptyStringSchema("Base64 server receipt Ed25519 public key."),
+			"proof_payload_hash": nonEmptyStringSchema("SHA-256 hash of the submitted commerce proof payload."),
+			"proof_signature":    nonEmptyStringSchema("Base64 local proof signature acknowledged by the server."),
+			"proof_key_id":       nonEmptyStringSchema("Local proof signing key acknowledged by the server."),
+			"challenge":          nonEmptyStringSchema("Website-provided challenge covered by the submitted proof."),
+			"device_id":          stringSchema("Optional Pro device id acknowledged by the server."),
+			"server_signature":   nonEmptyStringSchema("Base64 server signature over the canonical receipt payload."),
+			"integrity":          recordIntegritySchema(),
+		},
+		[]string{"schema_version", "receipt_id", "status", "received_at", "algorithm", "key_id", "public_key", "proof_payload_hash", "proof_signature", "proof_key_id", "challenge", "server_signature"},
+		nil,
+	)
+}
+
+func commerceReceiptVerificationSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"schema_version":           positiveIntegerSchema("Commerce receipt verification schema version."),
+			"verified_at":              nonEmptyStringSchema("Verification timestamp."),
+			"ok":                       booleanSchema("Whether the receipt matches the proof and server signature."),
+			"receipt_matched":          booleanSchema("Whether required receipt envelope fields are present and valid."),
+			"proof_matched":            booleanSchema("Whether receipt fields match the submitted proof."),
+			"proof_signature_matched":  booleanSchema("Whether the original local proof signature verifies."),
+			"server_signature_matched": booleanSchema("Whether the server receipt signature verifies."),
+			"expected_payload_hash":    stringSchema("Proof payload hash expected from the submitted proof."),
+			"actual_payload_hash":      stringSchema("Proof payload hash recorded in the receipt."),
+			"receipt_id":               stringSchema("Receipt id that was verified."),
+			"status":                   stringSchema("Receipt status that was verified."),
+			"reason":                   stringSchema("Verification failure reason, when any."),
+		},
+		[]string{"schema_version", "verified_at", "ok", "receipt_matched", "proof_matched", "proof_signature_matched", "server_signature_matched"},
+		nil,
+	)
+}
+
+func commerceReceiptListResultSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"records":   arraySchema(commerceReceiptSchema(), "Local commerce proof server receipts."),
+			"integrity": ledgerIntegritySummarySchema(),
+		},
+		[]string{"records"},
+		nil,
+	)
+}
+
+func commerceReceiptSubmitResultSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"schema_version": positiveIntegerSchema("Commerce receipt submit result schema version."),
+			"submitted_at":   nonEmptyStringSchema("Proof submission timestamp."),
+			"proof":          commerceProofSchema(),
+			"receipt":        commerceReceiptSchema(),
+			"verification":   commerceReceiptVerificationSchema(),
+		},
+		[]string{"schema_version", "submitted_at", "proof", "receipt", "verification"},
 		nil,
 	)
 }
@@ -2358,13 +2558,17 @@ func allowedToolArguments(name string) (map[string]struct{}, bool) {
 		return toolArgumentSet("scenario", "yes"), true
 	case "get_capability_scenario_ledger":
 		return toolArgumentSet("scenario", "pack_id", "scenario_id", "skill", "status", "type", "currency", "from", "to", "limit"), true
-	case "list_install_records", "list_billing_records", "get_commerce_snapshot":
+	case "list_install_records", "list_billing_records", "list_commerce_receipts", "get_commerce_snapshot":
 		return toolArgumentSet("pack_id", "scenario_id", "skill", "status", "type", "currency", "from", "to", "limit"), true
+	case "get_commerce_proof":
+		return toolArgumentSet("challenge"), true
+	case "submit_commerce_proof":
+		return toolArgumentSet("challenge", "yes"), true
 	case "list_agent_targets":
 		return toolArgumentSet(), true
 	case "get_agent_target":
 		return toolArgumentSet("target"), true
-	case "get_status", "list_config_keys", "list_registry_sources", "get_pro_status", "get_pro_setup", "start_pro_login", "list_pro_devices", "logout_pro", "register_pro_scheme", "doctor", "refresh_registry":
+	case "get_status", "list_config_keys", "list_registry_sources", "get_pro_status", "get_pro_setup", "start_pro_login", "list_pro_devices", "logout_pro", "register_pro_scheme", "doctor", "refresh_registry", "get_commerce_integrity":
 		return toolArgumentSet(), true
 	case "validate_registry":
 		return toolArgumentSet("path"), true

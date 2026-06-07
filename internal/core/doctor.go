@@ -19,6 +19,7 @@ func (s *Service) Doctor() DoctorResult {
 		s.checkRegistryManifests(),
 		s.checkAuthFile(),
 	}
+	checks = append(checks, s.checkCommerceLedgers()...)
 	checks = append(checks, s.checkInstalledSkills()...)
 	return DoctorResult{OK: checksOK(checks), Summary: summarizeChecks(checks), Checks: checks}
 }
@@ -196,6 +197,96 @@ func (s *Service) checkInstalledSkills() []DoctorCheck {
 		checks = append(checks, okCheck("installed_skills", "no installed skills", root))
 	}
 	return checks
+}
+
+func (s *Service) checkCommerceLedgers() []DoctorCheck {
+	checks := []DoctorCheck{
+		s.checkLedgerIntegrity("commerce_install_ledger", s.InstallRecordIntegrity),
+		s.checkLedgerIntegrity("commerce_billing_ledger", s.BillingRecordIntegrity),
+		s.checkLedgerIntegrity("commerce_receipt_ledger", s.CommerceReceiptIntegrity),
+	}
+	checks = append(checks, s.checkLedgerPrivatePaths()...)
+	return checks
+}
+
+func (s *Service) checkLedgerIntegrity(name string, verify func() (LedgerIntegritySummary, error)) DoctorCheck {
+	summary, err := verify()
+	if err != nil {
+		return errorCheck(name, "cannot verify local commerce ledger", "", err)
+	}
+	message := "local commerce ledger integrity is " + summary.Status
+	check := DoctorCheck{Name: name, OK: true, Severity: "info", Message: message, Details: summary}
+	switch summary.Status {
+	case integrityStatusVerified, integrityStatusEmpty:
+		return check
+	case integrityStatusLegacyUnsigned:
+		check.Severity = "warning"
+		check.Message = "local commerce ledger contains legacy unsigned records"
+		return check
+	default:
+		check.OK = false
+		check.Severity = "error"
+		if strings.TrimSpace(summary.Reason) != "" {
+			check.Message = "local commerce ledger integrity failed: " + summary.Reason
+		} else {
+			check.Message = "local commerce ledger integrity failed"
+		}
+		return check
+	}
+}
+
+func (s *Service) checkLedgerPrivatePaths() []DoctorCheck {
+	checks := []DoctorCheck{}
+	for _, dir := range s.ledgerPrivateDirs() {
+		checks = append(checks, checkLedgerPrivatePath("commerce_ledger_dir", dir, true, ledgerPrivateDirMode))
+	}
+	for _, path := range s.ledgerSensitivePaths() {
+		checks = append(checks, checkLedgerPrivatePath("commerce_ledger_file", path, false, ledgerPrivateFileMode))
+	}
+	return checks
+}
+
+func checkLedgerPrivatePath(name, path string, directory bool, expected os.FileMode) DoctorCheck {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			severity := "info"
+			if directory {
+				severity = "warning"
+			}
+			return DoctorCheck{Name: name, OK: true, Severity: severity, Message: "commerce ledger path does not exist yet", Path: path}
+		}
+		return errorCheck(name, "cannot access commerce ledger path", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return DoctorCheck{Name: name, OK: false, Severity: "error", Message: "commerce ledger path must not be a symlink", Path: path}
+	}
+	if directory && !info.IsDir() {
+		return DoctorCheck{Name: name, OK: false, Severity: "error", Message: "commerce ledger path is not a directory", Path: path}
+	}
+	if !directory && info.IsDir() {
+		return DoctorCheck{Name: name, OK: false, Severity: "error", Message: "commerce ledger file path is a directory", Path: path}
+	}
+	if runtime.GOOS == "windows" {
+		return okCheck(name, "commerce ledger path exists; POSIX permission check skipped", path)
+	}
+	permission := info.Mode().Perm()
+	if permission&^expected != 0 {
+		return DoctorCheck{
+			Name:     name,
+			OK:       false,
+			Severity: "error",
+			Message:  "commerce ledger path is too permissive",
+			Path:     path,
+			Details: map[string]any{
+				"actual_mode":   permission.String(),
+				"expected_mode": expected.String(),
+			},
+		}
+	}
+	return okCheck(name, "commerce ledger path permissions are private", path).withDetails(map[string]any{
+		"mode": permission.String(),
+	})
 }
 
 func (s *Service) checkSkillVersion(name, version string, currentOnly bool) (SkillManifest, string, []DoctorCheck, error) {

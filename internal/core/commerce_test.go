@@ -3,6 +3,9 @@ package core
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDefaultRegistrySkillsDeclareBillingMeters(t *testing.T) {
@@ -440,6 +444,195 @@ func TestLedgerIntegrityDetectsTamperedBillingRecords(t *testing.T) {
 	}
 }
 
+func TestLedgerIntegrityDetectsDeletedBillingLedgerWithAnchors(t *testing.T) {
+	root := t.TempDir()
+	service := NewService(PathsForRoot(root))
+	if _, err := service.InstallCapabilityPack(context.Background(), "advanced"); err != nil {
+		t.Fatalf("install advanced pack: %v", err)
+	}
+	billing, err := service.ListBillingRecords(RecordQueryOptions{PackID: "advanced"})
+	if err != nil {
+		t.Fatalf("list billing records: %v", err)
+	}
+	if billing.Integrity == nil || billing.Integrity.Status != integrityStatusVerified || billing.Integrity.Anchors < 2 || !billing.Integrity.AnchorMatched {
+		t.Fatalf("expected anchored verified billing ledger before reset: %#v", billing.Integrity)
+	}
+	for _, path := range service.ledgerAnchorPaths(billingRecordsFile) {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected billing anchor at %s: %v", path, err)
+		}
+	}
+
+	if err := os.Remove(service.billingRecordsPath()); err != nil {
+		t.Fatalf("delete billing ledger: %v", err)
+	}
+	if err := os.Remove(service.ledgerHeadPath(billingRecordsFile)); err != nil {
+		t.Fatalf("delete billing head: %v", err)
+	}
+
+	billing, err = service.ListBillingRecords(RecordQueryOptions{PackID: "advanced"})
+	if err != nil {
+		t.Fatalf("list reset billing records: %v", err)
+	}
+	if len(billing.Records) != 0 {
+		t.Fatalf("expected deleted billing records to be empty: %#v", billing.Records)
+	}
+	if billing.Integrity == nil || billing.Integrity.Status != integrityStatusFailed || billing.Integrity.Anchors < 2 || billing.Integrity.AnchorMatched || !strings.Contains(billing.Integrity.Reason, "anchor mismatch") {
+		t.Fatalf("expected anchor mismatch after deleted billing ledger: %#v", billing.Integrity)
+	}
+	if _, err := service.InstallCapabilityPack(context.Background(), "pdf"); !IsErrorCode(err, CodeIntegrityFailed) {
+		t.Fatalf("expected append to fail after deleted anchored billing ledger, got %v", err)
+	}
+}
+
+func TestCommerceProofSignsChallengeBoundLedgerIntegrity(t *testing.T) {
+	service := NewService(PathsForRoot(t.TempDir()))
+	if _, err := service.InstallCapabilityPack(context.Background(), "standard"); err != nil {
+		t.Fatalf("install standard pack: %v", err)
+	}
+	challenge := "site-nonce-123"
+	proof, err := service.CommerceProof(challenge)
+	if err != nil {
+		t.Fatalf("commerce proof: %v", err)
+	}
+	if proof.Challenge != challenge || proof.Payload.Challenge != challenge || proof.PayloadHash == "" || proof.Signature == "" || proof.PublicKey == "" {
+		t.Fatalf("unexpected commerce proof envelope: %#v", proof)
+	}
+	if proof.Payload.TrustLevel != "local_signed" || proof.Payload.ReceiptStatus != "local_only" || len(proof.Payload.Ledgers) != 3 {
+		t.Fatalf("unexpected commerce proof payload: %#v", proof.Payload)
+	}
+	verification := VerifyCommerceProof(proof, challenge)
+	if !verification.OK || !verification.SignatureMatched || !verification.PayloadHashMatched || !verification.ChallengeMatched || !verification.EnvelopeMatched {
+		t.Fatalf("expected valid commerce proof verification: %#v", verification)
+	}
+	wrongChallenge := VerifyCommerceProof(proof, "other-nonce")
+	if wrongChallenge.OK || wrongChallenge.ChallengeMatched {
+		t.Fatalf("expected challenge mismatch to fail verification: %#v", wrongChallenge)
+	}
+	tampered := proof
+	tampered.Payload.Ledgers[0].Status = integrityStatusFailed
+	tampered.Payload.OK = false
+	tamperedVerification := VerifyCommerceProof(tampered, challenge)
+	if tamperedVerification.OK || tamperedVerification.SignatureMatched || tamperedVerification.PayloadHashMatched {
+		t.Fatalf("expected tampered proof payload to fail verification: %#v", tamperedVerification)
+	}
+	if _, err := service.CommerceProof(""); !IsErrorCode(err, CodeInvalidArgument) {
+		t.Fatalf("expected empty proof challenge to be invalid, got %v", err)
+	}
+}
+
+func TestSubmitCommerceProofStoresServerReceipt(t *testing.T) {
+	receiptPublicKey, receiptPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate receipt key: %v", err)
+	}
+	var gotPath string
+	var gotAuth string
+	var gotDevice string
+	var gotRequest commerceProofSubmitRequest
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotPath = request.URL.Path
+		gotAuth = request.Header.Get("Authorization")
+		gotDevice = request.Header.Get("X-AGTX-Device-ID")
+		if gotPath != "/v1/commerce/proofs" {
+			http.Error(writer, "unexpected path", http.StatusNotFound)
+			return
+		}
+		if err := json.NewDecoder(request.Body).Decode(&gotRequest); err != nil {
+			http.Error(writer, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if !VerifyCommerceProof(gotRequest.Proof, "server-nonce").OK || !gotRequest.Verification.OK {
+			http.Error(writer, "invalid proof", http.StatusBadRequest)
+			return
+		}
+		receipt := signedTestCommerceReceipt(t, gotRequest.Proof, receiptPublicKey, receiptPrivateKey, 1)
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(commerceProofSubmitResponse{OK: true, Receipt: receipt})
+	}))
+	defer server.Close()
+
+	service := NewService(PathsForRoot(t.TempDir()))
+	service.Config.ProAPIURL = server.URL
+	service.Auth = AuthState{SchemaVersion: 1, AccessToken: "access", DeviceID: "device-1"}
+	if err := SaveAuth(service.Paths.AuthFile, service.Auth); err != nil {
+		t.Fatalf("save auth: %v", err)
+	}
+	if _, err := service.InstallCapabilityPack(context.Background(), "standard"); err != nil {
+		t.Fatalf("install standard pack: %v", err)
+	}
+
+	result, err := service.SubmitCommerceProof(context.Background(), "server-nonce")
+	if err != nil {
+		t.Fatalf("submit commerce proof: %v", err)
+	}
+	if gotPath != "/v1/commerce/proofs" || gotAuth != "Bearer access" || gotDevice != "device-1" {
+		t.Fatalf("unexpected proof submit request: path=%q auth=%q device=%q", gotPath, gotAuth, gotDevice)
+	}
+	if !result.Verification.OK || result.Receipt.ReceiptID == "" || result.Receipt.Integrity == nil || result.Receipt.Integrity.Status != integrityStatusVerified {
+		t.Fatalf("unexpected receipt submit result: %#v", result)
+	}
+	if result.Proof.Payload.DeviceID != "device-1" || result.Receipt.DeviceID != "device-1" {
+		t.Fatalf("expected proof and receipt to carry device id: %#v", result)
+	}
+	if !VerifyCommerceReceipt(result.Proof, result.Receipt).OK {
+		t.Fatalf("stored receipt should verify against submitted proof: %#v", result)
+	}
+	receipts, err := service.ListCommerceReceipts(RecordQueryOptions{Status: commerceReceiptStatusReceived})
+	if err != nil {
+		t.Fatalf("list commerce receipts: %v", err)
+	}
+	if len(receipts.Records) != 1 || receipts.Records[0].ReceiptID != result.Receipt.ReceiptID || receipts.Integrity == nil || receipts.Integrity.Status != integrityStatusVerified || receipts.Integrity.Anchors < 2 || !receipts.Integrity.AnchorMatched {
+		t.Fatalf("expected verified anchored receipt ledger: %#v", receipts)
+	}
+
+	data, err := os.ReadFile(service.commerceReceiptsPath())
+	if err != nil {
+		t.Fatalf("read receipt ledger: %v", err)
+	}
+	tampered := bytes.Replace(data, []byte(commerceReceiptStatusReceived), []byte("server_changed"), 1)
+	if err := os.WriteFile(service.commerceReceiptsPath(), tampered, 0o600); err != nil {
+		t.Fatalf("tamper receipt ledger: %v", err)
+	}
+	integrity, err := service.CommerceReceiptIntegrity()
+	if err != nil {
+		t.Fatalf("receipt integrity after tamper: %v", err)
+	}
+	if integrity.Status != integrityStatusFailed || integrity.Failed == 0 {
+		t.Fatalf("expected tampered receipt ledger to fail integrity: %#v", integrity)
+	}
+	if _, err := service.SubmitCommerceProof(context.Background(), "server-nonce-2"); !IsErrorCode(err, CodeIntegrityFailed) {
+		t.Fatalf("expected tampered receipt ledger to block future receipt append, got %v", err)
+	}
+}
+
+func signedTestCommerceReceipt(t *testing.T, proof CommerceProof, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey, sequence int64) CommerceReceipt {
+	t.Helper()
+	receipt := CommerceReceipt{
+		SchemaVersion:    1,
+		ReceiptID:        commerceReceiptIDForProof(proof),
+		Status:           commerceReceiptStatusReceived,
+		ReceivedAt:       time.Now().UTC().Format(time.RFC3339),
+		Issuer:           "agtx-test-pro",
+		ServerLedgerID:   "test-commerce-receipts",
+		ServerSequence:   sequence,
+		Algorithm:        commerceReceiptAlgorithm,
+		KeyID:            "test-receipt-key",
+		PublicKey:        base64.StdEncoding.EncodeToString(publicKey),
+		ProofPayloadHash: proof.PayloadHash,
+		ProofSignature:   proof.Signature,
+		ProofKeyID:       proof.KeyID,
+		Challenge:        proof.Challenge,
+		DeviceID:         proof.Payload.DeviceID,
+	}
+	payload, err := commerceReceiptPayloadBytes(receipt)
+	if err != nil {
+		t.Fatalf("canonical receipt payload: %v", err)
+	}
+	receipt.ServerSignature = base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, payload))
+	return receipt
+}
+
 func TestInstallWebsiteCapabilityPackRecordsInstallAndBilling(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
 	plan, err := service.PlanCapabilityPackInstall("pdf")
@@ -563,6 +756,38 @@ func TestCommerceHTTPHandlerExposesWebsiteQueries(t *testing.T) {
 		t.Fatalf("unexpected billing records response: %#v", billingResponse)
 	}
 
+	response, err = http.Get(server.URL + "/v1/commerce/integrity")
+	if err != nil {
+		t.Fatalf("get commerce integrity: %v", err)
+	}
+	defer response.Body.Close()
+	var integrityResponse struct {
+		OK   bool                    `json:"ok"`
+		Data CommerceIntegrityResult `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&integrityResponse); err != nil {
+		t.Fatalf("decode commerce integrity: %v", err)
+	}
+	if !integrityResponse.OK || !integrityResponse.Data.OK || len(integrityResponse.Data.Ledgers) != 3 || len(integrityResponse.Data.Checks) == 0 {
+		t.Fatalf("unexpected commerce integrity response: %#v", integrityResponse)
+	}
+
+	response, err = http.Get(server.URL + "/v1/commerce/proof?challenge=site-nonce")
+	if err != nil {
+		t.Fatalf("get commerce proof: %v", err)
+	}
+	defer response.Body.Close()
+	var proofResponse struct {
+		OK   bool          `json:"ok"`
+		Data CommerceProof `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&proofResponse); err != nil {
+		t.Fatalf("decode commerce proof: %v", err)
+	}
+	if !proofResponse.OK || !VerifyCommerceProof(proofResponse.Data, "site-nonce").OK {
+		t.Fatalf("unexpected commerce proof response: %#v", proofResponse)
+	}
+
 	response, err = http.Get(server.URL + "/v1/commerce/billing-records?pack_id=standard&type=pack_install&currency=USD&status=local_only")
 	if err != nil {
 		t.Fatalf("get filtered billing records: %v", err)
@@ -641,6 +866,166 @@ func TestCommerceHTTPHandlerExposesWebsiteQueries(t *testing.T) {
 	}
 	if !scenariosResponse.OK || len(scenariosResponse.Data) != 1 || scenariosResponse.Data[0].Scenario.ID != "meeting_to_presentation" || scenariosResponse.Data[0].RecommendedPack.Pack.ID != "advanced" {
 		t.Fatalf("unexpected capability scenarios response: %#v", scenariosResponse)
+	}
+}
+
+func TestCommerceHTTPHandlerSubmitsProofAndListsReceipts(t *testing.T) {
+	receiptPublicKey, receiptPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate receipt key: %v", err)
+	}
+	var submitCalls int
+	var gotPath string
+	var gotAuth string
+	var gotDevice string
+	var gotRequest commerceProofSubmitRequest
+	proServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		submitCalls++
+		gotPath = request.URL.Path
+		gotAuth = request.Header.Get("Authorization")
+		gotDevice = request.Header.Get("X-AGTX-Device-ID")
+		if request.Method != http.MethodPost || gotPath != "/v1/commerce/proofs" {
+			http.Error(writer, "unexpected proof submit request", http.StatusNotFound)
+			return
+		}
+		if err := json.NewDecoder(request.Body).Decode(&gotRequest); err != nil {
+			http.Error(writer, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if gotRequest.SchemaVersion != 1 || gotRequest.ClientVersion == "" || gotRequest.SubmittedAt == "" {
+			http.Error(writer, "invalid submit envelope", http.StatusBadRequest)
+			return
+		}
+		if !gotRequest.Verification.OK || !VerifyCommerceProof(gotRequest.Proof, "site-submit-nonce").OK {
+			http.Error(writer, "invalid commerce proof", http.StatusBadRequest)
+			return
+		}
+		receipt := signedTestCommerceReceipt(t, gotRequest.Proof, receiptPublicKey, receiptPrivateKey, 1)
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(commerceProofSubmitResponse{OK: true, Receipt: receipt})
+	}))
+	defer proServer.Close()
+
+	service := NewService(PathsForRoot(t.TempDir()))
+	service.Config.ProAPIURL = proServer.URL
+	service.Auth = AuthState{SchemaVersion: 1, AccessToken: "access", DeviceID: "device-1"}
+	if err := SaveAuth(service.Paths.AuthFile, service.Auth); err != nil {
+		t.Fatalf("save auth: %v", err)
+	}
+	if _, err := service.InstallCapabilityPack(context.Background(), "standard"); err != nil {
+		t.Fatalf("install standard pack: %v", err)
+	}
+	server := httptest.NewServer(service.CommerceHTTPHandler(CommerceHTTPOptions{MutationToken: "token"}))
+	defer server.Close()
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/v1/commerce/proof/submit", bytes.NewBufferString(`{"challenge":"site-submit-nonce","yes":true}`))
+	if err != nil {
+		t.Fatalf("new proof submit request without token: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("post proof submit without token: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized || submitCalls != 0 {
+		t.Fatalf("expected unauthorized proof submit without Pro call, status=%s calls=%d", response.Status, submitCalls)
+	}
+
+	request, err = http.NewRequest(http.MethodPost, server.URL+"/v1/commerce/proof/submit", bytes.NewBufferString(`{"challenge":"site-submit-nonce","yes":false}`))
+	if err != nil {
+		t.Fatalf("new proof submit confirmation request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-AGTX-Commerce-Token", "token")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("post proof submit without yes: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusPreconditionRequired || submitCalls != 0 {
+		t.Fatalf("expected confirmation proof submit without Pro call, status=%s calls=%d", response.Status, submitCalls)
+	}
+	var confirmation struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&confirmation); err != nil {
+		t.Fatalf("decode confirmation response: %v", err)
+	}
+	if confirmation.OK || confirmation.Error.Code != CodeConfirmationRequired {
+		t.Fatalf("unexpected confirmation response: %#v", confirmation)
+	}
+
+	request, err = http.NewRequest(http.MethodPost, server.URL+"/v1/commerce/proof/submit", bytes.NewBufferString(`{"challenge":"site-submit-nonce","yes":true}`))
+	if err != nil {
+		t.Fatalf("new proof submit request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-AGTX-Commerce-Token", "token")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("post proof submit: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected proof submit status: %s", response.Status)
+	}
+	if submitCalls != 1 || gotPath != "/v1/commerce/proofs" || gotAuth != "Bearer access" || gotDevice != "device-1" {
+		t.Fatalf("unexpected proof submit request: calls=%d path=%q auth=%q device=%q", submitCalls, gotPath, gotAuth, gotDevice)
+	}
+	var submitResponse struct {
+		OK   bool                        `json:"ok"`
+		Data CommerceReceiptSubmitResult `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&submitResponse); err != nil {
+		t.Fatalf("decode proof submit response: %v", err)
+	}
+	if !submitResponse.OK || !submitResponse.Data.Verification.OK || submitResponse.Data.Receipt.ReceiptID == "" || submitResponse.Data.Receipt.Status != commerceReceiptStatusReceived {
+		t.Fatalf("unexpected proof submit response: %#v", submitResponse)
+	}
+	if submitResponse.Data.Receipt.Integrity == nil || submitResponse.Data.Receipt.Integrity.Status != integrityStatusVerified {
+		t.Fatalf("expected locally signed receipt integrity: %#v", submitResponse.Data.Receipt)
+	}
+	if !VerifyCommerceReceipt(submitResponse.Data.Proof, submitResponse.Data.Receipt).OK {
+		t.Fatalf("receipt should verify against submitted proof: %#v", submitResponse.Data)
+	}
+
+	response, err = http.Get(server.URL + "/v1/commerce/receipts?status=server_received")
+	if err != nil {
+		t.Fatalf("get commerce receipts: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected receipts status: %s", response.Status)
+	}
+	var receiptsResponse struct {
+		OK   bool                      `json:"ok"`
+		Data CommerceReceiptListResult `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&receiptsResponse); err != nil {
+		t.Fatalf("decode receipts response: %v", err)
+	}
+	if !receiptsResponse.OK || len(receiptsResponse.Data.Records) != 1 || receiptsResponse.Data.Records[0].ReceiptID != submitResponse.Data.Receipt.ReceiptID || receiptsResponse.Data.Integrity == nil || receiptsResponse.Data.Integrity.Status != integrityStatusVerified {
+		t.Fatalf("unexpected receipts response: %#v", receiptsResponse)
+	}
+
+	response, err = http.Get(server.URL + "/v1/commerce/snapshot?pack_id=standard")
+	if err != nil {
+		t.Fatalf("get commerce snapshot: %v", err)
+	}
+	defer response.Body.Close()
+	var snapshotResponse struct {
+		OK   bool                       `json:"ok"`
+		Data CapabilityCommerceSnapshot `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&snapshotResponse); err != nil {
+		t.Fatalf("decode snapshot response: %v", err)
+	}
+	if !snapshotResponse.OK || len(snapshotResponse.Data.Receipts.Records) != 1 || snapshotResponse.Data.Receipts.Records[0].ReceiptID != submitResponse.Data.Receipt.ReceiptID {
+		t.Fatalf("expected receipt in website snapshot: %#v", snapshotResponse)
 	}
 }
 

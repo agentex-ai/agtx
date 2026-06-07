@@ -375,6 +375,8 @@ type LedgerIntegritySummary struct {
 	Verified       int    `json:"verified"`
 	Failed         int    `json:"failed"`
 	LegacyUnsigned int    `json:"legacy_unsigned"`
+	Anchors        int    `json:"anchors"`
+	AnchorMatched  bool   `json:"anchor_matched"`
 	KeyID          string `json:"key_id,omitempty"`
 	LastHash       string `json:"last_hash,omitempty"`
 	HeadHash       string `json:"head_hash,omitempty"`
@@ -390,13 +392,137 @@ type BillingTotal struct {
 }
 
 type CapabilityCommerceSnapshot struct {
-	SchemaVersion  int                      `json:"schema_version"`
-	GeneratedAt    string                   `json:"generated_at"`
-	Packs          []CapabilityPackView     `json:"packs"`
-	Scenarios      []CapabilityScenarioView `json:"scenarios,omitempty"`
-	InstallRecords InstallRecordListResult  `json:"install_records"`
-	Billing        BillingRecordListResult  `json:"billing"`
-	Integrity      []LedgerIntegritySummary `json:"integrity,omitempty"`
+	SchemaVersion  int                       `json:"schema_version"`
+	GeneratedAt    string                    `json:"generated_at"`
+	Packs          []CapabilityPackView      `json:"packs"`
+	Scenarios      []CapabilityScenarioView  `json:"scenarios,omitempty"`
+	InstallRecords InstallRecordListResult   `json:"install_records"`
+	Billing        BillingRecordListResult   `json:"billing"`
+	Receipts       CommerceReceiptListResult `json:"receipts"`
+	Integrity      []LedgerIntegritySummary  `json:"integrity,omitempty"`
+}
+
+type CommerceIntegrityResult struct {
+	SchemaVersion int                      `json:"schema_version"`
+	GeneratedAt   string                   `json:"generated_at"`
+	OK            bool                     `json:"ok"`
+	Summary       DiagnosticSummary        `json:"summary"`
+	Ledgers       []LedgerIntegritySummary `json:"ledgers"`
+	Checks        []DoctorCheck            `json:"checks"`
+}
+
+type CommerceProof struct {
+	SchemaVersion int                  `json:"schema_version"`
+	GeneratedAt   string               `json:"generated_at"`
+	Challenge     string               `json:"challenge"`
+	Subject       string               `json:"subject"`
+	TrustLevel    string               `json:"trust_level"`
+	ReceiptStatus string               `json:"receipt_status"`
+	Algorithm     string               `json:"algorithm"`
+	KeyID         string               `json:"key_id"`
+	PublicKey     string               `json:"public_key"`
+	PayloadHash   string               `json:"payload_hash"`
+	Signature     string               `json:"signature"`
+	Payload       CommerceProofPayload `json:"payload"`
+}
+
+type CommerceReceipt struct {
+	SchemaVersion    int              `json:"schema_version"`
+	ReceiptID        string           `json:"receipt_id"`
+	Status           string           `json:"status"`
+	ReceivedAt       string           `json:"received_at"`
+	Issuer           string           `json:"issuer,omitempty"`
+	ServerLedgerID   string           `json:"server_ledger_id,omitempty"`
+	ServerSequence   int64            `json:"server_sequence,omitempty"`
+	Algorithm        string           `json:"algorithm"`
+	KeyID            string           `json:"key_id"`
+	PublicKey        string           `json:"public_key"`
+	ProofPayloadHash string           `json:"proof_payload_hash"`
+	ProofSignature   string           `json:"proof_signature"`
+	ProofKeyID       string           `json:"proof_key_id"`
+	Challenge        string           `json:"challenge"`
+	DeviceID         string           `json:"device_id,omitempty"`
+	ServerSignature  string           `json:"server_signature"`
+	Integrity        *RecordIntegrity `json:"integrity,omitempty"`
+}
+
+type CommerceReceiptVerificationResult struct {
+	SchemaVersion          int                         `json:"schema_version"`
+	VerifiedAt             string                      `json:"verified_at"`
+	OK                     bool                        `json:"ok"`
+	ReceiptMatched         bool                        `json:"receipt_matched"`
+	ProofMatched           bool                        `json:"proof_matched"`
+	ProofSignatureMatched  bool                        `json:"proof_signature_matched"`
+	ServerSignatureMatched bool                        `json:"server_signature_matched"`
+	ServerKeyTrusted       bool                        `json:"server_key_trusted"`
+	TrustStatus            string                      `json:"trust_status,omitempty"`
+	ExpectedPayloadHash    string                      `json:"expected_payload_hash,omitempty"`
+	ActualPayloadHash      string                      `json:"actual_payload_hash,omitempty"`
+	ReceiptID              string                      `json:"receipt_id,omitempty"`
+	Status                 string                      `json:"status,omitempty"`
+	Reason                 string                      `json:"reason,omitempty"`
+	Trust                  *CommerceReceiptTrustResult `json:"trust,omitempty"`
+}
+
+type CommerceReceiptTrustResult struct {
+	SchemaVersion    int    `json:"schema_version"`
+	OK               bool   `json:"ok"`
+	Status           string `json:"status"`
+	Issuer           string `json:"issuer,omitempty"`
+	KeyID            string `json:"key_id,omitempty"`
+	PublicKey        string `json:"public_key,omitempty"`
+	ReceiptAlgorithm string `json:"receipt_algorithm,omitempty"`
+	BoundAt          string `json:"bound_at,omitempty"`
+	LastSeenAt       string `json:"last_seen_at,omitempty"`
+	Reason           string `json:"reason,omitempty"`
+}
+
+type CommerceReceiptListResult struct {
+	Records   []CommerceReceipt           `json:"records"`
+	Integrity *LedgerIntegritySummary     `json:"integrity,omitempty"`
+	Trust     *CommerceReceiptTrustResult `json:"trust,omitempty"`
+}
+
+type CommerceReceiptSubmitResult struct {
+	SchemaVersion int                               `json:"schema_version"`
+	SubmittedAt   string                            `json:"submitted_at"`
+	Proof         CommerceProof                     `json:"proof"`
+	Receipt       CommerceReceipt                   `json:"receipt"`
+	Verification  CommerceReceiptVerificationResult `json:"verification"`
+}
+
+type CommerceProofPayload struct {
+	SchemaVersion int                      `json:"schema_version"`
+	GeneratedAt   string                   `json:"generated_at"`
+	Challenge     string                   `json:"challenge"`
+	Subject       string                   `json:"subject"`
+	TrustLevel    string                   `json:"trust_level"`
+	ReceiptStatus string                   `json:"receipt_status"`
+	Algorithm     string                   `json:"algorithm"`
+	KeyID         string                   `json:"key_id"`
+	PublicKey     string                   `json:"public_key"`
+	DeviceID      string                   `json:"device_id,omitempty"`
+	OK            bool                     `json:"ok"`
+	Summary       DiagnosticSummary        `json:"summary"`
+	Ledgers       []LedgerIntegritySummary `json:"ledgers"`
+	Checks        []DoctorCheck            `json:"checks"`
+}
+
+type CommerceProofVerificationResult struct {
+	SchemaVersion      int    `json:"schema_version"`
+	VerifiedAt         string `json:"verified_at"`
+	OK                 bool   `json:"ok"`
+	AlgorithmMatched   bool   `json:"algorithm_matched"`
+	ChallengeMatched   bool   `json:"challenge_matched"`
+	PayloadHashMatched bool   `json:"payload_hash_matched"`
+	SignatureMatched   bool   `json:"signature_matched"`
+	EnvelopeMatched    bool   `json:"envelope_matched"`
+	ExpectedChallenge  string `json:"expected_challenge,omitempty"`
+	ActualChallenge    string `json:"actual_challenge,omitempty"`
+	KeyID              string `json:"key_id,omitempty"`
+	PayloadHash        string `json:"payload_hash,omitempty"`
+	CalculatedHash     string `json:"calculated_hash,omitempty"`
+	Reason             string `json:"reason,omitempty"`
 }
 
 type CommerceSnapshotExportResult struct {

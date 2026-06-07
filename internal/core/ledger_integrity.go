@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -17,6 +18,8 @@ const (
 	ledgerIntegrityAlgorithm = "hmac-sha256-chain-v1"
 	ledgerIntegrityKeyFile   = "ledger-integrity-key.json"
 	ledgerIntegrityKeyBytes  = 32
+	ledgerPrivateDirMode     = 0o700
+	ledgerPrivateFileMode    = 0o600
 
 	integrityStatusVerified       = "verified"
 	integrityStatusFailed         = "failed"
@@ -31,7 +34,29 @@ type ledgerIntegrityKey struct {
 	CreatedAt     string `json:"created_at"`
 }
 
+type ledgerIntegrityAnchor struct {
+	SchemaVersion int    `json:"schema_version"`
+	Ledger        string `json:"ledger"`
+	Algorithm     string `json:"algorithm"`
+	KeyID         string `json:"key_id"`
+	Records       int    `json:"records"`
+	LastHash      string `json:"last_hash"`
+	HeadHash      string `json:"head_hash"`
+	WrittenAt     string `json:"written_at"`
+	AnchorHash    string `json:"anchor_hash"`
+}
+
+type ledgerIntegrityAnchorState struct {
+	Anchor ledgerIntegrityAnchor
+	Path   string
+	OK     bool
+	Reason string
+}
+
 func (s *Service) appendSignedInstallRecord(record InstallRecord) (InstallRecord, error) {
+	if err := s.ensureCommerceLedgerPrivatePaths(); err != nil {
+		return InstallRecord{}, err
+	}
 	signed, err := s.signInstallRecord(record)
 	if err != nil {
 		return InstallRecord{}, err
@@ -46,10 +71,16 @@ func (s *Service) appendSignedInstallRecord(record InstallRecord) (InstallRecord
 }
 
 func (s *Service) ensureCommerceLedgersAppendable() error {
+	if err := s.ensureCommerceLedgerPrivatePaths(); err != nil {
+		return err
+	}
 	if err := ensureLedgerSummaryAppendable(s.verifyInstallLedger()); err != nil {
 		return err
 	}
-	return ensureLedgerSummaryAppendable(s.verifyBillingLedger())
+	if err := ensureLedgerSummaryAppendable(s.verifyBillingLedger()); err != nil {
+		return err
+	}
+	return ensureLedgerSummaryAppendable(s.verifyCommerceReceiptLedger())
 }
 
 func ensureLedgerSummaryAppendable(summary LedgerIntegritySummary, err error) error {
@@ -65,6 +96,9 @@ func ensureLedgerSummaryAppendable(summary LedgerIntegritySummary, err error) er
 func (s *Service) appendSignedBillingRecords(records []BillingRecord) ([]BillingRecord, error) {
 	if len(records) == 0 {
 		return nil, nil
+	}
+	if err := s.ensureCommerceLedgerPrivatePaths(); err != nil {
+		return nil, err
 	}
 	signed := make([]BillingRecord, 0, len(records))
 	for _, record := range records {
@@ -200,6 +234,7 @@ func (s *Service) verifyInstallRecords(records []InstallRecord) (LedgerIntegrity
 	if err != nil {
 		return LedgerIntegritySummary{}, nil, err
 	}
+	anchors := s.readLedgerAnchors(installRecordsFile, key)
 	summary := newLedgerIntegritySummary(installRecordsFile, key, head, len(records))
 	lastHash := ""
 	for index := range records {
@@ -211,7 +246,7 @@ func (s *Service) verifyInstallRecords(records []InstallRecord) (LedgerIntegrity
 			lastHash = result.Hash
 		}
 	}
-	return finalizeLedgerIntegritySummary(summary, lastHash, head), records, nil
+	return finalizeLedgerIntegritySummary(summary, lastHash, head, anchors), records, nil
 }
 
 func (s *Service) verifyBillingRecords(records []BillingRecord) (LedgerIntegritySummary, []BillingRecord, error) {
@@ -223,6 +258,7 @@ func (s *Service) verifyBillingRecords(records []BillingRecord) (LedgerIntegrity
 	if err != nil {
 		return LedgerIntegritySummary{}, nil, err
 	}
+	anchors := s.readLedgerAnchors(billingRecordsFile, key)
 	summary := newLedgerIntegritySummary(billingRecordsFile, key, head, len(records))
 	lastHash := ""
 	for index := range records {
@@ -234,7 +270,7 @@ func (s *Service) verifyBillingRecords(records []BillingRecord) (LedgerIntegrity
 			lastHash = result.Hash
 		}
 	}
-	return finalizeLedgerIntegritySummary(summary, lastHash, head), records, nil
+	return finalizeLedgerIntegritySummary(summary, lastHash, head, anchors), records, nil
 }
 
 func verifyRecordIntegrity(key *ledgerIntegrityKey, ledger string, head *RecordIntegrity, sequence int, previousHash string, record any, existing *RecordIntegrity) *RecordIntegrity {
@@ -336,6 +372,9 @@ func recordWithoutIntegrity(record any) any {
 	case BillingRecord:
 		value.Integrity = nil
 		return value
+	case CommerceReceipt:
+		value.Integrity = nil
+		return value
 	default:
 		return record
 	}
@@ -371,16 +410,17 @@ func applyIntegrityResult(summary *LedgerIntegritySummary, result *RecordIntegri
 	}
 }
 
-func finalizeLedgerIntegritySummary(summary LedgerIntegritySummary, lastHash string, head *RecordIntegrity) LedgerIntegritySummary {
+func finalizeLedgerIntegritySummary(summary LedgerIntegritySummary, lastHash string, head *RecordIntegrity, anchors []ledgerIntegrityAnchorState) LedgerIntegritySummary {
 	summary.LastHash = lastHash
 	headValue := headHash(head)
 	summary.HeadHash = headValue
 	summary.HeadMatched = summary.Records == 0 && headValue == "" || summary.Records > 0 && lastHash != "" && lastHash == headValue
+	applyAnchorSummary(&summary, anchors)
 	switch {
-	case summary.Records == 0 && headValue == "":
-		summary.Status = integrityStatusEmpty
 	case summary.Failed > 0:
 		summary.Status = integrityStatusFailed
+	case summary.Records == 0 && headValue == "":
+		summary.Status = integrityStatusEmpty
 	case summary.Verified > 0 && !summary.HeadMatched:
 		summary.Status = integrityStatusFailed
 		if strings.TrimSpace(summary.Reason) == "" {
@@ -399,6 +439,32 @@ func finalizeLedgerIntegritySummary(summary LedgerIntegritySummary, lastHash str
 	return summary
 }
 
+func applyAnchorSummary(summary *LedgerIntegritySummary, anchors []ledgerIntegrityAnchorState) {
+	if len(anchors) == 0 {
+		summary.AnchorMatched = summary.Records == 0 && summary.HeadHash == ""
+		return
+	}
+	summary.Anchors = len(anchors)
+	summary.AnchorMatched = true
+	for _, state := range anchors {
+		if !state.OK {
+			summary.Failed++
+			summary.AnchorMatched = false
+			if strings.TrimSpace(summary.Reason) == "" {
+				summary.Reason = "ledger anchor invalid: " + state.Reason
+			}
+			continue
+		}
+		if state.Anchor.Records != summary.Records || state.Anchor.LastHash != summary.LastHash || state.Anchor.HeadHash != summary.HeadHash {
+			summary.Failed++
+			summary.AnchorMatched = false
+			if strings.TrimSpace(summary.Reason) == "" {
+				summary.Reason = "ledger anchor mismatch"
+			}
+		}
+	}
+}
+
 func headHash(head *RecordIntegrity) string {
 	if head == nil {
 		return ""
@@ -407,6 +473,9 @@ func headHash(head *RecordIntegrity) string {
 }
 
 func (s *Service) loadOrCreateLedgerIntegrityKey() (ledgerIntegrityKey, error) {
+	if err := s.ensureCommerceLedgerPrivatePaths(); err != nil {
+		return ledgerIntegrityKey{}, err
+	}
 	if key, err := s.loadLedgerIntegrityKeyIfPresent(); err != nil {
 		return ledgerIntegrityKey{}, err
 	} else if key != nil {
@@ -426,7 +495,7 @@ func (s *Service) loadOrCreateLedgerIntegrityKey() (ledgerIntegrityKey, error) {
 	if err != nil {
 		return ledgerIntegrityKey{}, err
 	}
-	if err := writeFileAtomic(s.ledgerIntegrityKeyPath(), append(data, '\n'), 0o600); err != nil {
+	if err := writeFileAtomic(s.ledgerIntegrityKeyPath(), append(data, '\n'), ledgerPrivateFileMode); err != nil {
 		return ledgerIntegrityKey{}, err
 	}
 	return key, nil
@@ -458,6 +527,9 @@ func (s *Service) writeLedgerHead(ledger string, integrity *RecordIntegrity) err
 	if integrity == nil {
 		return nil
 	}
+	if err := s.ensureCommerceLedgerPrivatePaths(); err != nil {
+		return err
+	}
 	head := *integrity
 	head.Status = ""
 	head.Reason = ""
@@ -468,7 +540,10 @@ func (s *Service) writeLedgerHead(ledger string, integrity *RecordIntegrity) err
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(s.ledgerHeadPath(ledger), append(data, '\n'), 0o600)
+	if err := writeFileAtomic(s.ledgerHeadPath(ledger), append(data, '\n'), ledgerPrivateFileMode); err != nil {
+		return err
+	}
+	return s.writeLedgerAnchors(ledger, integrity)
 }
 
 func (s *Service) readLedgerHead(ledger string) (*RecordIntegrity, error) {
@@ -492,4 +567,225 @@ func (s *Service) ledgerIntegrityKeyPath() string {
 
 func (s *Service) ledgerHeadPath(ledger string) string {
 	return filepath.Join(s.Paths.ConfigDir, ledger+".head.json")
+}
+
+func (s *Service) ledgerAnchorPaths(ledger string) []string {
+	name := ledger + ".anchor.json"
+	paths := []string{
+		filepath.Join(s.Paths.ConfigDir, name),
+		filepath.Join(s.Paths.CacheDir, "commerce-ledgers", name),
+	}
+	unique := paths[:0]
+	seen := map[string]bool{}
+	for _, path := range paths {
+		clean := filepath.Clean(path)
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		unique = append(unique, clean)
+	}
+	return unique
+}
+
+func (s *Service) writeLedgerAnchors(ledger string, integrity *RecordIntegrity) error {
+	key, err := s.loadLedgerIntegrityKeyIfPresent()
+	if err != nil {
+		return err
+	}
+	if key == nil {
+		return NewError(CodeIntegrityFailed, "local ledger integrity key is missing; refusing to anchor ledger", map[string]any{"ledger": ledger})
+	}
+	anchor := ledgerIntegrityAnchor{
+		SchemaVersion: 1,
+		Ledger:        ledger,
+		Algorithm:     ledgerIntegrityAlgorithm,
+		KeyID:         key.KeyID,
+		Records:       integrity.Sequence,
+		LastHash:      strings.TrimSpace(integrity.Hash),
+		HeadHash:      strings.TrimSpace(integrity.Hash),
+		WrittenAt:     time.Now().UTC().Format(time.RFC3339),
+	}
+	hash, err := ledgerAnchorHash(*key, anchor)
+	if err != nil {
+		return err
+	}
+	anchor.AnchorHash = hash
+	data, err := json.MarshalIndent(anchor, "", "  ")
+	if err != nil {
+		return err
+	}
+	for _, path := range s.ledgerAnchorPaths(ledger) {
+		if err := writeFileAtomic(path, append(data, '\n'), ledgerPrivateFileMode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) readLedgerAnchors(ledger string, key *ledgerIntegrityKey) []ledgerIntegrityAnchorState {
+	states := []ledgerIntegrityAnchorState{}
+	for _, path := range s.ledgerAnchorPaths(ledger) {
+		data, err := readFileLimited(path, defaultRecordMaxBytes, "ledger anchor")
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			states = append(states, ledgerIntegrityAnchorState{Path: path, Reason: err.Error()})
+			continue
+		}
+		state := ledgerIntegrityAnchorState{Path: path}
+		if err := decodeJSONStrict(bytes.TrimSpace(data), &state.Anchor); err != nil {
+			state.Reason = "invalid anchor JSON: " + err.Error()
+			states = append(states, state)
+			continue
+		}
+		if err := verifyLedgerAnchor(key, ledger, state.Anchor); err != nil {
+			state.Reason = err.Error()
+			states = append(states, state)
+			continue
+		}
+		state.OK = true
+		states = append(states, state)
+	}
+	return states
+}
+
+func verifyLedgerAnchor(key *ledgerIntegrityKey, ledger string, anchor ledgerIntegrityAnchor) error {
+	if anchor.SchemaVersion != 1 {
+		return NewError(CodeIntegrityFailed, "ledger anchor schema mismatch", map[string]any{"ledger": ledger})
+	}
+	if anchor.Ledger != ledger {
+		return NewError(CodeIntegrityFailed, "ledger anchor ledger mismatch", map[string]any{"expected": ledger, "actual": anchor.Ledger})
+	}
+	if anchor.Algorithm != ledgerIntegrityAlgorithm {
+		return NewError(CodeIntegrityFailed, "ledger anchor algorithm mismatch", map[string]any{"ledger": ledger})
+	}
+	if key == nil {
+		return NewError(CodeIntegrityFailed, "ledger anchor exists but local integrity key is missing", map[string]any{"ledger": ledger})
+	}
+	if anchor.KeyID != key.KeyID {
+		return NewError(CodeIntegrityFailed, "ledger anchor key mismatch", map[string]any{"ledger": ledger})
+	}
+	expected, err := ledgerAnchorHash(*key, anchor)
+	if err != nil {
+		return err
+	}
+	if !hmac.Equal([]byte(expected), []byte(anchor.AnchorHash)) {
+		return NewError(CodeIntegrityFailed, "ledger anchor hash mismatch", map[string]any{"ledger": ledger})
+	}
+	return nil
+}
+
+func ledgerAnchorHash(key ledgerIntegrityKey, anchor ledgerIntegrityAnchor) (string, error) {
+	anchor.AnchorHash = ""
+	data, err := json.Marshal(anchor)
+	if err != nil {
+		return "", err
+	}
+	secret, err := hex.DecodeString(strings.TrimSpace(key.Secret))
+	if err != nil {
+		return "", err
+	}
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte("agtx-ledger-anchor-v1"))
+	mac.Write(data)
+	return hex.EncodeToString(mac.Sum(nil)), nil
+}
+
+func (s *Service) ensureCommerceLedgerPrivatePaths() error {
+	for _, dir := range s.ledgerPrivateDirs() {
+		if err := ensureLedgerPrivateDir(dir); err != nil {
+			return err
+		}
+	}
+	for _, path := range s.ledgerSensitivePaths() {
+		if err := ensureLedgerPrivateFileIfPresent(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) ledgerPrivateDirs() []string {
+	return uniqueCleanPaths([]string{
+		s.Paths.ConfigDir,
+		filepath.Join(s.Paths.CacheDir, "commerce-ledgers"),
+	})
+}
+
+func (s *Service) ledgerSensitivePaths() []string {
+	paths := []string{
+		s.ledgerIntegrityKeyPath(),
+		s.commerceProofKeyPath(),
+		s.commerceReceiptTrustPath(),
+		s.installRecordsPath(),
+		s.billingRecordsPath(),
+		s.commerceReceiptsPath(),
+		s.ledgerHeadPath(installRecordsFile),
+		s.ledgerHeadPath(billingRecordsFile),
+		s.ledgerHeadPath(commerceReceiptsFile),
+	}
+	for _, ledger := range []string{installRecordsFile, billingRecordsFile, commerceReceiptsFile} {
+		paths = append(paths, s.ledgerAnchorPaths(ledger)...)
+	}
+	return uniqueCleanPaths(paths)
+}
+
+func uniqueCleanPaths(paths []string) []string {
+	unique := paths[:0]
+	seen := map[string]bool{}
+	for _, path := range paths {
+		clean := filepath.Clean(path)
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		unique = append(unique, clean)
+	}
+	return unique
+}
+
+func ensureLedgerPrivateDir(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.MkdirAll(path, ledgerPrivateDirMode); err != nil {
+			return err
+		}
+		return chmodLedgerPath(path, ledgerPrivateDirMode)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return NewError(CodeIntegrityFailed, "commerce ledger directory must not be a symlink", map[string]any{"path": path})
+	}
+	if !info.IsDir() {
+		return NewError(CodeIntegrityFailed, "commerce ledger directory path is not a directory", map[string]any{"path": path})
+	}
+	return chmodLedgerPath(path, ledgerPrivateDirMode)
+}
+
+func ensureLedgerPrivateFileIfPresent(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return NewError(CodeIntegrityFailed, "commerce ledger file must not be a symlink", map[string]any{"path": path})
+	}
+	if info.IsDir() {
+		return NewError(CodeIntegrityFailed, "commerce ledger file path is a directory", map[string]any{"path": path})
+	}
+	return chmodLedgerPath(path, ledgerPrivateFileMode)
+}
+
+func chmodLedgerPath(path string, mode os.FileMode) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	return os.Chmod(path, mode)
 }

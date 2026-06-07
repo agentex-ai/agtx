@@ -2,11 +2,21 @@ package cli
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/agentex-ai/agtx/internal/core"
 )
 
 func TestInstallRequiresConfirmationForJSONAgent(t *testing.T) {
@@ -1165,6 +1175,46 @@ func TestCommerceInstallPackSnapshotAndBillingJSON(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
+	code = Main([]string{"commerce", "integrity", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("commerce integrity failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var integrity struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			OK      bool `json:"ok"`
+			Ledgers []struct {
+				Status string `json:"status"`
+			} `json:"ledgers"`
+			Checks []struct {
+				Name string `json:"name"`
+			} `json:"checks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &integrity); err != nil {
+		t.Fatalf("invalid commerce integrity json: %v\n%s", err, stdout.String())
+	}
+	if !integrity.OK || !integrity.Data.OK || len(integrity.Data.Ledgers) != 3 || len(integrity.Data.Checks) == 0 {
+		t.Fatalf("unexpected commerce integrity response: %s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "proof", "--challenge", "cli-nonce", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("commerce proof failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var proof struct {
+		OK   bool               `json:"ok"`
+		Data core.CommerceProof `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &proof); err != nil {
+		t.Fatalf("invalid commerce proof json: %v\n%s", err, stdout.String())
+	}
+	if !proof.OK || !core.VerifyCommerceProof(proof.Data, "cli-nonce").OK {
+		t.Fatalf("unexpected commerce proof response: %s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
 	exportPath := filepath.Join(t.TempDir(), "commerce-snapshot.json")
 	code = Main([]string{"commerce", "snapshot", "--pack-id", "standard", "--out", exportPath, "--json"}, bytes.NewReader(nil), &stdout, &stderr)
 	if code != 0 {
@@ -1196,6 +1246,123 @@ func TestCommerceInstallPackSnapshotAndBillingJSON(t *testing.T) {
 	}
 	if !bytes.Contains(data, []byte(`"schema_version": 1`)) || !bytes.Contains(data, []byte(`"pack_id": "standard"`)) {
 		t.Fatalf("unexpected exported snapshot: %s", string(data))
+	}
+}
+
+func TestCommerceSubmitProofStoresAndListsReceiptJSON(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	receiptPublicKey, receiptPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate receipt key: %v", err)
+	}
+	var gotPath string
+	var gotAuth string
+	var gotDevice string
+	var gotRequest testCommerceProofSubmitRequest
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotPath = request.URL.Path
+		gotAuth = request.Header.Get("Authorization")
+		gotDevice = request.Header.Get("X-AGTX-Device-ID")
+		if request.Method != http.MethodPost || gotPath != "/v1/commerce/proofs" {
+			http.Error(writer, "unexpected proof submit request", http.StatusNotFound)
+			return
+		}
+		if err := json.NewDecoder(request.Body).Decode(&gotRequest); err != nil {
+			http.Error(writer, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if gotRequest.SchemaVersion != 1 || gotRequest.ClientVersion == "" || gotRequest.SubmittedAt == "" {
+			http.Error(writer, "invalid submit envelope", http.StatusBadRequest)
+			return
+		}
+		if !gotRequest.Verification.OK || !core.VerifyCommerceProof(gotRequest.Proof, "cli-submit-nonce").OK {
+			http.Error(writer, "invalid commerce proof", http.StatusBadRequest)
+			return
+		}
+		receipt := testSignedCommerceReceipt(t, gotRequest.Proof, receiptPublicKey, receiptPrivateKey, 1)
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(testCommerceProofSubmitResponse{OK: true, Receipt: receipt})
+	}))
+	defer server.Close()
+
+	paths := core.PathsForRoot(root)
+	config := core.DefaultConfig()
+	config.ProAPIURL = server.URL
+	if err := core.SaveConfig(paths.ConfigFile, config); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	if err := core.SaveAuth(paths.AuthFile, core.AuthState{SchemaVersion: 1, AccessToken: "access", DeviceID: "device-1"}); err != nil {
+		t.Fatalf("save auth: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"commerce", "install-pack", "standard", "--yes", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("install pack failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "submit-proof", "--challenge", "cli-submit-nonce", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("expected submit proof confirmation code 2, got %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var confirmation struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &confirmation); err != nil {
+		t.Fatalf("invalid confirmation json: %v\n%s", err, stdout.String())
+	}
+	if confirmation.OK || confirmation.Error.Code != "confirmation_required" {
+		t.Fatalf("unexpected confirmation response: %s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "submit-proof", "--challenge", "cli-submit-nonce", "--yes", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("submit proof failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if gotPath != "/v1/commerce/proofs" || gotAuth != "Bearer access" || gotDevice != "device-1" {
+		t.Fatalf("unexpected proof submit request: path=%q auth=%q device=%q", gotPath, gotAuth, gotDevice)
+	}
+	var submit struct {
+		OK   bool                             `json:"ok"`
+		Data core.CommerceReceiptSubmitResult `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &submit); err != nil {
+		t.Fatalf("invalid submit proof json: %v\n%s", err, stdout.String())
+	}
+	if !submit.OK || !submit.Data.Verification.OK || submit.Data.Receipt.ReceiptID == "" || submit.Data.Receipt.Status != "server_received" {
+		t.Fatalf("unexpected submit proof response: %s", stdout.String())
+	}
+	if submit.Data.Receipt.Integrity == nil || submit.Data.Receipt.Integrity.Status == "" {
+		t.Fatalf("expected locally signed receipt integrity: %#v", submit.Data.Receipt)
+	}
+	if !core.VerifyCommerceReceipt(submit.Data.Proof, submit.Data.Receipt).OK {
+		t.Fatalf("receipt should verify against submitted proof: %#v", submit.Data)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "receipts", "--status", "server_received", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("list receipts failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var receipts struct {
+		OK   bool                           `json:"ok"`
+		Data core.CommerceReceiptListResult `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &receipts); err != nil {
+		t.Fatalf("invalid receipts json: %v\n%s", err, stdout.String())
+	}
+	if !receipts.OK || len(receipts.Data.Records) != 1 || receipts.Data.Records[0].ReceiptID != submit.Data.Receipt.ReceiptID || receipts.Data.Integrity == nil || receipts.Data.Integrity.Status == "" {
+		t.Fatalf("unexpected receipts response: %s", stdout.String())
 	}
 }
 
@@ -1272,6 +1439,12 @@ func TestHelpShowsDetailedProUsage(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte(`agtx commerce serve [--addr host:port] [--allow-origin origin] [--json]`)) {
 		t.Fatalf("expected commerce serve usage: %s", stdout.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`agtx commerce proof --challenge nonce [--json]`)) {
+		t.Fatalf("expected commerce proof usage: %s", stdout.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`agtx commerce submit-proof --challenge nonce --yes [--json]`)) {
+		t.Fatalf("expected commerce submit-proof usage: %s", stdout.String())
 	}
 }
 
@@ -1739,28 +1912,32 @@ func TestConfigLoadFailureDoesNotHonorAssignedJSONFlag(t *testing.T) {
 
 func TestDiscoveryHelperListsAreStable(t *testing.T) {
 	lists := map[string][]string{
-		"commands":                supportedCommands(),
-		"config subcommands":      configSubcommands(),
-		"registry subcommands":    registrySubcommands(),
-		"commerce subcommands":    commerceSubcommands(),
-		"pro subcommands":         proSubcommands(),
-		"agent subcommands":       agentSubcommands(),
-		"search flags":            searchFlags(),
-		"install flags":           installFlags(),
-		"run flags":               runFlags(),
-		"uninstall flags":         uninstallFlags(),
-		"list flags":              listFlags(),
-		"rollback flags":          rollbackFlags(),
-		"config init flags":       configInitFlags(),
-		"pro login flags":         proLoginFlags(),
-		"commerce pack flags":     commercePackFlags(),
-		"commerce scenario flags": commerceScenarioFlags(),
-		"commerce ledger flags":   commerceScenarioLedgerFlags(),
-		"commerce record flags":   commerceRecordFlags(),
-		"commerce snapshot flags": commerceSnapshotFlags(),
-		"commerce serve flags":    commerceServeFlags(),
-		"agent init flags":        agentInitFlags(),
-		"json only flags":         jsonOnlyFlags(),
+		"commands":                 supportedCommands(),
+		"config subcommands":       configSubcommands(),
+		"registry subcommands":     registrySubcommands(),
+		"commerce subcommands":     commerceSubcommands(),
+		"pro subcommands":          proSubcommands(),
+		"agent subcommands":        agentSubcommands(),
+		"search flags":             searchFlags(),
+		"install flags":            installFlags(),
+		"run flags":                runFlags(),
+		"uninstall flags":          uninstallFlags(),
+		"list flags":               listFlags(),
+		"rollback flags":           rollbackFlags(),
+		"config init flags":        configInitFlags(),
+		"pro login flags":          proLoginFlags(),
+		"commerce pack flags":      commercePackFlags(),
+		"commerce scenario flags":  commerceScenarioFlags(),
+		"commerce ledger flags":    commerceScenarioLedgerFlags(),
+		"commerce record flags":    commerceRecordFlags(),
+		"commerce receipt flags":   commerceReceiptFlags(),
+		"commerce integrity flags": commerceIntegrityFlags(),
+		"commerce proof flags":     commerceProofFlags(),
+		"commerce submit flags":    commerceSubmitProofFlags(),
+		"commerce snapshot flags":  commerceSnapshotFlags(),
+		"commerce serve flags":     commerceServeFlags(),
+		"agent init flags":         agentInitFlags(),
+		"json only flags":          jsonOnlyFlags(),
 	}
 	for name, values := range lists {
 		t.Run(name, func(t *testing.T) {
@@ -1797,6 +1974,65 @@ func containsCLIAction(actions []struct {
 		}
 	}
 	return false
+}
+
+type testCommerceProofSubmitRequest struct {
+	SchemaVersion int                                  `json:"schema_version"`
+	ClientVersion string                               `json:"client_version"`
+	SubmittedAt   string                               `json:"submitted_at"`
+	Proof         core.CommerceProof                   `json:"proof"`
+	Verification  core.CommerceProofVerificationResult `json:"verification"`
+}
+
+type testCommerceProofSubmitResponse struct {
+	OK      bool                 `json:"ok,omitempty"`
+	Receipt core.CommerceReceipt `json:"receipt"`
+}
+
+func testSignedCommerceReceipt(t *testing.T, proof core.CommerceProof, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey, sequence int64) core.CommerceReceipt {
+	t.Helper()
+	receipt := core.CommerceReceipt{
+		SchemaVersion:    1,
+		ReceiptID:        testCommerceReceiptIDForProof(proof),
+		Status:           "server_received",
+		ReceivedAt:       time.Now().UTC().Format(time.RFC3339),
+		Issuer:           "agtx-test-pro",
+		ServerLedgerID:   "test-commerce-receipts",
+		ServerSequence:   sequence,
+		Algorithm:        "ed25519-commerce-receipt-v1",
+		KeyID:            "test-receipt-key",
+		PublicKey:        base64.StdEncoding.EncodeToString(publicKey),
+		ProofPayloadHash: proof.PayloadHash,
+		ProofSignature:   proof.Signature,
+		ProofKeyID:       proof.KeyID,
+		Challenge:        proof.Challenge,
+		DeviceID:         proof.Payload.DeviceID,
+	}
+	payload, err := testCommerceReceiptPayloadBytes(receipt)
+	if err != nil {
+		t.Fatalf("canonical receipt payload: %v", err)
+	}
+	receipt.ServerSignature = base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, payload))
+	return receipt
+}
+
+func testCommerceReceiptPayloadBytes(receipt core.CommerceReceipt) ([]byte, error) {
+	receipt.ServerSignature = ""
+	receipt.Integrity = nil
+	data, err := json.Marshal(receipt)
+	if err != nil {
+		return nil, err
+	}
+	var normalized any
+	if err := json.Unmarshal(data, &normalized); err != nil {
+		return nil, err
+	}
+	return json.Marshal(normalized)
+}
+
+func testCommerceReceiptIDForProof(proof core.CommerceProof) string {
+	hash := sha256.Sum256([]byte(strings.TrimSpace(proof.PayloadHash) + "\n" + strings.TrimSpace(proof.Signature)))
+	return "receipt-" + hex.EncodeToString(hash[:12])
 }
 
 func containsString(values []string, want string) bool {

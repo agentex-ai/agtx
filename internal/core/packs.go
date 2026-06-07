@@ -15,6 +15,7 @@ const (
 	defaultRecordMaxBytes = 4 * 1024 * 1024
 	installRecordsFile    = "install-records.jsonl"
 	billingRecordsFile    = "billing-records.jsonl"
+	commerceReceiptsFile  = "commerce-receipts.jsonl"
 )
 
 func DefaultCapabilityPacks() []CapabilityPack {
@@ -566,12 +567,19 @@ func (s *Service) CommerceSnapshot(options RecordQueryOptions) (CapabilityCommer
 	if err != nil {
 		return CapabilityCommerceSnapshot{}, err
 	}
+	receipts, err := s.ListCommerceReceipts(options)
+	if err != nil {
+		return CapabilityCommerceSnapshot{}, err
+	}
 	integrity := []LedgerIntegritySummary{}
 	if installs.Integrity != nil {
 		integrity = append(integrity, *installs.Integrity)
 	}
 	if billing.Integrity != nil {
 		integrity = append(integrity, *billing.Integrity)
+	}
+	if receipts.Integrity != nil {
+		integrity = append(integrity, *receipts.Integrity)
 	}
 	return CapabilityCommerceSnapshot{
 		SchemaVersion:  1,
@@ -580,7 +588,26 @@ func (s *Service) CommerceSnapshot(options RecordQueryOptions) (CapabilityCommer
 		Scenarios:      scenarios,
 		InstallRecords: installs,
 		Billing:        billing,
+		Receipts:       receipts,
 		Integrity:      integrity,
+	}, nil
+}
+
+func (s *Service) CommerceIntegrity() (CommerceIntegrityResult, error) {
+	checks := s.checkCommerceLedgers()
+	ledgers := make([]LedgerIntegritySummary, 0, 3)
+	for _, check := range checks {
+		if summary, ok := check.Details.(LedgerIntegritySummary); ok {
+			ledgers = append(ledgers, summary)
+		}
+	}
+	return CommerceIntegrityResult{
+		SchemaVersion: 1,
+		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
+		OK:            checksOK(checks),
+		Summary:       summarizeChecks(checks),
+		Ledgers:       ledgers,
+		Checks:        checks,
 	}, nil
 }
 
@@ -1115,10 +1142,11 @@ func appendJSONLine(path string, value any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
+	_ = file.Chmod(0o600)
 	if _, err := file.Write(append(data, '\n')); err != nil {
 		_ = file.Close()
 		return err

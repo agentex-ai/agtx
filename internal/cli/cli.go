@@ -789,6 +789,85 @@ func runCommerce(ctx context.Context, service *core.Service, args []string, stdi
 		printBillingRecords(stdout, records)
 		printLedgerIntegrity(stdout, records.Integrity)
 		return 0
+	case "receipts":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		options := takeRecordQueryFlags(&rest, commerceReceiptFlags())
+		if hasInternalInvalidFlag(rest) {
+			return fail(stdout, stderr, jsonOut, internalFlagError(rest, commerceReceiptFlags()))
+		}
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected commerce receipts arguments", rest, commerceReceiptFlags()))
+		}
+		records, err := service.ListCommerceReceipts(options)
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(records, nil), 0)
+		}
+		printCommerceReceipts(stdout, records)
+		printLedgerIntegrity(stdout, records.Integrity)
+		return 0
+	case "integrity":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected commerce integrity arguments", rest, commerceIntegrityFlags()))
+		}
+		result, err := service.CommerceIntegrity()
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(result, doctorWarnings(result.Checks)), diagnosticExitCode(result.OK))
+		}
+		printCommerceIntegrity(stdout, result)
+		return diagnosticExitCode(result.OK)
+	case "proof":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		known := flagSet(commerceProofFlags())
+		challenge := takeStringFlag(&rest, "--challenge", "", known)
+		if hasInternalInvalidFlag(rest) {
+			return fail(stdout, stderr, jsonOut, internalFlagError(rest, commerceProofFlags()))
+		}
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected commerce proof arguments", rest, commerceProofFlags()))
+		}
+		result, err := service.CommerceProof(challenge)
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(result, doctorWarnings(result.Payload.Checks)), diagnosticExitCode(result.Payload.OK))
+		}
+		printCommerceProof(stdout, result)
+		return diagnosticExitCode(result.Payload.OK)
+	case "submit-proof":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		yes := takeBoolFlag(&rest, "--yes", "-y")
+		known := flagSet(commerceSubmitProofFlags())
+		challenge := takeStringFlag(&rest, "--challenge", "", known)
+		if hasInternalInvalidFlag(rest) {
+			return fail(stdout, stderr, jsonOut, internalFlagError(rest, commerceSubmitProofFlags()))
+		}
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected commerce submit-proof arguments", rest, commerceSubmitProofFlags()))
+		}
+		if err := confirmMutation("submit-proof", []string{challenge}, yes, jsonOut, stdin, stdout); err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		result, err := service.SubmitCommerceProof(ctx, challenge)
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(result, nil), 0)
+		}
+		printCommerceReceiptSubmit(stdout, result)
+		return 0
 	case "snapshot":
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
@@ -844,7 +923,7 @@ func runCommerce(ctx context.Context, service *core.Service, args []string, stdi
 }
 
 func commerceSubcommands() []string {
-	return []string{"packs", "scenarios", "install-pack", "install-scenario", "scenario-ledger", "install-records", "billing-records", "snapshot", "serve"}
+	return []string{"packs", "scenarios", "install-pack", "install-scenario", "scenario-ledger", "install-records", "billing-records", "receipts", "integrity", "proof", "submit-proof", "snapshot", "serve"}
 }
 
 func commercePackFlags() []string {
@@ -869,6 +948,22 @@ func commerceScenarioLedgerFlags() []string {
 
 func commerceRecordFlags() []string {
 	return []string{"--json", "--pack-id", "--scenario-id", "--skill", "--status", "--type", "--currency", "--from", "--to", "--limit"}
+}
+
+func commerceReceiptFlags() []string {
+	return []string{"--json", "--status", "--from", "--to", "--limit"}
+}
+
+func commerceIntegrityFlags() []string {
+	return []string{"--json"}
+}
+
+func commerceProofFlags() []string {
+	return []string{"--json", "--challenge"}
+}
+
+func commerceSubmitProofFlags() []string {
+	return []string{"--json", "--challenge", "--yes", "-y"}
 }
 
 func commerceSnapshotFlags() []string {
@@ -1339,6 +1434,8 @@ func mutationFlags(action string) []string {
 		return commerceInstallPackFlags()
 	case "install-scenario":
 		return commerceInstallScenarioFlags()
+	case "submit-proof":
+		return commerceSubmitProofFlags()
 	default:
 		return []string{"--json", "--yes", "-y"}
 	}
@@ -1651,11 +1748,21 @@ func printBillingRecords(stdout io.Writer, result core.BillingRecordListResult) 
 	}
 }
 
+func printCommerceReceipts(stdout io.Writer, result core.CommerceReceiptListResult) {
+	if len(result.Records) == 0 {
+		fmt.Fprintln(stdout, "No commerce receipts found.")
+		return
+	}
+	for _, receipt := range result.Records {
+		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%s\n", receipt.ReceivedAt, receipt.ReceiptID, receipt.Status, receipt.ProofPayloadHash, valueOrDash(receipt.ServerLedgerID))
+	}
+}
+
 func printLedgerIntegrity(stdout io.Writer, integrity *core.LedgerIntegritySummary) {
 	if integrity == nil {
 		return
 	}
-	fmt.Fprintf(stdout, "integrity: %s\tledger=%s\tverified=%d\tfailed=%d\tlegacy_unsigned=%d\n", integrity.Status, integrity.Ledger, integrity.Verified, integrity.Failed, integrity.LegacyUnsigned)
+	fmt.Fprintf(stdout, "integrity: %s\tledger=%s\tverified=%d\tfailed=%d\tlegacy_unsigned=%d\tanchors=%d\tanchor_matched=%t\n", integrity.Status, integrity.Ledger, integrity.Verified, integrity.Failed, integrity.LegacyUnsigned, integrity.Anchors, integrity.AnchorMatched)
 	if integrity.Reason != "" {
 		fmt.Fprintf(stdout, "integrity_reason: %s\n", integrity.Reason)
 	}
@@ -1666,12 +1773,60 @@ func printCommerceSnapshot(stdout io.Writer, snapshot core.CapabilityCommerceSna
 	fmt.Fprintf(stdout, "packs: %d\n", len(snapshot.Packs))
 	fmt.Fprintf(stdout, "install_records: %d\n", len(snapshot.InstallRecords.Records))
 	fmt.Fprintf(stdout, "billing_records: %d\n", len(snapshot.Billing.Records))
+	fmt.Fprintf(stdout, "receipts: %d\n", len(snapshot.Receipts.Records))
 	for _, total := range snapshot.Billing.Totals {
 		fmt.Fprintf(stdout, "billing_total: %s\t%d records\t%d\n", total.Currency, total.Records, total.GrossAmountMinor)
 	}
 	for _, integrity := range snapshot.Integrity {
 		item := integrity
 		printLedgerIntegrity(stdout, &item)
+	}
+}
+
+func printCommerceIntegrity(stdout io.Writer, result core.CommerceIntegrityResult) {
+	status := "ok"
+	if !result.OK {
+		status = "error"
+	}
+	fmt.Fprintf(stdout, "commerce integrity %s\t%s\n", result.GeneratedAt, status)
+	for _, integrity := range result.Ledgers {
+		item := integrity
+		printLedgerIntegrity(stdout, &item)
+	}
+	fmt.Fprintf(stdout, "summary: %d checks, %d warnings, %d errors\n", result.Summary.Checks, result.Summary.Warnings, result.Summary.Errors)
+}
+
+func printCommerceProof(stdout io.Writer, proof core.CommerceProof) {
+	status := "ok"
+	if !proof.Payload.OK {
+		status = "error"
+	}
+	fmt.Fprintf(stdout, "commerce proof %s\t%s\n", proof.GeneratedAt, status)
+	fmt.Fprintf(stdout, "challenge: %s\n", proof.Challenge)
+	fmt.Fprintf(stdout, "subject: %s\n", proof.Subject)
+	fmt.Fprintf(stdout, "trust_level: %s\n", proof.TrustLevel)
+	fmt.Fprintf(stdout, "receipt_status: %s\n", proof.ReceiptStatus)
+	fmt.Fprintf(stdout, "algorithm: %s\n", proof.Algorithm)
+	fmt.Fprintf(stdout, "key_id: %s\n", proof.KeyID)
+	fmt.Fprintf(stdout, "payload_hash: %s\n", proof.PayloadHash)
+	fmt.Fprintf(stdout, "signature: %s\n", proof.Signature)
+	fmt.Fprintf(stdout, "summary: %d checks, %d warnings, %d errors\n", proof.Payload.Summary.Checks, proof.Payload.Summary.Warnings, proof.Payload.Summary.Errors)
+}
+
+func printCommerceReceiptSubmit(stdout io.Writer, result core.CommerceReceiptSubmitResult) {
+	status := "verified"
+	if !result.Verification.OK {
+		status = "unverified"
+	}
+	fmt.Fprintf(stdout, "commerce receipt %s\t%s\n", result.SubmittedAt, status)
+	fmt.Fprintf(stdout, "challenge: %s\n", result.Proof.Challenge)
+	fmt.Fprintf(stdout, "receipt_id: %s\n", result.Receipt.ReceiptID)
+	fmt.Fprintf(stdout, "receipt_status: %s\n", result.Receipt.Status)
+	fmt.Fprintf(stdout, "received_at: %s\n", result.Receipt.ReceivedAt)
+	fmt.Fprintf(stdout, "payload_hash: %s\n", result.Receipt.ProofPayloadHash)
+	fmt.Fprintf(stdout, "server_ledger: %s\n", valueOrDash(result.Receipt.ServerLedgerID))
+	if result.Verification.Reason != "" {
+		fmt.Fprintf(stdout, "verification_reason: %s\n", result.Verification.Reason)
 	}
 }
 
@@ -2006,6 +2161,10 @@ Usage:
   agtx commerce install-scenario <scenario> [--plan] [--yes] [--json]
   agtx commerce scenario-ledger <scenario> [--type type] [--limit N] [--json]
   agtx commerce install-records|billing-records [--pack-id id] [--scenario-id id] [--skill name] [--limit N] [--json]
+  agtx commerce receipts [--status status] [--from time] [--to time] [--limit N] [--json]
+  agtx commerce integrity [--json]
+  agtx commerce proof --challenge nonce [--json]
+  agtx commerce submit-proof --challenge nonce --yes [--json]
   agtx commerce snapshot [--pack-id id] [--scenario-id id] [--skill name] [--limit N] [--out path] [--json]
   agtx commerce serve [--addr host:port] [--allow-origin origin] [--json]
   agtx pro login [--open] [--json]

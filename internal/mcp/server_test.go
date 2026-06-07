@@ -3,6 +3,11 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/agentex-ai/agtx/internal/core"
 )
@@ -134,6 +140,8 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	var installRecordsSchema map[string]any
 	var billingRecordsSchema map[string]any
 	var commerceSnapshotSchema map[string]any
+	var commerceIntegritySchema map[string]any
+	var commerceProofSchema map[string]any
 	var configKeysSchema map[string]any
 	var registrySourcesSchema map[string]any
 	var statusSchema map[string]any
@@ -182,6 +190,10 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 			billingRecordsSchema = tool.OutputSchema
 		case "get_commerce_snapshot":
 			commerceSnapshotSchema = tool.OutputSchema
+		case "get_commerce_integrity":
+			commerceIntegritySchema = tool.OutputSchema
+		case "get_commerce_proof":
+			commerceProofSchema = tool.OutputSchema
 		case "list_config_keys":
 			configKeysSchema = tool.OutputSchema
 		case "list_registry_sources":
@@ -233,7 +245,7 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 			verifyErrorSchema = tool.ErrorOutputSchema
 		}
 	}
-	if searchSchema == nil || listSchema == nil || packListSchema == nil || scenarioListSchema == nil || scenarioSchema == nil || packPlanSchema == nil || packInstallSchema == nil || scenarioPlanSchema == nil || scenarioInstallSchema == nil || scenarioLedgerSchema == nil || installRecordsSchema == nil || billingRecordsSchema == nil || commerceSnapshotSchema == nil || configKeysSchema == nil || registrySourcesSchema == nil || statusSchema == nil || proStatusSchema == nil || proSetupSchema == nil || proLoginStartSchema == nil || proLoginCompleteSchema == nil || proDevicesSchema == nil || revokeProDeviceSchema == nil || logoutProSchema == nil || registerProSchemeSchema == nil || refreshSchema == nil || validateRegistrySchema == nil || runSchema == nil || runOutputSchema == nil || runErrorSchema == nil || planSchema == nil || planOutputSchema == nil || installSchema == nil || installErrorSchema == nil || upgradeSchema == nil || rollbackSchema == nil || uninstallSchema == nil || agentSchema == nil || doctorSchema == nil || verifySchema == nil || verifyErrorSchema == nil {
+	if searchSchema == nil || listSchema == nil || packListSchema == nil || scenarioListSchema == nil || scenarioSchema == nil || packPlanSchema == nil || packInstallSchema == nil || scenarioPlanSchema == nil || scenarioInstallSchema == nil || scenarioLedgerSchema == nil || installRecordsSchema == nil || billingRecordsSchema == nil || commerceSnapshotSchema == nil || commerceIntegritySchema == nil || commerceProofSchema == nil || configKeysSchema == nil || registrySourcesSchema == nil || statusSchema == nil || proStatusSchema == nil || proSetupSchema == nil || proLoginStartSchema == nil || proLoginCompleteSchema == nil || proDevicesSchema == nil || revokeProDeviceSchema == nil || logoutProSchema == nil || registerProSchemeSchema == nil || refreshSchema == nil || validateRegistrySchema == nil || runSchema == nil || runOutputSchema == nil || runErrorSchema == nil || planSchema == nil || planOutputSchema == nil || installSchema == nil || installErrorSchema == nil || upgradeSchema == nil || rollbackSchema == nil || uninstallSchema == nil || agentSchema == nil || doctorSchema == nil || verifySchema == nil || verifyErrorSchema == nil {
 		t.Fatalf("expected schemas for discovery metadata: %s", stdout.String())
 	}
 	if runSchema["additionalProperties"] != false {
@@ -374,6 +386,14 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	snapshotProps, ok := commerceSnapshotSchema["properties"].(map[string]any)
 	if !ok || snapshotProps["packs"] == nil || snapshotProps["scenarios"] == nil || snapshotProps["install_records"] == nil || snapshotProps["billing"] == nil || snapshotProps["integrity"] == nil {
 		t.Fatalf("expected commerce snapshot schemas: %#v", commerceSnapshotSchema)
+	}
+	commerceIntegrityProps, ok := commerceIntegritySchema["properties"].(map[string]any)
+	if !ok || commerceIntegrityProps["summary"] == nil || commerceIntegrityProps["ledgers"] == nil || commerceIntegrityProps["checks"] == nil {
+		t.Fatalf("expected commerce integrity schemas: %#v", commerceIntegritySchema)
+	}
+	commerceProofProps, ok := commerceProofSchema["properties"].(map[string]any)
+	if !ok || commerceProofProps["challenge"] == nil || commerceProofProps["payload_hash"] == nil || commerceProofProps["signature"] == nil || commerceProofProps["payload"] == nil {
+		t.Fatalf("expected commerce proof schemas: %#v", commerceProofSchema)
 	}
 	configKeysItems, ok := configKeysSchema["items"].(map[string]any)
 	if !ok {
@@ -1283,7 +1303,9 @@ func TestMCPCapabilityPackCommerceSnapshot(t *testing.T) {
 	service := core.NewService(core.PathsForRoot(t.TempDir()))
 	input := strings.NewReader(
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"install_capability_pack","arguments":{"pack":"gaoji","yes":true}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_commerce_snapshot","arguments":{"pack_id":"advanced","type":"pack_install","currency":"USD","limit":10}}}` + "\n",
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_commerce_snapshot","arguments":{"pack_id":"advanced","type":"pack_install","currency":"USD","limit":10}}}` + "\n" +
+			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_commerce_integrity","arguments":{}}}` + "\n" +
+			`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_commerce_proof","arguments":{"challenge":"mcp-nonce"}}}` + "\n",
 	)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -1292,8 +1314,8 @@ func TestMCPCapabilityPackCommerceSnapshot(t *testing.T) {
 		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected two MCP responses, got %d: %s", len(lines), stdout.String())
+	if len(lines) != 4 {
+		t.Fatalf("expected four MCP responses, got %d: %s", len(lines), stdout.String())
 	}
 	var install struct {
 		Result struct {
@@ -1358,6 +1380,155 @@ func TestMCPCapabilityPackCommerceSnapshot(t *testing.T) {
 	}
 	if len(snapshot.Result.StructuredContent.Billing.Records) != 1 || snapshot.Result.StructuredContent.Billing.Records[0].PackID != "advanced" || snapshot.Result.StructuredContent.Billing.Records[0].Meter != "seat" {
 		t.Fatalf("expected advanced billing records: %s", lines[1])
+	}
+	var integrity struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				OK      bool `json:"ok"`
+				Ledgers []struct {
+					Status string `json:"status"`
+				} `json:"ledgers"`
+				Checks []struct {
+					Name string `json:"name"`
+				} `json:"checks"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[2]), &integrity); err != nil {
+		t.Fatalf("invalid integrity json: %v\n%s", err, lines[2])
+	}
+	if integrity.Result.IsError || !integrity.Result.StructuredContent.OK || len(integrity.Result.StructuredContent.Ledgers) != 3 || len(integrity.Result.StructuredContent.Checks) == 0 {
+		t.Fatalf("expected commerce integrity result: %s", lines[2])
+	}
+	for _, ledger := range integrity.Result.StructuredContent.Ledgers {
+		if ledger.Status == "" {
+			t.Fatalf("expected ledger integrity status: %s", lines[2])
+		}
+	}
+	var proof struct {
+		Result struct {
+			IsError           bool               `json:"isError"`
+			StructuredContent core.CommerceProof `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[3]), &proof); err != nil {
+		t.Fatalf("invalid proof json: %v\n%s", err, lines[3])
+	}
+	if proof.Result.IsError || !core.VerifyCommerceProof(proof.Result.StructuredContent, "mcp-nonce").OK {
+		t.Fatalf("expected commerce proof result: %s", lines[3])
+	}
+}
+
+func TestMCPSubmitProofStoresAndListsReceipt(t *testing.T) {
+	paths := core.PathsForRoot(t.TempDir())
+	service := core.NewService(paths)
+	receiptPublicKey, receiptPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate receipt key: %v", err)
+	}
+	var submitCalls int
+	var gotPath string
+	var gotAuth string
+	var gotDevice string
+	var gotRequest testCommerceProofSubmitRequest
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		submitCalls++
+		gotPath = request.URL.Path
+		gotAuth = request.Header.Get("Authorization")
+		gotDevice = request.Header.Get("X-AGTX-Device-ID")
+		if request.Method != http.MethodPost || gotPath != "/v1/commerce/proofs" {
+			http.Error(writer, "unexpected proof submit request", http.StatusNotFound)
+			return
+		}
+		if err := json.NewDecoder(request.Body).Decode(&gotRequest); err != nil {
+			http.Error(writer, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if gotRequest.SchemaVersion != 1 || gotRequest.ClientVersion == "" || gotRequest.SubmittedAt == "" {
+			http.Error(writer, "invalid submit envelope", http.StatusBadRequest)
+			return
+		}
+		if !gotRequest.Verification.OK || !core.VerifyCommerceProof(gotRequest.Proof, "mcp-submit-nonce").OK {
+			http.Error(writer, "invalid commerce proof", http.StatusBadRequest)
+			return
+		}
+		receipt := testSignedCommerceReceipt(t, gotRequest.Proof, receiptPublicKey, receiptPrivateKey, 1)
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(testCommerceProofSubmitResponse{OK: true, Receipt: receipt})
+	}))
+	defer server.Close()
+
+	service.Config.ProAPIURL = server.URL
+	service.Auth = core.AuthState{SchemaVersion: 1, AccessToken: "access", DeviceID: "device-1"}
+	if err := core.SaveAuth(paths.AuthFile, service.Auth); err != nil {
+		t.Fatalf("save auth: %v", err)
+	}
+	if _, err := service.InstallCapabilityPack(context.Background(), "standard"); err != nil {
+		t.Fatalf("install standard pack: %v", err)
+	}
+
+	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"submit_commerce_proof","arguments":{"challenge":"mcp-submit-nonce"}}}` + "\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	if submitCalls != 0 {
+		t.Fatalf("submit without yes should not call Pro, got %d calls", submitCalls)
+	}
+	if !strings.Contains(stdout.String(), "confirmation_required") {
+		t.Fatalf("expected confirmation error: %s", stdout.String())
+	}
+	assertMCPConfirmationDetails(t, stdout.Bytes(), "submit_commerce_proof", "challenge")
+
+	stdout.Reset()
+	stderr.Reset()
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"submit_commerce_proof","arguments":{"challenge":"mcp-submit-nonce","yes":true}}}` + "\n" +
+			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_commerce_receipts","arguments":{"status":"server_received","limit":10}}}` + "\n",
+	)
+	code = Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	if submitCalls != 1 || gotPath != "/v1/commerce/proofs" || gotAuth != "Bearer access" || gotDevice != "device-1" {
+		t.Fatalf("unexpected proof submit request: calls=%d path=%q auth=%q device=%q", submitCalls, gotPath, gotAuth, gotDevice)
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected two MCP responses, got %d: %s", len(lines), stdout.String())
+	}
+	var submit struct {
+		Result struct {
+			IsError           bool                             `json:"isError"`
+			StructuredContent core.CommerceReceiptSubmitResult `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &submit); err != nil {
+		t.Fatalf("invalid submit receipt json: %v\n%s", err, lines[0])
+	}
+	if submit.Result.IsError || !submit.Result.StructuredContent.Verification.OK || submit.Result.StructuredContent.Receipt.ReceiptID == "" || submit.Result.StructuredContent.Receipt.Status != "server_received" {
+		t.Fatalf("unexpected submit receipt response: %s", lines[0])
+	}
+	if submit.Result.StructuredContent.Receipt.Integrity == nil || submit.Result.StructuredContent.Receipt.Integrity.Status == "" {
+		t.Fatalf("expected locally signed receipt integrity: %#v", submit.Result.StructuredContent.Receipt)
+	}
+	if !core.VerifyCommerceReceipt(submit.Result.StructuredContent.Proof, submit.Result.StructuredContent.Receipt).OK {
+		t.Fatalf("receipt should verify against submitted proof: %#v", submit.Result.StructuredContent)
+	}
+	var receipts struct {
+		Result struct {
+			IsError           bool                           `json:"isError"`
+			StructuredContent core.CommerceReceiptListResult `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &receipts); err != nil {
+		t.Fatalf("invalid list receipts json: %v\n%s", err, lines[1])
+	}
+	if receipts.Result.IsError || len(receipts.Result.StructuredContent.Records) != 1 || receipts.Result.StructuredContent.Records[0].ReceiptID != submit.Result.StructuredContent.Receipt.ReceiptID || receipts.Result.StructuredContent.Integrity == nil || receipts.Result.StructuredContent.Integrity.Status == "" {
+		t.Fatalf("unexpected list receipts response: %s", lines[1])
 	}
 }
 
@@ -2319,6 +2490,65 @@ func assertMCPInvalidRequestDetails(t *testing.T, output []byte, field, message 
 	if response.Error.Data.Expected == nil {
 		t.Fatalf("expected field expectation in invalid request details: %s", string(output))
 	}
+}
+
+type testCommerceProofSubmitRequest struct {
+	SchemaVersion int                                  `json:"schema_version"`
+	ClientVersion string                               `json:"client_version"`
+	SubmittedAt   string                               `json:"submitted_at"`
+	Proof         core.CommerceProof                   `json:"proof"`
+	Verification  core.CommerceProofVerificationResult `json:"verification"`
+}
+
+type testCommerceProofSubmitResponse struct {
+	OK      bool                 `json:"ok,omitempty"`
+	Receipt core.CommerceReceipt `json:"receipt"`
+}
+
+func testSignedCommerceReceipt(t *testing.T, proof core.CommerceProof, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey, sequence int64) core.CommerceReceipt {
+	t.Helper()
+	receipt := core.CommerceReceipt{
+		SchemaVersion:    1,
+		ReceiptID:        testCommerceReceiptIDForProof(proof),
+		Status:           "server_received",
+		ReceivedAt:       time.Now().UTC().Format(time.RFC3339),
+		Issuer:           "agtx-test-pro",
+		ServerLedgerID:   "test-commerce-receipts",
+		ServerSequence:   sequence,
+		Algorithm:        "ed25519-commerce-receipt-v1",
+		KeyID:            "test-receipt-key",
+		PublicKey:        base64.StdEncoding.EncodeToString(publicKey),
+		ProofPayloadHash: proof.PayloadHash,
+		ProofSignature:   proof.Signature,
+		ProofKeyID:       proof.KeyID,
+		Challenge:        proof.Challenge,
+		DeviceID:         proof.Payload.DeviceID,
+	}
+	payload, err := testCommerceReceiptPayloadBytes(receipt)
+	if err != nil {
+		t.Fatalf("canonical receipt payload: %v", err)
+	}
+	receipt.ServerSignature = base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, payload))
+	return receipt
+}
+
+func testCommerceReceiptPayloadBytes(receipt core.CommerceReceipt) ([]byte, error) {
+	receipt.ServerSignature = ""
+	receipt.Integrity = nil
+	data, err := json.Marshal(receipt)
+	if err != nil {
+		return nil, err
+	}
+	var normalized any
+	if err := json.Unmarshal(data, &normalized); err != nil {
+		return nil, err
+	}
+	return json.Marshal(normalized)
+}
+
+func testCommerceReceiptIDForProof(proof core.CommerceProof) string {
+	hash := sha256.Sum256([]byte(strings.TrimSpace(proof.PayloadHash) + "\n" + strings.TrimSpace(proof.Signature)))
+	return "receipt-" + hex.EncodeToString(hash[:12])
 }
 
 func containsString(values []string, want string) bool {
