@@ -3,8 +3,16 @@ package core
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+func TestSafeURLForDetailsRedactsQueryFragmentAndUserInfo(t *testing.T) {
+	got := safeURLForDetails("https://user:pass@example.com/download.zip?token=secret#frag")
+	if got != "https://example.com/download.zip" {
+		t.Fatalf("unexpected safe url: %s", got)
+	}
+}
 
 func TestOutboundHTTPClientRejectsRemoteHTTPRedirect(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -19,6 +27,11 @@ func TestOutboundHTTPClientRejectsRemoteHTTPRedirect(t *testing.T) {
 	_, err = outboundHTTPClient.Do(request)
 	if !IsErrorCode(err, CodeInvalidArgument) {
 		t.Fatalf("expected invalid redirect error, got %v", err)
+	}
+	coreErr := ErrorFrom(err)
+	details, ok := coreErr.Details.(map[string]any)
+	if !ok || strings.Contains(details["url"].(string), "token=") {
+		t.Fatalf("expected redacted redirect url details, got %#v", coreErr.Details)
 	}
 }
 

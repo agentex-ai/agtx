@@ -286,6 +286,32 @@ func TestProDevicesUnauthorizedIncludesRecoveryHints(t *testing.T) {
 	}
 }
 
+func TestProRevokeRejectsUnsafeDeviceID(t *testing.T) {
+	service := NewService(PathsForRoot(t.TempDir()))
+	if _, err := service.ProRevokeDevice(context.Background(), "../device"); !IsErrorCode(err, CodeInvalidArgument) {
+		t.Fatalf("expected invalid device id, got %v", err)
+	}
+	if _, err := service.ProRevokeDevice(context.Background(), "device/one"); !IsErrorCode(err, CodeInvalidArgument) {
+		t.Fatalf("expected invalid device id with slash, got %v", err)
+	}
+	if err := validateDeviceID("_base64url-device"); err != nil {
+		t.Fatalf("expected base64url-style device id to be allowed: %v", err)
+	}
+}
+
+func TestProAPIURLFromConfigValidatesRuntimeValues(t *testing.T) {
+	if _, err := proAPIURLFromConfig(Config{SchemaVersion: 1, ProAPIURL: "http://pro.example.com"}); !IsErrorCode(err, CodeInvalidArgument) {
+		t.Fatalf("expected remote http pro api url rejected, got %v", err)
+	}
+	got, err := proAPIURLFromConfig(Config{SchemaVersion: 1, ProAPIURL: "https://pro.example.com/base/"})
+	if err != nil {
+		t.Fatalf("expected valid pro api url: %v", err)
+	}
+	if got != "https://pro.example.com/base" {
+		t.Fatalf("unexpected normalized pro api url: %s", got)
+	}
+}
+
 func containsSetupStatus(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

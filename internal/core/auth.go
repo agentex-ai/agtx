@@ -204,8 +204,12 @@ func (s *Service) ProDevices(ctx context.Context) ([]ProDevice, error) {
 }
 
 func (s *Service) ProRevokeDevice(ctx context.Context, id string) (ProDevice, error) {
-	if strings.TrimSpace(id) == "" {
+	id = strings.TrimSpace(id)
+	if id == "" {
 		return ProDevice{}, NewError(CodeInvalidArgument, "device id is required", nil)
+	}
+	if err := validateDeviceID(id); err != nil {
+		return ProDevice{}, err
 	}
 	var device ProDevice
 	err := s.proJSON(ctx, http.MethodPost, "/v1/devices/"+url.PathEscape(id)+"/revoke", nil, &device)
@@ -318,7 +322,7 @@ func requestJSON(ctx context.Context, method, rawURL string, auth requestAuth, i
 	res, err := outboundHTTPClient.Do(req)
 	if err != nil {
 		if requestCtx.Err() == context.DeadlineExceeded {
-			return NewError(CodeTimeout, "pro request timed out", map[string]any{"url": rawURL, "timeout_ms": defaultProRequestTimeout.Milliseconds()})
+			return NewError(CodeTimeout, "pro request timed out", map[string]any{"url": safeURLForDetails(rawURL), "timeout_ms": defaultProRequestTimeout.Milliseconds()})
 		}
 		return err
 	}
@@ -333,7 +337,7 @@ func requestJSON(ctx context.Context, method, rawURL string, auth requestAuth, i
 	data, err := readAllLimited(res.Body, defaultAuthMaxBytes, "pro response")
 	if err != nil {
 		if requestCtx.Err() == context.DeadlineExceeded {
-			return NewError(CodeTimeout, "pro request timed out", map[string]any{"url": rawURL, "timeout_ms": defaultProRequestTimeout.Milliseconds()})
+			return NewError(CodeTimeout, "pro request timed out", map[string]any{"url": safeURLForDetails(rawURL), "timeout_ms": defaultProRequestTimeout.Milliseconds()})
 		}
 		return err
 	}
@@ -464,9 +468,23 @@ func refreshAccessToken(ctx context.Context, apiURL string, auth AuthState) (pro
 
 func proAPIURLFromConfig(config Config) (string, error) {
 	if strings.TrimSpace(config.ProAPIURL) != "" {
-		return strings.TrimRight(config.ProAPIURL, "/"), nil
+		if err := validateServiceURL("pro_api_url", config.ProAPIURL); err != nil {
+			return "", err
+		}
+		parsed, err := url.Parse(config.ProAPIURL)
+		if err != nil {
+			return "", err
+		}
+		parsed.Path = strings.TrimRight(parsed.Path, "/")
+		parsed.RawPath = ""
+		parsed.RawQuery = ""
+		parsed.Fragment = ""
+		return parsed.String(), nil
 	}
 	if strings.TrimSpace(config.RegistryURL) != "" {
+		if err := validateRegistryURL(config.RegistryURL); err != nil {
+			return "", err
+		}
 		parsed, err := url.Parse(config.RegistryURL)
 		if err == nil && parsed.Scheme != "" && parsed.Host != "" {
 			return parsed.Scheme + "://" + parsed.Host, nil
@@ -598,6 +616,22 @@ func defaultDeviceName() string {
 		host = runtime.GOOS + "-" + runtime.GOARCH
 	}
 	return host
+}
+
+func validateDeviceID(id string) error {
+	if strings.TrimSpace(id) == "" {
+		return NewError(CodeInvalidArgument, "device id is required", nil)
+	}
+	if strings.TrimSpace(id) != id {
+		return NewError(CodeInvalidArgument, "device id must not contain leading or trailing whitespace", map[string]any{"value": id})
+	}
+	if id == "." || id == ".." || strings.Contains(id, "/") || strings.Contains(id, "\\") || strings.ContainsRune(id, 0) {
+		return NewError(CodeInvalidArgument, "device id must be a safe path segment", map[string]any{"value": id})
+	}
+	if !deviceIDPattern.MatchString(id) {
+		return NewError(CodeInvalidArgument, "device id contains unsupported characters", map[string]any{"value": id})
+	}
+	return nil
 }
 
 func randomToken(bytesLen int) (string, error) {

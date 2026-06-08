@@ -872,7 +872,7 @@ func fetchBundleBytes(ctx context.Context, url string, config Config, paths Path
 	res, err := outboundHTTPClient.Do(req)
 	if err != nil {
 		if requestCtx.Err() == context.DeadlineExceeded {
-			return nil, NewError(CodeTimeout, "package download timed out", map[string]any{"url": url, "timeout_ms": timeout.Milliseconds()})
+			return nil, NewError(CodeTimeout, "package download timed out", map[string]any{"url": safeURLForDetails(url), "timeout_ms": timeout.Milliseconds()})
 		}
 		return nil, err
 	}
@@ -884,7 +884,7 @@ func fetchBundleBytes(ctx context.Context, url string, config Config, paths Path
 	data, err := readAllLimited(res.Body, config.PackageMaxBytes, "package")
 	if err != nil {
 		if requestCtx.Err() == context.DeadlineExceeded {
-			return nil, NewError(CodeTimeout, "package download timed out", map[string]any{"url": url, "timeout_ms": timeout.Milliseconds()})
+			return nil, NewError(CodeTimeout, "package download timed out", map[string]any{"url": safeURLForDetails(url), "timeout_ms": timeout.Milliseconds()})
 		}
 		return nil, err
 	}

@@ -13,6 +13,7 @@ import (
 )
 
 var sha256Pattern = regexp.MustCompile(`^[A-Fa-f0-9]{64}$`)
+var deviceIDPattern = regexp.MustCompile(`^[A-Za-z0-9._+-]+$`)
 
 type RegistrySource struct {
 	Kind   string `json:"kind"`
@@ -84,7 +85,7 @@ func RefreshRegistry(ctx context.Context, paths Paths, config Config) (RegistryR
 	res, err := outboundHTTPClient.Do(req)
 	if err != nil {
 		if requestCtx.Err() == context.DeadlineExceeded {
-			return RegistryRefreshResult{}, NewError(CodeTimeout, "registry refresh timed out", map[string]any{"url": config.RegistryURL, "timeout_ms": timeout.Milliseconds()})
+			return RegistryRefreshResult{}, NewError(CodeTimeout, "registry refresh timed out", map[string]any{"url": safeURLForDetails(config.RegistryURL), "timeout_ms": timeout.Milliseconds()})
 		}
 		return RegistryRefreshResult{}, err
 	}
@@ -96,7 +97,7 @@ func RefreshRegistry(ctx context.Context, paths Paths, config Config) (RegistryR
 	data, err := readAllLimited(res.Body, config.RegistryMaxBytes, "registry")
 	if err != nil {
 		if requestCtx.Err() == context.DeadlineExceeded {
-			return RegistryRefreshResult{}, NewError(CodeTimeout, "registry refresh timed out", map[string]any{"url": config.RegistryURL, "timeout_ms": timeout.Milliseconds()})
+			return RegistryRefreshResult{}, NewError(CodeTimeout, "registry refresh timed out", map[string]any{"url": safeURLForDetails(config.RegistryURL), "timeout_ms": timeout.Milliseconds()})
 		}
 		return RegistryRefreshResult{}, err
 	}
@@ -386,6 +387,9 @@ func validateBundleURL(raw string) error {
 		if parsed.Host == "" {
 			return NewError(CodeInvalidArgument, "bundle url requires host", map[string]any{"url": raw})
 		}
+		if parsed.User != nil {
+			return NewError(CodeInvalidArgument, "bundle url must not include user info", map[string]any{"url": safeURLForDetails(raw)})
+		}
 		if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
 			return NewError(CodeInvalidArgument, "http bundle url must use localhost or loopback; use https for remote bundles", map[string]any{"url": raw})
 		}
@@ -416,6 +420,12 @@ func validateServiceURL(label, raw string) error {
 		if parsed.Host == "" {
 			return NewError(CodeInvalidArgument, label+" requires host", map[string]any{"url": raw})
 		}
+		if isConfiguredServiceURL(label) && parsed.User != nil {
+			return NewError(CodeInvalidArgument, label+" must not include user info", map[string]any{"url": safeURLForDetails(raw)})
+		}
+		if isConfiguredServiceURL(label) && (parsed.RawQuery != "" || parsed.Fragment != "") {
+			return NewError(CodeInvalidArgument, label+" must not include query or fragment", map[string]any{"url": safeURLForDetails(raw)})
+		}
 		if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
 			return NewError(CodeInvalidArgument, label+" must use https unless it targets localhost or loopback", map[string]any{"url": raw})
 		}
@@ -423,6 +433,10 @@ func validateServiceURL(label, raw string) error {
 		return NewError(CodeInvalidArgument, "unsupported "+label+" scheme", map[string]any{"scheme": parsed.Scheme})
 	}
 	return nil
+}
+
+func isConfiguredServiceURL(label string) bool {
+	return label == "registry_url" || label == "pro_api_url"
 }
 
 func isLoopbackHost(host string) bool {

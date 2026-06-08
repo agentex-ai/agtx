@@ -51,6 +51,9 @@ func TestLoadConfigRejectsInvalidValues(t *testing.T) {
 	tests := map[string]string{
 		"bad registry url":    `{"schema_version":1,"registry_url":"file:///tmp/registry.json"}`,
 		"plain http remote":   `{"schema_version":1,"registry_url":"http://registry.example.com/registry.json"}`,
+		"registry query":      `{"schema_version":1,"registry_url":"https://example.com/registry.json?token=secret"}`,
+		"pro api fragment":    `{"schema_version":1,"pro_api_url":"https://pro.example.com/#frag"}`,
+		"pro api user info":   `{"schema_version":1,"pro_api_url":"https://user:pass@pro.example.com"}`,
 		"bad telemetry":       `{"schema_version":1,"telemetry":"verbose"}`,
 		"bad timeout":         `{"schema_version":1,"run_timeout_ms":0}`,
 		"bad schema version":  `{"schema_version":2}`,

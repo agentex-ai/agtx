@@ -205,7 +205,7 @@ func remoteHTTPError(message, rawURL string, statusCode int, status string, body
 		}
 		if err := decodeJSONStrict(body, &envelope); err == nil && strings.TrimSpace(envelope.Error.Code) != "" {
 			details := cloneDetailsMap(envelope.Error.Details)
-			details["url"] = rawURL
+			details["url"] = safeURLForDetails(rawURL)
 			details["status_code"] = statusCode
 			details["status"] = status
 			return NewError(envelope.Error.Code, envelope.Error.Message, details)
@@ -215,7 +215,7 @@ func remoteHTTPError(message, rawURL string, statusCode int, status string, body
 }
 
 func httpStatusError(message, rawURL string, statusCode int, status string) error {
-	details := map[string]any{"url": rawURL, "status_code": statusCode, "status": status}
+	details := map[string]any{"url": safeURLForDetails(rawURL), "status_code": statusCode, "status": status}
 	switch statusCode {
 	case http.StatusUnauthorized:
 		return NewError(CodeUnauthorized, message, details)

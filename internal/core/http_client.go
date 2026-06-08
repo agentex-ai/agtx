@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -47,7 +48,7 @@ func secureRedirectPolicy(req *http.Request, via []*http.Request) error {
 		return nil
 	}
 	if req.URL.Scheme == "http" && !isLoopbackHost(req.URL.Hostname()) {
-		return NewError(CodeInvalidArgument, "redirect to remote http is not allowed", map[string]any{"url": req.URL.String()})
+		return NewError(CodeInvalidArgument, "redirect to remote http is not allowed", map[string]any{"url": safeURLForDetails(req.URL.String())})
 	}
 	if len(via) > 0 && !sameURLOrigin(req.URL, via[0].URL) {
 		req.Header.Del("Authorization")
@@ -60,5 +61,16 @@ func sameURLOrigin(left, right *url.URL) bool {
 	if left == nil || right == nil {
 		return false
 	}
-	return left.Scheme == right.Scheme && left.Host == right.Host
+	return strings.EqualFold(left.Scheme, right.Scheme) && strings.EqualFold(left.Host, right.Host)
+}
+
+func safeURLForDetails(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
 }
