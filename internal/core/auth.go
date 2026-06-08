@@ -3,10 +3,8 @@ package core
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -90,13 +88,22 @@ func (s *Service) ProLoginStart(ctx context.Context) (ProLoginStartResult, error
 	}
 	auth := normalizeAuth(s.Auth)
 	if auth.DeviceID == "" {
-		auth.DeviceID = randomToken(32)
+		auth.DeviceID, err = randomToken(32)
+		if err != nil {
+			return ProLoginStartResult{}, err
+		}
 	}
 	if auth.DeviceName == "" {
 		auth.DeviceName = defaultDeviceName()
 	}
-	state := randomToken(32)
-	verifier := randomToken(48)
+	state, err := randomToken(32)
+	if err != nil {
+		return ProLoginStartResult{}, err
+	}
+	verifier, err := randomToken(48)
+	if err != nil {
+		return ProLoginStartResult{}, err
+	}
 	auth.Pending = &PendingAuth{State: state, CodeVerifier: verifier, StartedAt: time.Now().UTC().Format(time.RFC3339), ProAPIURL: apiURL}
 	if err := SaveAuth(s.Paths.AuthFile, auth); err != nil {
 		return ProLoginStartResult{}, err
@@ -282,6 +289,8 @@ func buildLoginURL(apiURL string, auth AuthState, state, verifier string) (strin
 }
 
 func requestJSON(ctx context.Context, method, rawURL string, auth requestAuth, in, out any) error {
+	requestCtx, cancel := contextWithDefaultTimeout(ctx, defaultProRequestTimeout)
+	defer cancel()
 	var body *bytes.Reader
 	if in == nil {
 		body = bytes.NewReader(nil)
@@ -292,7 +301,7 @@ func requestJSON(ctx context.Context, method, rawURL string, auth requestAuth, i
 		}
 		body = bytes.NewReader(data)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
+	req, err := http.NewRequestWithContext(requestCtx, method, rawURL, body)
 	if err != nil {
 		return err
 	}
@@ -306,8 +315,11 @@ func requestJSON(ctx context.Context, method, rawURL string, auth requestAuth, i
 	if auth.DeviceID != "" {
 		req.Header.Set("X-AGTX-Device-ID", auth.DeviceID)
 	}
-	res, err := http.DefaultClient.Do(req)
+	res, err := outboundHTTPClient.Do(req)
 	if err != nil {
+		if requestCtx.Err() == context.DeadlineExceeded {
+			return NewError(CodeTimeout, "pro request timed out", map[string]any{"url": rawURL, "timeout_ms": defaultProRequestTimeout.Milliseconds()})
+		}
 		return err
 	}
 	defer res.Body.Close()
@@ -320,6 +332,9 @@ func requestJSON(ctx context.Context, method, rawURL string, auth requestAuth, i
 	}
 	data, err := readAllLimited(res.Body, defaultAuthMaxBytes, "pro response")
 	if err != nil {
+		if requestCtx.Err() == context.DeadlineExceeded {
+			return NewError(CodeTimeout, "pro request timed out", map[string]any{"url": rawURL, "timeout_ms": defaultProRequestTimeout.Milliseconds()})
+		}
 		return err
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
@@ -585,13 +600,12 @@ func defaultDeviceName() string {
 	return host
 }
 
-func randomToken(bytesLen int) string {
-	data := make([]byte, bytesLen)
-	if _, err := rand.Read(data); err != nil {
-		sum := sha256.Sum256([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
-		return hex.EncodeToString(sum[:])
+func randomToken(bytesLen int) (string, error) {
+	token, err := NewSecretToken(bytesLen)
+	if err != nil {
+		return "", NewError(CodeInternal, "secure random token generation failed", map[string]any{"error": err.Error()})
 	}
-	return base64.RawURLEncoding.EncodeToString(data)
+	return token, nil
 }
 
 func pkceChallenge(verifier string) string {

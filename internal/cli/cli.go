@@ -70,7 +70,7 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "commerce":
 		return runCommerce(ctx, service, args[1:], stdin, stdout, stderr)
 	case "pro":
-		return runPro(ctx, service, args[1:], stdout, stderr)
+		return runPro(ctx, service, args[1:], stdin, stdout, stderr)
 	case "mcp":
 		return mcp.Run(service, stdin, stdout, stderr)
 	case "agent":
@@ -1130,7 +1130,7 @@ func validateCommerceServeAddr(addr string) error {
 	return nil
 }
 
-func runPro(ctx context.Context, service *core.Service, args []string, stdout, stderr io.Writer) int {
+func runPro(ctx context.Context, service *core.Service, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	jsonOut := wantsJSONOutput(args)
 	if len(args) == 0 || onlyJSONFlag(args) {
 		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "pro subcommand is required", map[string]any{"supported_subcommands": proSubcommands()}))
@@ -1255,8 +1255,12 @@ func runPro(ctx context.Context, service *core.Service, args []string, stdout, s
 	case "revoke":
 		rest := args[1:]
 		jsonOut := takeBoolFlag(&rest, "--json", "")
+		yes := takeBoolFlag(&rest, "--yes", "-y")
 		if len(rest) != 1 {
-			return fail(stdout, stderr, jsonOut, argumentCountError("pro revoke requires device id", []string{"device_id"}, jsonOnlyFlags()))
+			return fail(stdout, stderr, jsonOut, argumentCountError("pro revoke requires device id", []string{"device_id"}, proRevokeFlags()))
+		}
+		if err := confirmMutation("pro-revoke", []string{rest[0]}, yes, jsonOut, stdin, stdout); err != nil {
+			return fail(stdout, stderr, jsonOut, err)
 		}
 		device, err := service.ProRevokeDevice(ctx, rest[0])
 		if err != nil {
@@ -1308,6 +1312,10 @@ func proSubcommands() []string {
 
 func proLoginFlags() []string {
 	return []string{"--json", "--open"}
+}
+
+func proRevokeFlags() []string {
+	return []string{"--json", "--yes", "-y"}
 }
 
 func openURL(rawURL string) error {
@@ -1468,6 +1476,8 @@ func mutationFlags(action string) []string {
 		return commerceInstallScenarioFlags()
 	case "submit-proof":
 		return commerceSubmitProofFlags()
+	case "pro-revoke":
+		return proRevokeFlags()
 	default:
 		return []string{"--json", "--yes", "-y"}
 	}
@@ -2202,7 +2212,7 @@ Usage:
   agtx pro login [--open] [--json]
   agtx pro callback <agtx://pro/callback?...> [--json]
   agtx pro status|setup|logout|devices|register-scheme [--json]
-  agtx pro revoke <device-id> [--json]
+  agtx pro revoke <device-id> --yes [--json]
   agtx mcp
   agtx agent init <target> [--print|--json]
   agtx agent targets [--json]`)

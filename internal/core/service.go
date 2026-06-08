@@ -869,7 +869,7 @@ func fetchBundleBytes(ctx context.Context, url string, config Config, paths Path
 		return nil, err
 	}
 	attachAuthHeader(req, config, loadRequestAuth(ctx, paths, config))
-	res, err := http.DefaultClient.Do(req)
+	res, err := outboundHTTPClient.Do(req)
 	if err != nil {
 		if requestCtx.Err() == context.DeadlineExceeded {
 			return nil, NewError(CodeTimeout, "package download timed out", map[string]any{"url": url, "timeout_ms": timeout.Milliseconds()})

@@ -23,8 +23,8 @@
 - Registry files and installed skill manifests are strictly decoded as a single JSON value and revalidated before use; manifest name/version identity must match the installation path and current pointer.
 - Skill names, versions, OS IDs, and architecture IDs are treated as path segments with a small ASCII-safe character set; `/`, `\`, `.`, `..`, NUL bytes, surrounding whitespace, and shell-punctuation characters are rejected before filesystem access.
 - Non-stub bundle manifests are validated before download: `url`, `sha256`, `archive`, platform IDs, and entrypoints must be well-formed.
-- Bundle URLs are limited to local paths, local `file://`, `http://`, and `https://`; unsupported schemes are rejected before network access, and `file://` bundle URLs may not include query strings or fragments.
-- Registry refresh URLs must be `http://` or `https://` with a host.
+- Bundle URLs are limited to local paths, local `file://`, localhost or loopback `http://`, and remote `https://`; unsupported schemes are rejected before network access, and `file://` bundle URLs may not include query strings or fragments.
+- Registry refresh and Pro API URLs must use `https://` with a host, except `http://localhost` and loopback URLs for local development.
 - Remote registry refresh and HTTP package downloads use configurable timeouts (`registry_download_timeout_ms` and `package_download_timeout_ms`, both default 30000) and return structured `timeout` errors for agents.
 - Skill archives only extract directories and regular files; symlinks, hard links, devices, and other special entries are rejected.
 - Archive and entrypoint paths are interpreted with POSIX-style forward-slash semantics on every host; they must be non-empty, unique after cleaning, and contained inside the skill directory.

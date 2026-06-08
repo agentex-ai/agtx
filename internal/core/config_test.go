@@ -50,6 +50,7 @@ func TestLoadConfigRejectsTrailingJSONValue(t *testing.T) {
 func TestLoadConfigRejectsInvalidValues(t *testing.T) {
 	tests := map[string]string{
 		"bad registry url":    `{"schema_version":1,"registry_url":"file:///tmp/registry.json"}`,
+		"plain http remote":   `{"schema_version":1,"registry_url":"http://registry.example.com/registry.json"}`,
 		"bad telemetry":       `{"schema_version":1,"telemetry":"verbose"}`,
 		"bad timeout":         `{"schema_version":1,"run_timeout_ms":0}`,
 		"bad schema version":  `{"schema_version":2}`,
@@ -160,6 +161,12 @@ func TestSetAndUnsetConfigValue(t *testing.T) {
 	}
 	if _, err := SetConfigValue(config, "registry_url", "file:///tmp/registry.json"); !IsErrorCode(err, CodeInvalidArgument) {
 		t.Fatalf("expected invalid registry url scheme, got %v", err)
+	}
+	if _, err := SetConfigValue(config, "registry_url", "http://registry.example.com/registry.json"); !IsErrorCode(err, CodeInvalidArgument) {
+		t.Fatalf("expected invalid remote http registry url, got %v", err)
+	}
+	if config, err = SetConfigValue(config, "registry_url", "http://127.0.0.1:8080/registry.json"); err != nil {
+		t.Fatalf("expected loopback http registry url to be allowed: %v", err)
 	}
 	config, err = SetConfigValue(config, "registry_download_timeout_ms", "1234")
 	if err != nil {

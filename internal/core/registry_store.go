@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -80,7 +81,7 @@ func RefreshRegistry(ctx context.Context, paths Paths, config Config) (RegistryR
 		return RegistryRefreshResult{}, err
 	}
 	attachAuthHeader(req, config, loadRequestAuth(ctx, paths, config))
-	res, err := http.DefaultClient.Do(req)
+	res, err := outboundHTTPClient.Do(req)
 	if err != nil {
 		if requestCtx.Err() == context.DeadlineExceeded {
 			return RegistryRefreshResult{}, NewError(CodeTimeout, "registry refresh timed out", map[string]any{"url": config.RegistryURL, "timeout_ms": timeout.Milliseconds()})
@@ -385,6 +386,9 @@ func validateBundleURL(raw string) error {
 		if parsed.Host == "" {
 			return NewError(CodeInvalidArgument, "bundle url requires host", map[string]any{"url": raw})
 		}
+		if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
+			return NewError(CodeInvalidArgument, "http bundle url must use localhost or loopback; use https for remote bundles", map[string]any{"url": raw})
+		}
 	default:
 		return NewError(CodeInvalidArgument, "unsupported bundle url scheme", map[string]any{"scheme": parsed.Scheme})
 	}
@@ -412,10 +416,22 @@ func validateServiceURL(label, raw string) error {
 		if parsed.Host == "" {
 			return NewError(CodeInvalidArgument, label+" requires host", map[string]any{"url": raw})
 		}
+		if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
+			return NewError(CodeInvalidArgument, label+" must use https unless it targets localhost or loopback", map[string]any{"url": raw})
+		}
 	default:
 		return NewError(CodeInvalidArgument, "unsupported "+label+" scheme", map[string]any{"scheme": parsed.Scheme})
 	}
 	return nil
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSpace(strings.TrimSuffix(host, "."))
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func validateArchiveType(archiveType, rawURL string) error {

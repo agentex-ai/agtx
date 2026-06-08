@@ -309,6 +309,28 @@ func TestInstallRejectsUnsupportedBundleURLScheme(t *testing.T) {
 	}
 }
 
+func TestInstallRejectsRemoteHTTPBundleURL(t *testing.T) {
+	service := NewService(PathsForRoot(t.TempDir()))
+	service.Registry = Registry{SchemaVersion: 1, Skills: []SkillManifest{{
+		SchemaVersion: 1,
+		Name:          "http_bundle",
+		Version:       "1.0.0",
+		Summary:       "HTTP",
+		Description:   "Plain remote HTTP bundle",
+		Platforms: []PlatformBundle{{
+			OS:         runtime.GOOS,
+			Arch:       runtime.GOARCH,
+			URL:        "http://packages.example.com/tool.zip",
+			SHA256:     strings.Repeat("a", 64),
+			Archive:    "zip",
+			Entrypoint: "bin/tool",
+		}},
+	}}}
+	if _, err := service.InstallSkills(context.Background(), []string{"http_bundle"}); !IsErrorCode(err, CodeInvalidArgument) {
+		t.Fatalf("expected invalid argument for remote http bundle, got %v", err)
+	}
+}
+
 func TestInstallRejectsUnsafeEntrypointManifest(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
 	service.Registry = Registry{SchemaVersion: 1, Skills: []SkillManifest{{

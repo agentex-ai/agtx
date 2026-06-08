@@ -12,7 +12,7 @@ agtx pro login --open
 agtx pro callback "agtx://pro/callback?code=...&state=..."
 agtx pro status --json
 agtx pro devices
-agtx pro revoke <device-id>
+agtx pro revoke <device-id> --yes
 agtx pro logout
 ```
 

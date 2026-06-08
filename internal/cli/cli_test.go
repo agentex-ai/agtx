@@ -1428,7 +1428,7 @@ func TestHelpShowsDetailedProUsage(t *testing.T) {
 	if !bytes.Contains(stdout.Bytes(), []byte(`agtx pro status|setup|logout|devices|register-scheme [--json]`)) {
 		t.Fatalf("expected pro setup usage: %s", stdout.String())
 	}
-	if !bytes.Contains(stdout.Bytes(), []byte(`agtx pro revoke <device-id> [--json]`)) {
+	if !bytes.Contains(stdout.Bytes(), []byte(`agtx pro revoke <device-id> --yes [--json]`)) {
 		t.Fatalf("expected pro revoke usage: %s", stdout.String())
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte(`agtx commerce install-pack <pack> [--plan] [--yes] [--json]`)) {
@@ -1533,6 +1533,86 @@ func TestProDevicesUnauthorizedIncludesRecoveryHintsJSON(t *testing.T) {
 	}
 	if !foundRestart {
 		t.Fatalf("expected restart_login next action: %s", stdout.String())
+	}
+}
+
+func TestProRevokeRequiresConfirmation(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	if err := os.MkdirAll(filepath.Join(root, "config"), 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config", "config.json"), []byte(`{"schema_version":1,"pro_api_url":"https://pro.example.com"}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config", "auth.json"), []byte(`{"schema_version":1,"access_token":"secret","device_id":"device-current"}`), 0o600); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"pro", "revoke", "device-1", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("expected confirmation exit code, got %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var response struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				Action         string   `json:"action"`
+				Targets        []string `json:"targets"`
+				SupportedFlags []string `json:"supported_flags"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid confirmation json: %v\n%s", err, stdout.String())
+	}
+	if response.OK || response.Error.Code != "confirmation_required" || response.Error.Details.Action != "pro-revoke" {
+		t.Fatalf("unexpected confirmation response: %s", stdout.String())
+	}
+	if len(response.Error.Details.Targets) != 1 || response.Error.Details.Targets[0] != "device-1" {
+		t.Fatalf("unexpected confirmation targets: %s", stdout.String())
+	}
+	if !containsString(response.Error.Details.SupportedFlags, "--yes") || !containsString(response.Error.Details.SupportedFlags, "-y") {
+		t.Fatalf("expected pro revoke yes flags: %s", stdout.String())
+	}
+}
+
+func TestProRevokeWithYesCallsServer(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	var gotPath string
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotPath = request.URL.Path
+		gotAuth = request.Header.Get("Authorization")
+		if request.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", request.Method)
+		}
+		_, _ = writer.Write([]byte(`{"id":"device-1","name":"Office","revoked_at":"2026-06-08T00:00:00Z"}`))
+	}))
+	defer server.Close()
+	if err := os.MkdirAll(filepath.Join(root, "config"), 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config", "config.json"), []byte(`{"schema_version":1,"pro_api_url":"`+server.URL+`"}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config", "auth.json"), []byte(`{"schema_version":1,"access_token":"secret","device_id":"device-current"}`), 0o600); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"pro", "revoke", "device-1", "--yes", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("pro revoke failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if gotPath != "/v1/devices/device-1/revoke" || gotAuth != "Bearer secret" {
+		t.Fatalf("unexpected revoke request path=%q auth=%q", gotPath, gotAuth)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"revoked_at": "2026-06-08T00:00:00Z"`)) {
+		t.Fatalf("expected revoked response: %s", stdout.String())
 	}
 }
 
