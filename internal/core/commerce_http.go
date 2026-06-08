@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -64,25 +65,22 @@ type commerceHTTPHandler struct {
 }
 
 func (h *commerceHTTPHandler) route(writer http.ResponseWriter, request *http.Request) {
-	allowedOrigin := h.allowedOrigin(request)
-	if allowedOrigin != "" {
-		writer.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-		writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-AGTX-Commerce-Token, X-AGTX-Commerce-Challenge")
-		writer.Header().Set("Access-Control-Max-Age", "600")
-		if allowedOrigin != "*" {
-			writer.Header().Add("Vary", "Origin")
-		}
-	}
-	if request.Method == http.MethodOptions {
-		writer.WriteHeader(http.StatusNoContent)
-		return
-	}
-
 	path := strings.TrimSuffix(request.URL.Path, "/")
 	if path == "" {
 		path = "/"
 	}
+	allowCORS := h.corsAllowedForPath(path)
+	allowedOrigin := h.allowedOrigin(request, allowCORS)
+	h.writeCORSHeaders(writer, allowedOrigin)
+	if request.Method == http.MethodOptions {
+		if allowCORS && allowedOrigin != "" {
+			writer.WriteHeader(http.StatusNoContent)
+			return
+		}
+		h.writeError(writer, http.StatusForbidden, NewError(CodeUnauthorized, "CORS origin is not allowed", nil))
+		return
+	}
+
 	switch path {
 	case "/":
 		if !h.requireMethod(writer, request, http.MethodGet) {
@@ -569,18 +567,54 @@ func decodeCommerceProofSubmitRequest(writer http.ResponseWriter, request *http.
 	return requestBody, nil
 }
 
-func (h *commerceHTTPHandler) allowedOrigin(request *http.Request) string {
+func (h *commerceHTTPHandler) corsAllowedForPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/commerce")
+}
+
+func (h *commerceHTTPHandler) writeCORSHeaders(writer http.ResponseWriter, allowedOrigin string) {
+	if allowedOrigin == "" {
+		return
+	}
+	writer.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+	writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-AGTX-Commerce-Token, X-AGTX-Commerce-Challenge")
+	writer.Header().Set("Access-Control-Max-Age", "600")
+	writer.Header().Add("Vary", "Origin")
+}
+
+func (h *commerceHTTPHandler) allowedOrigin(request *http.Request, allowCORS bool) string {
+	if !allowCORS {
+		return ""
+	}
 	allowed := strings.TrimSpace(h.options.AllowedOrigin)
 	if allowed == "" {
 		return ""
-	}
-	if allowed == "*" {
-		return "*"
 	}
 	if request.Header.Get("Origin") == allowed {
 		return allowed
 	}
 	return ""
+}
+
+func ValidateCommerceAllowedOrigin(origin string) error {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return nil
+	}
+	if origin == "*" {
+		return NewError(CodeInvalidArgument, "--allow-origin must be a specific http(s) origin, not *", map[string]any{"flag": "--allow-origin"})
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return NewError(CodeInvalidArgument, "--allow-origin must be a valid http(s) origin", map[string]any{"flag": "--allow-origin", "origin": origin})
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return NewError(CodeInvalidArgument, "--allow-origin must use http or https", map[string]any{"flag": "--allow-origin", "scheme": parsed.Scheme})
+	}
+	if parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+		return NewError(CodeInvalidArgument, "--allow-origin must not include path, query, fragment, or credentials", map[string]any{"flag": "--allow-origin", "origin": origin})
+	}
+	return nil
 }
 
 func (h *commerceHTTPHandler) writeOK(writer http.ResponseWriter, data any) {

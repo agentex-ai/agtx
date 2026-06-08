@@ -724,6 +724,20 @@ func TestCommerceHTTPHandlerExposesWebsiteQueries(t *testing.T) {
 		}
 	}
 
+	dashboardRequest, err := http.NewRequest(http.MethodGet, server.URL+"/commerce", nil)
+	if err != nil {
+		t.Fatalf("new dashboard request: %v", err)
+	}
+	dashboardRequest.Header.Set("Origin", "https://site.example")
+	dashboardResponse, err := http.DefaultClient.Do(dashboardRequest)
+	if err != nil {
+		t.Fatalf("get dashboard: %v", err)
+	}
+	defer dashboardResponse.Body.Close()
+	if dashboardResponse.Header.Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("dashboard must not be CORS-readable, got %q", dashboardResponse.Header.Get("Access-Control-Allow-Origin"))
+	}
+
 	response, err = http.Get(server.URL + "/v1/commerce/install-records?skill=pdf")
 	if err != nil {
 		t.Fatalf("get install records: %v", err)
@@ -866,6 +880,18 @@ func TestCommerceHTTPHandlerExposesWebsiteQueries(t *testing.T) {
 	}
 	if !scenariosResponse.OK || len(scenariosResponse.Data) != 1 || scenariosResponse.Data[0].Scenario.ID != "meeting_to_presentation" || scenariosResponse.Data[0].RecommendedPack.Pack.ID != "advanced" {
 		t.Fatalf("unexpected capability scenarios response: %#v", scenariosResponse)
+	}
+}
+
+func TestCommerceHTTPRejectsWildcardAllowedOrigin(t *testing.T) {
+	if err := ValidateCommerceAllowedOrigin("*"); !IsErrorCode(err, CodeInvalidArgument) {
+		t.Fatalf("expected wildcard origin to be rejected, got %v", err)
+	}
+	if err := ValidateCommerceAllowedOrigin("https://site.example/path"); !IsErrorCode(err, CodeInvalidArgument) {
+		t.Fatalf("expected origin with path to be rejected, got %v", err)
+	}
+	if err := ValidateCommerceAllowedOrigin("https://site.example"); err != nil {
+		t.Fatalf("expected concrete origin to be accepted, got %v", err)
 	}
 }
 

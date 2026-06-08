@@ -1448,6 +1448,34 @@ func TestHelpShowsDetailedProUsage(t *testing.T) {
 	}
 }
 
+func TestCommerceServeRejectsUnsafeNetworkConfig(t *testing.T) {
+	t.Setenv("AGTX_HOME", t.TempDir())
+	for _, addr := range []string{"0.0.0.0:8765", ":8765", "192.168.1.5:8765"} {
+		if err := validateCommerceServeAddr(addr); !core.IsErrorCode(err, core.CodeInvalidArgument) {
+			t.Fatalf("expected %s to be rejected, got %v", addr, err)
+		}
+	}
+	for _, addr := range []string{"127.0.0.1:8765", "localhost:8765", "[::1]:8765"} {
+		if err := validateCommerceServeAddr(addr); err != nil {
+			t.Fatalf("expected %s to be accepted, got %v", addr, err)
+		}
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"commerce", "serve", "--addr", "0.0.0.0:8765", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 || !bytes.Contains(stdout.Bytes(), []byte("commerce serve only binds loopback addresses")) {
+		t.Fatalf("expected unsafe addr failure, code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"commerce", "serve", "--allow-origin", "*", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code == 0 || !bytes.Contains(stdout.Bytes(), []byte("--allow-origin must be a specific")) {
+		t.Fatalf("expected wildcard origin failure, code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestProStatusWithoutLogin(t *testing.T) {
 	t.Setenv("AGTX_HOME", t.TempDir())
 	var stdout bytes.Buffer

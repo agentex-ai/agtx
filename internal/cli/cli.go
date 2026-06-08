@@ -1052,7 +1052,16 @@ func serveCommerceHTTP(ctx context.Context, service *core.Service, addr, allowed
 	if addr == "" {
 		return core.NewError(core.CodeInvalidArgument, "--addr requires a value", map[string]any{"flag": "--addr", "supported_flags": commerceServeFlags()})
 	}
-	mutationToken := core.NewTraceID()
+	if err := validateCommerceServeAddr(addr); err != nil {
+		return err
+	}
+	if err := core.ValidateCommerceAllowedOrigin(allowedOrigin); err != nil {
+		return err
+	}
+	mutationToken, err := core.NewSecretToken(32)
+	if err != nil {
+		return err
+	}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -1060,7 +1069,11 @@ func serveCommerceHTTP(ctx context.Context, service *core.Service, addr, allowed
 	defer listener.Close()
 
 	server := &http.Server{
-		Handler: service.CommerceHTTPHandler(core.CommerceHTTPOptions{AllowedOrigin: allowedOrigin, MutationToken: mutationToken}),
+		Handler:           service.CommerceHTTPHandler(core.CommerceHTTPOptions{AllowedOrigin: strings.TrimSpace(allowedOrigin), MutationToken: mutationToken}),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	defer server.Close()
 	go func() {
@@ -1094,6 +1107,25 @@ func serveCommerceHTTP(ctx context.Context, service *core.Service, addr, allowed
 	}
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return err
+	}
+	return nil
+}
+
+func validateCommerceServeAddr(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return core.NewError(core.CodeInvalidArgument, "--addr must be host:port", map[string]any{"flag": "--addr", "addr": addr, "error": err.Error()})
+	}
+	if strings.TrimSpace(host) == "" {
+		return core.NewError(core.CodeInvalidArgument, "--addr must use an explicit loopback host", map[string]any{"flag": "--addr", "addr": addr})
+	}
+	normalizedHost := strings.ToLower(strings.Trim(host, "[]"))
+	if normalizedHost == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(normalizedHost)
+	if ip == nil || !ip.IsLoopback() {
+		return core.NewError(core.CodeInvalidArgument, "commerce serve only binds loopback addresses", map[string]any{"flag": "--addr", "addr": addr, "allowed_examples": []string{"127.0.0.1:8765", "[::1]:8765", "localhost:8765"}})
 	}
 	return nil
 }

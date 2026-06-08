@@ -2,6 +2,7 @@ package core
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"time"
@@ -33,4 +34,15 @@ func NewTraceID() string {
 		return fmt.Sprintf("agtx-%x-%s", time.Now().UnixNano(), hex.EncodeToString(randomBytes[:]))
 	}
 	return fmt.Sprintf("agtx-%x", time.Now().UnixNano())
+}
+
+func NewSecretToken(bytesLen int) (string, error) {
+	if bytesLen <= 0 {
+		bytesLen = 32
+	}
+	data := make([]byte, bytesLen)
+	if _, err := rand.Read(data); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
 }

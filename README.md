@@ -248,7 +248,11 @@ panels can call:
 - `GET /v1/commerce/snapshot?scenario_id=invoice_processing&limit=100`
 
 `commerce serve` prints the dashboard URL and one-session mutation token used
-by the dashboard when installing packs.
+by the dashboard when installing packs. The server only binds loopback
+addresses such as `127.0.0.1` or `localhost`; `--allow-origin` must be a
+specific `http://` or `https://` origin and cannot be `*`. CORS is applied only
+to `/v1/commerce...` API routes, not to the local dashboard HTML that embeds the
+mutation token.
 
 The matching MCP tools are `list_capability_packs`,
 `list_capability_scenarios`, `get_capability_scenario`,
