@@ -676,10 +676,9 @@ func TestRunSkillTimeoutAndOutputLimit(t *testing.T) {
 func TestRunSkillPassesConfiguredAgentName(t *testing.T) {
 	root := t.TempDir()
 	entrypoint := "agent.sh"
-	command := "printf '%s' \"$AGTX_AGENT_NAME\""
+	command := "agentenv"
 	if runtime.GOOS == "windows" {
 		entrypoint = "agent.bat"
-		command = "echo %AGTX_AGENT_NAME%"
 	}
 	archivePath := filepath.Join(root, "agent.zip")
 	sum := writePackage(t, archivePath, entrypoint, scriptContent(command))
@@ -707,15 +706,15 @@ func TestRunSkillPassesConfiguredAgentName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run agent failed: %v", err)
 	}
-	if strings.TrimSpace(result.Stdout) != "Codex" {
-		t.Fatalf("expected AGTX_AGENT_NAME in skill env, got %q", result.Stdout)
+	if normalizeTestOutputLines(result.Stdout) != strings.Join([]string{"Codex", "by Codex", "Codex"}, "\n") {
+		t.Fatalf("expected attribution env in skill env, got %q", result.Stdout)
 	}
 	result, err = service.RunSkillWithOptions(context.Background(), "agent", RunOptions{AgentName: "Cursor"})
 	if err != nil {
 		t.Fatalf("run agent with override failed: %v", err)
 	}
-	if strings.TrimSpace(result.Stdout) != "Cursor" {
-		t.Fatalf("expected per-run AGTX_AGENT_NAME override, got %q", result.Stdout)
+	if normalizeTestOutputLines(result.Stdout) != strings.Join([]string{"Cursor", "by Cursor", "Cursor"}, "\n") {
+		t.Fatalf("expected per-run attribution env override, got %q", result.Stdout)
 	}
 	if _, err := service.RunSkillWithOptions(context.Background(), "agent", RunOptions{AgentName: " Cursor "}); !IsErrorCode(err, CodeInvalidArgument) {
 		t.Fatalf("expected invalid per-run agent name, got %v", err)
@@ -1651,14 +1650,25 @@ func scriptContent(unixCommand string) string {
 			return "@echo off\r\necho 1234567890\r\n"
 		case "echo %AGTX_AGENT_NAME%":
 			return "@echo off\r\necho %AGTX_AGENT_NAME%\r\n"
+		case "agentenv":
+			return "@echo off\r\necho %AGTX_AGENT_NAME%\r\necho %AGTX_BYLINE%\r\necho %AGTX_GENERATED_BY%\r\n"
 		case "copydoc":
 			return "@echo off\r\ncopy /Y \"%~1\" \"%~3\" >nul\r\n"
 		default:
 			return "@echo off\r\n" + unixCommand + "\r\n"
 		}
 	}
+	if unixCommand == "agentenv" {
+		return "#!/bin/sh\nprintf '%s\\n%s\\n%s\\n' \"$AGTX_AGENT_NAME\" \"$AGTX_BYLINE\" \"$AGTX_GENERATED_BY\"\n"
+	}
 	if unixCommand == "copydoc" {
 		return "#!/bin/sh\nset -eu\ncp \"$1\" \"$3\"\n"
 	}
 	return "#!/bin/sh\n" + unixCommand + "\n"
+}
+
+func normalizeTestOutputLines(value string) string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	return strings.TrimSpace(value)
 }
