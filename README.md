@@ -110,7 +110,7 @@ agtx pro logout
 `agtx pro setup` is a no-side-effect preflight check: it does not refresh tokens or call the network, and instead reports current local status plus recommended next actions for either humans or agents.
 `agtx pro register-scheme` now targets both macOS and Windows; on macOS it installs a tiny local callback app bundle under the agtx config directory so browser login can return through `agtx://`.
 
-Set `agent_name` to pass default artifact attribution into installed skills, or use `agtx run --agent-name ...` for a single invocation. During `agtx run`, the value is exposed as `AGTX_AGENT_NAME`, `AGTX_BYLINE`, and `AGTX_GENERATED_BY` so document-generating skills can write Office creator metadata or visible bylines such as `by Codex`.
+Set `agent_name` to pass default artifact attribution into installed skills, or use `agtx run --agent-name ...` for a single invocation. During `agtx run`, the value is exposed as `AGTX_AGENT_NAME`, `AGTX_BYLINE`, and `AGTX_GENERATED_BY` so document-generating skills can write Office creator metadata or visible bylines such as `by Codex`. After a successful run, agtx also best-effort updates explicit `.docx`, `.xlsx`, and `.pptx` output paths with Office core metadata (`creator`, `lastModifiedBy`, and a `by <agent>` description line). To avoid mutating source templates, pass generated files through output-style arguments such as `--output file.docx`, `output=file.docx`, or `action=create path=file.docx`.
 
 ## Registry
 

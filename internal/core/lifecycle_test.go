@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -721,6 +722,58 @@ func TestRunSkillPassesConfiguredAgentName(t *testing.T) {
 	}
 }
 
+func TestRunSkillAppliesOfficeAttribution(t *testing.T) {
+	root := t.TempDir()
+	templatePath := filepath.Join(root, "template.docx")
+	writeMinimalOfficeDocument(t, templatePath)
+	outputPath := filepath.Join(root, "out.docx")
+	entrypoint := "copydoc.sh"
+	command := "copydoc"
+	if runtime.GOOS == "windows" {
+		entrypoint = "copydoc.bat"
+	}
+	archivePath := filepath.Join(root, "copydoc.zip")
+	sum := writePackage(t, archivePath, entrypoint, scriptContent(command))
+	service := NewService(PathsForRoot(root))
+	service.Config.AgentName = "Codex"
+	service.Registry = Registry{SchemaVersion: 1, Skills: []SkillManifest{{
+		SchemaVersion: 1,
+		Name:          "copydoc",
+		Version:       "1.0.0",
+		Summary:       "Copy doc",
+		Description:   "Copy doc test package",
+		Platforms: []PlatformBundle{{
+			OS:         runtime.GOOS,
+			Arch:       runtime.GOARCH,
+			URL:        archivePath,
+			SHA256:     sum,
+			Archive:    "zip",
+			Entrypoint: entrypoint,
+		}},
+	}}}
+	if _, err := service.InstallSkills(context.Background(), []string{"copydoc"}); err != nil {
+		t.Fatalf("install copydoc failed: %v", err)
+	}
+	runResult, err := service.RunSkill(context.Background(), "copydoc", []string{templatePath, "--output", outputPath}, nil)
+	if err != nil {
+		t.Fatalf("run copydoc failed: %v stdout=%q stderr=%q", err, runResult.Stdout, runResult.Stderr)
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("expected copied office document: %v stdout=%q stderr=%q", err, runResult.Stdout, runResult.Stderr)
+	}
+	coreXML := readZipFileStringForTest(t, outputPath, "docProps/core.xml")
+	if !strings.Contains(coreXML, "<dc:creator>Codex</dc:creator>") || !strings.Contains(coreXML, "<cp:lastModifiedBy>Codex</cp:lastModifiedBy>") {
+		t.Fatalf("expected office attribution metadata, got:\n%s", coreXML)
+	}
+	if !strings.Contains(coreXML, "by Codex") {
+		t.Fatalf("expected byline description, got:\n%s", coreXML)
+	}
+	templateCoreXML := readZipFileStringForTest(t, templatePath, "docProps/core.xml")
+	if strings.Contains(templateCoreXML, "Codex") {
+		t.Fatalf("expected source template to remain unattributed, got:\n%s", templateCoreXML)
+	}
+}
+
 func TestInstallRejectsPackageAboveSizeLimit(t *testing.T) {
 	root := t.TempDir()
 	entrypoint := "echo.sh"
@@ -1325,6 +1378,83 @@ func writePackage(t *testing.T, archivePath, entrypoint, content string) string 
 	return writeMultiFilePackage(t, archivePath, map[string]string{entrypoint: content})
 }
 
+func writeMinimalOfficeDocument(t *testing.T, path string) {
+	t.Helper()
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create office document: %v", err)
+	}
+	zipWriter := zip.NewWriter(file)
+	entries := map[string]string{
+		"[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+</Types>`,
+		"_rels/.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+</Relationships>`,
+		"docProps/core.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:title>Template</dc:title>
+</cp:coreProperties>`,
+		"word/document.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p></w:body>
+</w:document>`,
+	}
+	names := make([]string, 0, len(entries))
+	for name := range entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		writer, err := zipWriter.Create(name)
+		if err != nil {
+			t.Fatalf("create office zip entry: %v", err)
+		}
+		if _, err := writer.Write([]byte(entries[name])); err != nil {
+			t.Fatalf("write office zip entry: %v", err)
+		}
+	}
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("close office zip: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close office document: %v", err)
+	}
+}
+
+func readZipFileStringForTest(t *testing.T, archivePath, name string) string {
+	t.Helper()
+	reader, err := zip.OpenReader(archivePath)
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+	defer reader.Close()
+	for _, file := range reader.File {
+		if file.Name != name {
+			continue
+		}
+		handle, err := file.Open()
+		if err != nil {
+			t.Fatalf("open zip entry: %v", err)
+		}
+		defer handle.Close()
+		data, err := io.ReadAll(handle)
+		if err != nil {
+			t.Fatalf("read zip entry: %v", err)
+		}
+		return string(data)
+	}
+	t.Fatalf("zip entry %s not found", name)
+	return ""
+}
+
 type fileSpec struct {
 	content string
 	mode    os.FileMode
@@ -1518,9 +1648,14 @@ func scriptContent(unixCommand string) string {
 			return "@echo off\r\necho 1234567890\r\n"
 		case "echo %AGTX_AGENT_NAME%":
 			return "@echo off\r\necho %AGTX_AGENT_NAME%\r\n"
+		case "copydoc":
+			return "@echo off\r\ncopy /Y \"%~1\" \"%~3\" >nul\r\n"
 		default:
 			return "@echo off\r\n" + unixCommand + "\r\n"
 		}
+	}
+	if unixCommand == "copydoc" {
+		return "#!/bin/sh\nset -eu\ncp \"$1\" \"$3\"\n"
 	}
 	return "#!/bin/sh\n" + unixCommand + "\n"
 }
