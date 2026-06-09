@@ -103,7 +103,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release.outputs.tag }}
+          name: agtx ${{ steps.release.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             dist/*.tar.gz
             dist/*.zip

@@ -1467,6 +1467,7 @@ func runResultSchema() map[string]any {
 			"timed_out":          booleanSchema("Whether execution timed out."),
 			"output_limit_bytes": positiveIntegerSchema("Configured output capture limit in bytes."),
 			"timeout_ms":         positiveIntegerSchema("Configured timeout in milliseconds."),
+			"attributed_files":   stringArraySchema("Office document output paths that agtx successfully annotated with generated artifact attribution.", false),
 			"usage_events":       arraySchema(usageEventResultSchema(), "Billing usage events produced by this successful invocation."),
 		},
 		[]string{"name", "exit_code"},

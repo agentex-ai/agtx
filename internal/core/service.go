@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.0-dev"
+var Version = "0.1.0-dev"
 
 var pathSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
 

@@ -585,6 +585,9 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	if _, ok := runOutputProps["scenario_id"].(map[string]any); !ok {
 		t.Fatalf("expected run output scenario_id schema: %#v", runOutputProps)
 	}
+	if _, ok := runOutputProps["attributed_files"].(map[string]any); !ok {
+		t.Fatalf("expected run output attributed_files schema: %#v", runOutputProps)
+	}
 	usageEvents, ok := runOutputProps["usage_events"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected run usage_events schema: %#v", runOutputProps)
