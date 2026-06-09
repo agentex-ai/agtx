@@ -554,6 +554,7 @@ type RunOptions struct {
 	Timeout          time.Duration
 	OutputLimitBytes int64
 	ScenarioID       string
+	AgentName        string
 }
 
 type UsageEventResult struct {

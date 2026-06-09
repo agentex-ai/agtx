@@ -255,14 +255,20 @@ func TestConfigKeysJSONAndPlainText(t *testing.T) {
 		t.Fatalf("expected config key metadata: %s", stdout.String())
 	}
 	foundPackageMax := false
+	foundAgentName := false
 	for _, item := range response.Data {
 		if item.Key == "package_max_bytes" {
 			foundPackageMax = item.Type == "positive_integer" && item.Mutable
-			break
+		}
+		if item.Key == "agent_name" {
+			foundAgentName = item.Type == "string" && item.Mutable
 		}
 	}
 	if !foundPackageMax {
 		t.Fatalf("expected package_max_bytes metadata: %s", stdout.String())
+	}
+	if !foundAgentName {
+		t.Fatalf("expected agent_name metadata: %s", stdout.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
@@ -270,7 +276,7 @@ func TestConfigKeysJSONAndPlainText(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("config keys plain failed code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "registry_url\turl") || !strings.Contains(stdout.String(), "package_max_bytes\tpositive_integer") {
+	if !strings.Contains(stdout.String(), "registry_url\turl") || !strings.Contains(stdout.String(), "package_max_bytes\tpositive_integer") || !strings.Contains(stdout.String(), "agent_name\tstring") {
 		t.Fatalf("expected plain config keys table: %s", stdout.String())
 	}
 }
@@ -2065,7 +2071,7 @@ func TestDiscoveryHelperListsAreStable(t *testing.T) {
 		})
 	}
 	runSet := flagSet(runFlags())
-	for _, flag := range []string{"--json", "--ndjson", "--input", "--timeout-ms", "--output-limit-bytes", "--scenario-id"} {
+	for _, flag := range []string{"--json", "--ndjson", "--input", "--timeout-ms", "--output-limit-bytes", "--scenario-id", "--agent-name"} {
 		if !runSet[flag] {
 			t.Fatalf("run flag set missing %s", flag)
 		}

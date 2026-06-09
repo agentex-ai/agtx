@@ -27,6 +27,7 @@ func runExecutable(ctx context.Context, versionDir, entrypoint string, options R
 
 	cmd := exec.CommandContext(runCtx, executable, options.Args...)
 	cmd.Dir = versionDir
+	cmd.Env = skillRunEnvironment(options)
 	if options.Input != nil {
 		cmd.Stdin = bytes.NewReader(options.Input)
 	}
@@ -63,6 +64,19 @@ func runExecutable(ctx context.Context, versionDir, entrypoint string, options R
 	}
 	result.ExitCode = 0
 	return result, nil
+}
+
+func skillRunEnvironment(options RunOptions) []string {
+	env := os.Environ()
+	agentName := strings.TrimSpace(options.AgentName)
+	if agentName == "" {
+		return env
+	}
+	return append(env,
+		"AGTX_AGENT_NAME="+agentName,
+		"AGTX_BYLINE=by "+agentName,
+		"AGTX_GENERATED_BY="+agentName,
+	)
 }
 
 func validateEntrypoint(versionDir, entrypoint string) (string, error) {

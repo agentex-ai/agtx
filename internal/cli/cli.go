@@ -134,6 +134,7 @@ func runConfig(service *core.Service, args []string, stdout, stderr io.Writer) i
 		}
 		fmt.Fprintf(stdout, "channel: %s\ntelemetry: %s\nregistry_url: %s\n", service.Config.Channel, service.Config.Telemetry, service.Config.RegistryURL)
 		fmt.Fprintf(stdout, "pro_api_url: %s\n", service.Config.ProAPIURL)
+		fmt.Fprintf(stdout, "agent_name: %s\n", service.Config.AgentName)
 		fmt.Fprintf(stdout, "lock_timeout_ms: %d\nstale_lock_ms: %d\n", service.Config.LockTimeoutMS, service.Config.StaleLockMS)
 		fmt.Fprintf(stdout, "run_timeout_ms: %d\nrun_output_limit_bytes: %d\n", service.Config.RunTimeoutMS, service.Config.RunOutputLimitBytes)
 		fmt.Fprintf(stdout, "registry_max_bytes: %d\nregistry_download_timeout_ms: %d\npackage_max_bytes: %d\npackage_download_timeout_ms: %d\nextracted_max_bytes: %d\nextracted_max_files: %d\n", service.Config.RegistryMaxBytes, service.Config.RegistryDownloadTimeoutMS, service.Config.PackageMaxBytes, service.Config.PackageDownloadTimeoutMS, service.Config.ExtractedMaxBytes, service.Config.ExtractedMaxFiles)
@@ -277,6 +278,7 @@ func runSkill(ctx context.Context, service *core.Service, args []string, stdin i
 	timeoutMS := takeIntFlag(&args, "--timeout-ms", service.Config.RunTimeoutMS, runKnownFlags)
 	outputLimit := takeInt64Flag(&args, "--output-limit-bytes", service.Config.RunOutputLimitBytes, runKnownFlags)
 	scenarioID := takeStringFlag(&args, "--scenario-id", "", runKnownFlags)
+	agentName := takeStringFlag(&args, "--agent-name", "", runKnownFlags)
 	if jsonOut && ndjsonOut {
 		return failRun(stdout, stderr, jsonOut, ndjsonOut, mutuallyExclusiveFlagsError("--json", "--ndjson", runFlags()), core.RunResult{})
 	}
@@ -302,6 +304,7 @@ func runSkill(ctx context.Context, service *core.Service, args []string, stdin i
 		Timeout:          time.Duration(timeoutMS) * time.Millisecond,
 		OutputLimitBytes: outputLimit,
 		ScenarioID:       scenarioID,
+		AgentName:        agentName,
 	})
 	if err != nil {
 		if ndjsonOut {
@@ -326,7 +329,7 @@ func runSkill(ctx context.Context, service *core.Service, args []string, stdin i
 }
 
 func runFlags() []string {
-	return []string{"--json", "--ndjson", "--input", "--timeout-ms", "--output-limit-bytes", "--scenario-id"}
+	return []string{"--json", "--ndjson", "--input", "--timeout-ms", "--output-limit-bytes", "--scenario-id", "--agent-name"}
 }
 
 func uninstallFlags() []string {

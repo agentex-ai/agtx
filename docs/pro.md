@@ -28,9 +28,9 @@ When a Pro-gated request fails with `unauthorized`, `subscription_required`, or 
 
 `agtx doctor` validates `auth.json` without blocking ordinary non-Pro commands. If the auth file is corrupt, run `agtx pro logout` and then `agtx pro login --open`.
 
-## Worker
+## Pro Backend
 
-The starter Worker in `workers/agtx-pro` exposes:
+The Pro backend is not shipped in this public repository. A compatible backend should expose:
 
 - `/v1/registry`
 - `/v1/packages/...`
@@ -41,16 +41,6 @@ The starter Worker in `workers/agtx-pro` exposes:
 - `/v1/devices/:id/revoke`
 - `/webhooks/stripe`
 
-D1 stores accounts, subscriptions, active devices, authorization codes, and refresh-token hashes. R2 stores the Pro registry at `registry/pro.json` and package archives under `/v1/packages/...` keys.
-
-Apply the schema and run locally:
-
-```sh
-cd workers/agtx-pro
-wrangler d1 execute agtx-pro --local --file schema.sql
-wrangler dev
-```
-
-The starter has a demo account path for local testing. Replace that with real hosted login and Stripe Customer Portal before production.
+A typical Cloudflare implementation can use D1 for accounts, subscriptions, active devices, authorization codes, and refresh-token hashes, plus R2 for a Pro registry such as `registry/pro.json` and package archives under `/v1/packages/...` keys.
 
 The Worker returns the public registry to unauthenticated clients and merges Pro entries only for active/trialing subscriptions. Package downloads require an active subscription and reject unsafe package keys. Refresh tokens are one-time use and rotated through `/v1/cli/token` with `grant_type=refresh_token`.

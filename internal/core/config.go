@@ -18,12 +18,14 @@ const defaultExtractedMaxBytes = 1024 * 1024 * 1024
 const defaultExtractedMaxFiles = 8192
 const defaultRegistryDownloadTimeoutMS = 30000
 const defaultPackageDownloadTimeoutMS = 30000
+const maxAgentNameBytes = 128
 
 type Config struct {
 	SchemaVersion             int      `json:"schema_version"`
 	RegistryURL               string   `json:"registry_url,omitempty"`
 	ProAPIURL                 string   `json:"pro_api_url,omitempty"`
 	RegistryFiles             []string `json:"registry_files,omitempty"`
+	AgentName                 string   `json:"agent_name,omitempty"`
 	Channel                   string   `json:"channel"`
 	Telemetry                 string   `json:"telemetry"`
 	LockTimeoutMS             int      `json:"lock_timeout_ms"`
@@ -62,6 +64,7 @@ func ConfigKeys() []ConfigKeyInfo {
 		{Key: "registry_url", Type: "url", Default: defaults.RegistryURL, Description: "Remote registry manifest URL used by registry refresh.", Mutable: true},
 		{Key: "pro_api_url", Type: "url", Default: defaults.ProAPIURL, Description: "Base URL for Pro login, status, devices, and gated downloads.", Mutable: true},
 		{Key: "registry_files", Type: "string_list", Default: defaults.RegistryFiles, Description: "Comma- or semicolon-separated local registry overlay files.", Mutable: true},
+		{Key: "agent_name", Type: "string", Default: defaults.AgentName, Description: "Agent display name passed to skills for generated artifact attribution, such as Office document creator/byline metadata.", Mutable: true},
 		{Key: "channel", Type: "string", Default: defaults.Channel, Description: "Release channel used by registry and tooling policy.", Mutable: true},
 		{Key: "telemetry", Type: "enum", Default: defaults.Telemetry, Description: "Telemetry mode for local configuration.", Allowed: []string{"off", "desensitized"}, Mutable: true},
 		{Key: "lock_timeout_ms", Type: "positive_integer", Default: defaults.LockTimeoutMS, Description: "Maximum time to wait for a mutation lock.", Mutable: true},
@@ -166,6 +169,7 @@ type configFile struct {
 	RegistryURL               *string   `json:"registry_url,omitempty"`
 	ProAPIURL                 *string   `json:"pro_api_url,omitempty"`
 	RegistryFiles             *[]string `json:"registry_files,omitempty"`
+	AgentName                 *string   `json:"agent_name,omitempty"`
 	Channel                   *string   `json:"channel"`
 	Telemetry                 *string   `json:"telemetry"`
 	LockTimeoutMS             *int      `json:"lock_timeout_ms"`
@@ -204,6 +208,9 @@ func decodeConfig(data []byte) (Config, error) {
 	}
 	if file.RegistryFiles != nil {
 		config.RegistryFiles = append([]string(nil), (*file.RegistryFiles)...)
+	}
+	if file.AgentName != nil {
+		config.AgentName = *file.AgentName
 	}
 	if file.Channel != nil {
 		config.Channel = *file.Channel
@@ -281,6 +288,9 @@ func validateConfig(config Config) error {
 			return NewError(CodeInvalidArgument, "registry_files entries must not contain NUL bytes", nil)
 		}
 	}
+	if err := validateAgentName(config.AgentName); err != nil {
+		return err
+	}
 	if err := validatePathSegment("channel", config.Channel); err != nil {
 		return err
 	}
@@ -322,7 +332,6 @@ func validateConfig(config Config) error {
 
 func SetConfigValue(config Config, key, value string) (Config, error) {
 	key = strings.TrimSpace(key)
-	value = strings.TrimSpace(value)
 	switch key {
 	case "registry_url":
 		if value != "" {
@@ -344,6 +353,11 @@ func SetConfigValue(config Config, key, value string) (Config, error) {
 		} else {
 			config.RegistryFiles = splitList(value)
 		}
+	case "agent_name":
+		if err := validateAgentName(value); err != nil {
+			return config, err
+		}
+		config.AgentName = value
 	case "channel":
 		if value == "" {
 			return config, NewError(CodeInvalidArgument, "channel cannot be empty", nil)
@@ -432,6 +446,8 @@ func UnsetConfigValue(config Config, key string) (Config, error) {
 		config.ProAPIURL = ""
 	case "registry_files":
 		config.RegistryFiles = nil
+	case "agent_name":
+		config.AgentName = ""
 	case "channel":
 		config.Channel = "stable"
 	case "telemetry":
@@ -464,6 +480,25 @@ func UnsetConfigValue(config Config, key string) (Config, error) {
 		return config, err
 	}
 	return config, nil
+}
+
+func validateAgentName(value string) error {
+	if value == "" {
+		return nil
+	}
+	if strings.TrimSpace(value) != value {
+		return NewError(CodeInvalidArgument, "agent_name must not contain leading or trailing whitespace", map[string]any{"key": "agent_name"})
+	}
+	if len(value) > maxAgentNameBytes {
+		return NewError(CodeInvalidArgument, "agent_name is too long", map[string]any{"key": "agent_name", "max_bytes": maxAgentNameBytes})
+	}
+	if strings.ContainsRune(value, 0) {
+		return NewError(CodeInvalidArgument, "agent_name must not contain NUL bytes", map[string]any{"key": "agent_name"})
+	}
+	if strings.IndexFunc(value, func(r rune) bool { return r < 0x20 }) >= 0 {
+		return NewError(CodeInvalidArgument, "agent_name must not contain control characters", map[string]any{"key": "agent_name"})
+	}
+	return nil
 }
 
 func splitList(value string) []string {

@@ -155,6 +155,23 @@ func TestSetAndUnsetConfigValue(t *testing.T) {
 	if config.Telemetry != "off" {
 		t.Fatalf("unexpected telemetry after unset: %s", config.Telemetry)
 	}
+	config, err = SetConfigValue(config, "agent_name", "Codex")
+	if err != nil {
+		t.Fatalf("set agent name: %v", err)
+	}
+	if config.AgentName != "Codex" {
+		t.Fatalf("unexpected agent name: %s", config.AgentName)
+	}
+	config, err = UnsetConfigValue(config, "agent_name")
+	if err != nil {
+		t.Fatalf("unset agent name: %v", err)
+	}
+	if config.AgentName != "" {
+		t.Fatalf("unexpected agent name after unset: %s", config.AgentName)
+	}
+	if _, err := SetConfigValue(config, "agent_name", " Codex "); !IsErrorCode(err, CodeInvalidArgument) {
+		t.Fatalf("expected invalid agent name whitespace, got %v", err)
+	}
 	config, err = SetConfigValue(config, "registry_url", "https://example.com/registry.json")
 	if err != nil {
 		t.Fatalf("set registry url: %v", err)
@@ -343,6 +360,9 @@ func configKeySampleValue(t *testing.T, key ConfigKeyInfo) string {
 	case "string_list":
 		return "a.json,b.json"
 	case "string":
+		if key.Key == "agent_name" {
+			return "Codex"
+		}
 		return "stable"
 	case "enum":
 		if len(key.Allowed) == 0 {

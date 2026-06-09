@@ -516,6 +516,12 @@ func (s *Service) RunSkillWithOptions(ctx context.Context, name string, options 
 	if options.OutputLimitBytes <= 0 {
 		options.OutputLimitBytes = s.Config.RunOutputLimitBytes
 	}
+	if strings.TrimSpace(options.AgentName) == "" {
+		options.AgentName = s.Config.AgentName
+	}
+	if err := validateAgentName(options.AgentName); err != nil {
+		return RunResult{}, err
+	}
 	version, err := s.currentVersion(name)
 	if err != nil {
 		return RunResult{}, err

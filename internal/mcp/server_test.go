@@ -266,6 +266,9 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	if _, ok := properties["scenario_id"].(map[string]any); !ok {
 		t.Fatalf("expected run_skill scenario_id input schema: %#v", properties)
 	}
+	if _, ok := properties["agent_name"].(map[string]any); !ok {
+		t.Fatalf("expected run_skill agent_name input schema: %#v", properties)
+	}
 	anyOf, ok := planSchema["anyOf"].([]any)
 	if !ok || len(anyOf) != 2 {
 		t.Fatalf("expected plan_install anyOf requirements: %#v", planSchema["anyOf"])

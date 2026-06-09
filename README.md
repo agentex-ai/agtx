@@ -11,6 +11,7 @@ agtx search "summarize PDFs and Word files"
 agtx install pdf --plan --json
 agtx install pdf docx --yes
 agtx run pdf --timeout-ms 30000 --output-limit-bytes 1048576 --json
+agtx run docx --agent-name Codex --json -- action=create path=sample.docx title=Extracted content="hello from Agentex"
 agtx uninstall pdf --plan --json
 agtx list --json
 agtx status
@@ -20,6 +21,7 @@ agtx config init
 agtx config keys --json
 agtx config set registry_url https://example.com/agtx/registry.json
 agtx config set pro_api_url https://agtx-pro.example.com
+agtx config set agent_name Codex
 agtx config set package_max_bytes 268435456
 agtx config set extracted_max_bytes 1073741824
 agtx config set extracted_max_files 8192
@@ -108,6 +110,8 @@ agtx pro logout
 `agtx pro setup` is a no-side-effect preflight check: it does not refresh tokens or call the network, and instead reports current local status plus recommended next actions for either humans or agents.
 `agtx pro register-scheme` now targets both macOS and Windows; on macOS it installs a tiny local callback app bundle under the agtx config directory so browser login can return through `agtx://`.
 
+Set `agent_name` to pass default artifact attribution into installed skills, or use `agtx run --agent-name ...` for a single invocation. During `agtx run`, the value is exposed as `AGTX_AGENT_NAME`, `AGTX_BYLINE`, and `AGTX_GENERATED_BY` so document-generating skills can write Office creator metadata or visible bylines such as `by Codex`.
+
 ## Registry
 
 `agtx` starts with a built-in registry so it can run offline. Optional registry overlays can be configured in `config.json`:
@@ -117,6 +121,7 @@ agtx pro logout
   "schema_version": 1,
   "registry_url": "https://example.com/agtx/registry.json",
   "pro_api_url": "https://agtx-pro.example.com",
+  "agent_name": "Codex",
   "registry_files": ["/path/to/local-registry.json"],
   "channel": "stable",
   "telemetry": "off",

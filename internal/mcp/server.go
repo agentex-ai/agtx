@@ -835,12 +835,17 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
+		agentName, err := args.String("agent_name")
+		if err != nil {
+			return nil, err
+		}
 		result, err := s.service.RunSkillWithOptions(context.Background(), skill, core.RunOptions{
 			Args:             skillArgs,
 			Input:            []byte(input),
 			Timeout:          time.Duration(timeoutMS) * time.Millisecond,
 			OutputLimitBytes: outputLimitBytes,
 			ScenarioID:       scenarioID,
+			AgentName:        agentName,
 		})
 		if err != nil {
 			return toolError(err, result), nil
@@ -1143,6 +1148,7 @@ func tools() []map[string]any {
 				"timeout_ms":         positiveIntegerSchema("Execution timeout in milliseconds."),
 				"output_limit_bytes": positiveIntegerSchema("Maximum captured stdout and stderr bytes."),
 				"scenario_id":        stringSchema("Optional real task scenario id used to tag usage billing records."),
+				"agent_name":         stringSchema("Optional per-run agent display name used for generated artifact attribution. Overrides config agent_name for this invocation."),
 			},
 			[]string{"skill"},
 			nil,
@@ -2589,7 +2595,7 @@ func allowedToolArguments(name string) (map[string]struct{}, bool) {
 	case "uninstall_skill":
 		return toolArgumentSet("skill", "all_versions", "yes", "plan"), true
 	case "run_skill":
-		return toolArgumentSet("skill", "args", "input", "timeout_ms", "output_limit_bytes", "scenario_id"), true
+		return toolArgumentSet("skill", "args", "input", "timeout_ms", "output_limit_bytes", "scenario_id", "agent_name"), true
 	default:
 		return nil, false
 	}

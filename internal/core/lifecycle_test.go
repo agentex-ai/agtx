@@ -672,6 +672,55 @@ func TestRunSkillTimeoutAndOutputLimit(t *testing.T) {
 	}
 }
 
+func TestRunSkillPassesConfiguredAgentName(t *testing.T) {
+	root := t.TempDir()
+	entrypoint := "agent.sh"
+	command := "printf '%s' \"$AGTX_AGENT_NAME\""
+	if runtime.GOOS == "windows" {
+		entrypoint = "agent.bat"
+		command = "echo %AGTX_AGENT_NAME%"
+	}
+	archivePath := filepath.Join(root, "agent.zip")
+	sum := writePackage(t, archivePath, entrypoint, scriptContent(command))
+	service := NewService(PathsForRoot(root))
+	service.Config.AgentName = "Codex"
+	service.Registry = Registry{SchemaVersion: 1, Skills: []SkillManifest{{
+		SchemaVersion: 1,
+		Name:          "agent",
+		Version:       "1.0.0",
+		Summary:       "Agent",
+		Description:   "Agent env test package",
+		Platforms: []PlatformBundle{{
+			OS:         runtime.GOOS,
+			Arch:       runtime.GOARCH,
+			URL:        archivePath,
+			SHA256:     sum,
+			Archive:    "zip",
+			Entrypoint: entrypoint,
+		}},
+	}}}
+	if _, err := service.InstallSkills(context.Background(), []string{"agent"}); err != nil {
+		t.Fatalf("install agent failed: %v", err)
+	}
+	result, err := service.RunSkill(context.Background(), "agent", nil, nil)
+	if err != nil {
+		t.Fatalf("run agent failed: %v", err)
+	}
+	if strings.TrimSpace(result.Stdout) != "Codex" {
+		t.Fatalf("expected AGTX_AGENT_NAME in skill env, got %q", result.Stdout)
+	}
+	result, err = service.RunSkillWithOptions(context.Background(), "agent", RunOptions{AgentName: "Cursor"})
+	if err != nil {
+		t.Fatalf("run agent with override failed: %v", err)
+	}
+	if strings.TrimSpace(result.Stdout) != "Cursor" {
+		t.Fatalf("expected per-run AGTX_AGENT_NAME override, got %q", result.Stdout)
+	}
+	if _, err := service.RunSkillWithOptions(context.Background(), "agent", RunOptions{AgentName: " Cursor "}); !IsErrorCode(err, CodeInvalidArgument) {
+		t.Fatalf("expected invalid per-run agent name, got %v", err)
+	}
+}
+
 func TestInstallRejectsPackageAboveSizeLimit(t *testing.T) {
 	root := t.TempDir()
 	entrypoint := "echo.sh"
@@ -1467,6 +1516,8 @@ func scriptContent(unixCommand string) string {
 			return "@echo off\r\necho agtx:%1\r\n"
 		case "echo 1234567890":
 			return "@echo off\r\necho 1234567890\r\n"
+		case "echo %AGTX_AGENT_NAME%":
+			return "@echo off\r\necho %AGTX_AGENT_NAME%\r\n"
 		default:
 			return "@echo off\r\n" + unixCommand + "\r\n"
 		}
