@@ -1,5 +1,9 @@
 # agtx
 
+[![Release CLI](https://github.com/agentex-ai/agtx/actions/workflows/release.yml/badge.svg)](https://github.com/agentex-ai/agtx/actions/workflows/release.yml)
+[![GitHub release](https://img.shields.io/github/v/release/agentex-ai/agtx?sort=semver)](https://github.com/agentex-ai/agtx/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 `agtx` is a macOS and Windows friendly, low-dependency native skill manager for Agentex skills.
 
 The v1 implementation is intentionally small: one Go binary, standard library first, no Python/NPM/Homebrew runtime dependency, and no third-party Go modules.
@@ -52,6 +56,15 @@ For `agtx run`, `--output-limit-bytes` bounds captured stdout/stderr and `--inpu
 Structured errors include recovery hints for agent callers: unknown commands include `supported_commands`, nested command errors include `supported_subcommands`, missing positional arguments include `expected_args`, flag parse/unexpected-argument errors include `supported_flags`, and MCP parse/envelope/method/tool/params/argument errors include `field`, `expected`, `supported_fields`, `supported_methods`, `supported_tools`, `supported_params`, or `supported_arguments`. MCP required-argument, argument-shape, and confirmation errors also include the tool name plus expected argument shape or `yes=true` retry details.
 
 ## Build
+
+Prebuilt CLI archives are attached to tagged releases: <https://github.com/agentex-ai/agtx/releases/latest>.
+
+Maintainers can publish a release by pushing a `v*` tag, for example:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 Release builds should disable cgo and prefer Go-native resolver/user lookup paths:
 
@@ -110,7 +123,7 @@ agtx pro logout
 `agtx pro setup` is a no-side-effect preflight check: it does not refresh tokens or call the network, and instead reports current local status plus recommended next actions for either humans or agents.
 `agtx pro register-scheme` now targets both macOS and Windows; on macOS it installs a tiny local callback app bundle under the agtx config directory so browser login can return through `agtx://`.
 
-Set `agent_name` to pass default artifact attribution into installed skills, or use `agtx run --agent-name ...` for a single invocation. During `agtx run`, the value is exposed as `AGTX_AGENT_NAME`, `AGTX_BYLINE`, and `AGTX_GENERATED_BY` so document-generating skills can write Office creator metadata or visible bylines such as `by Codex`. After a successful run, agtx also best-effort updates explicit `.docx`, `.xlsx`, and `.pptx` output paths with Office core metadata (`creator`, `lastModifiedBy`, and a `by <agent>` description line). To avoid mutating source templates, pass generated files through output-style arguments such as `--output file.docx`, `output=file.docx`, or `action=create path=file.docx`.
+Set `agent_name` to pass default artifact attribution into installed skills, or use `agtx run --agent-name ...` for a single invocation. During `agtx run`, the value is exposed as `AGTX_AGENT_NAME`, `AGTX_BYLINE`, and `AGTX_GENERATED_BY` so document-generating skills can write Office creator metadata or visible bylines such as `by Codex`. After a successful run, agtx also best-effort updates explicit `.docx`, `.xlsx`, and `.pptx` output paths with Office core metadata (`creator`, `lastModifiedBy`, and a `by <agent>` description line), and reports successful writes in `attributed_files` for JSON/MCP callers. To avoid mutating source templates, pass generated files through output-style arguments such as `--output file.docx`, `output=file.docx`, JSON `outputs`, or `action=create path=file.docx`.
 
 ## Registry
 

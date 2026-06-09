@@ -761,6 +761,9 @@ func TestRunSkillAppliesOfficeAttribution(t *testing.T) {
 	if _, err := os.Stat(outputPath); err != nil {
 		t.Fatalf("expected copied office document: %v stdout=%q stderr=%q", err, runResult.Stdout, runResult.Stderr)
 	}
+	if len(runResult.AttributedFiles) != 1 || runResult.AttributedFiles[0] != filepath.Clean(outputPath) {
+		t.Fatalf("expected attributed output file, got %#v", runResult.AttributedFiles)
+	}
 	coreXML := readZipFileStringForTest(t, outputPath, "docProps/core.xml")
 	if !strings.Contains(coreXML, "<dc:creator>Codex</dc:creator>") || !strings.Contains(coreXML, "<cp:lastModifiedBy>Codex</cp:lastModifiedBy>") {
 		t.Fatalf("expected office attribution metadata, got:\n%s", coreXML)

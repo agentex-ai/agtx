@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 )
@@ -46,5 +47,41 @@ func TestOfficeAttributionCandidatePathsIgnoreAmbiguousPath(t *testing.T) {
 
 	if len(candidates) != 0 {
 		t.Fatalf("expected ambiguous path to be ignored, got %#v", candidates)
+	}
+}
+
+func TestOfficeAttributionCandidatePathsUseJSONOutputContainers(t *testing.T) {
+	root := t.TempDir()
+	outputPath := filepath.Join(root, "report.docx")
+	writeMinimalOfficeDocument(t, outputPath)
+	stdout, err := json.Marshal(map[string]any{
+		"outputs": []string{outputPath},
+	})
+	if err != nil {
+		t.Fatalf("marshal stdout: %v", err)
+	}
+
+	candidates := officeAttributionCandidatePaths("", RunOptions{}, RunResult{Stdout: string(stdout)})
+
+	if len(candidates) != 1 || candidates[0] != filepath.Clean(outputPath) {
+		t.Fatalf("expected JSON output candidate, got %#v", candidates)
+	}
+}
+
+func TestOfficeAttributionCandidatePathsIgnoreJSONInputContainers(t *testing.T) {
+	root := t.TempDir()
+	inputPath := filepath.Join(root, "source.docx")
+	writeMinimalOfficeDocument(t, inputPath)
+	input, err := json.Marshal(map[string]any{
+		"inputs": []string{inputPath},
+	})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+
+	candidates := officeAttributionCandidatePaths("", RunOptions{Input: input}, RunResult{})
+
+	if len(candidates) != 0 {
+		t.Fatalf("expected JSON input container to be ignored, got %#v", candidates)
 	}
 }

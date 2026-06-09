@@ -545,6 +545,7 @@ type RunResult struct {
 	TimedOut         bool               `json:"timed_out,omitempty"`
 	OutputLimitBytes int64              `json:"output_limit_bytes,omitempty"`
 	TimeoutMS        int64              `json:"timeout_ms,omitempty"`
+	AttributedFiles  []string           `json:"attributed_files,omitempty"`
 	UsageEvents      []UsageEventResult `json:"usage_events,omitempty"`
 }
 

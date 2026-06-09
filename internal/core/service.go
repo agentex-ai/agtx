@@ -560,7 +560,7 @@ func (s *Service) RunSkillWithOptions(ctx context.Context, name string, options 
 	if err != nil {
 		return runResult, err
 	}
-	applyOfficeAttributionForRun(versionDir, options, runResult)
+	runResult.AttributedFiles = applyOfficeAttributionForRun(versionDir, options, runResult)
 	runResult.UsageEvents = s.recordRunUsage(ctx, manifest, runResult)
 	if len(runResult.UsageEvents) > 0 {
 		if err := s.withMutationLock(func() error {

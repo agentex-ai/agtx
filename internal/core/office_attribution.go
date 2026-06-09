@@ -41,15 +41,19 @@ type officeCorePropertiesOutput struct {
 	Category       string   `xml:"cp:category,omitempty"`
 }
 
-func applyOfficeAttributionForRun(versionDir string, options RunOptions, result RunResult) {
+func applyOfficeAttributionForRun(versionDir string, options RunOptions, result RunResult) []string {
 	agentName := strings.TrimSpace(options.AgentName)
 	if agentName == "" {
-		return
+		return nil
 	}
 	byline := "by " + agentName
+	attributed := []string{}
 	for _, path := range officeAttributionCandidatePaths(versionDir, options, result) {
-		_ = updateOfficeCoreProperties(path, agentName, byline)
+		if err := updateOfficeCoreProperties(path, agentName, byline); err == nil {
+			attributed = append(attributed, path)
+		}
 	}
+	return attributed
 }
 
 func officeAttributionCandidatePaths(versionDir string, options RunOptions, result RunResult) []string {
@@ -142,10 +146,13 @@ func collectOfficePathsFromJSON(data []byte, add func(string)) {
 	if err := json.Unmarshal(data, &value); err != nil {
 		return
 	}
-	collectOfficePathsFromValue(value, add)
+	collectOfficePathsFromValue(value, "", add)
 }
 
-func collectOfficePathsFromValue(value any, add func(string)) {
+func collectOfficePathsFromValue(value any, key string, add func(string)) {
+	if isOfficeOutputContainerKey(key) {
+		collectOfficeOutputStrings(value, add)
+	}
 	switch typed := value.(type) {
 	case map[string]any:
 		values := map[string]string{}
@@ -154,12 +161,27 @@ func collectOfficePathsFromValue(value any, add func(string)) {
 			if stringValue, ok := childValue.(string); ok {
 				values[key] = stringValue
 			}
-			collectOfficePathsFromValue(childValue, add)
+			collectOfficePathsFromValue(childValue, key, add)
 		}
 		addOfficeOutputValues(values, add)
 	case []any:
 		for _, item := range typed {
-			collectOfficePathsFromValue(item, add)
+			collectOfficePathsFromValue(item, key, add)
+		}
+	}
+}
+
+func collectOfficeOutputStrings(value any, add func(string)) {
+	switch typed := value.(type) {
+	case string:
+		add(typed)
+	case map[string]any:
+		for _, childValue := range typed {
+			collectOfficeOutputStrings(childValue, add)
+		}
+	case []any:
+		for _, item := range typed {
+			collectOfficeOutputStrings(item, add)
 		}
 	}
 }
@@ -182,6 +204,18 @@ func isOfficeDocumentPath(path string) bool {
 func isOfficeMutationAction(action string) bool {
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "create", "edit", "write", "export", "generate", "save", "render", "build":
+		return true
+	default:
+		return false
+	}
+}
+
+func isOfficeOutputContainerKey(key string) bool {
+	switch normalizeAttributionKey(key) {
+	case "outputs", "output_files", "output_paths",
+		"artifacts", "artifact_files", "artifact_paths",
+		"results", "result_files", "result_paths",
+		"generated_files", "generated_paths":
 		return true
 	default:
 		return false
