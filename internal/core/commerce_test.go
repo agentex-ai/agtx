@@ -21,16 +21,16 @@ import (
 func TestDefaultRegistrySkillsDeclareBillingMeters(t *testing.T) {
 	registry := DefaultRegistry()
 	expected := map[string][]string{
-		"web_search": {"call"},
-		"web_fetch":  {"page", "call"},
-		"research":   {"task"},
-		"ocr":        {"page"},
-		"audio":      {"minute"},
-		"imagen":     {"task", "credit"},
-		"docx":       {"task"},
-		"xlsx":       {"task"},
-		"pptx":       {"task"},
-		"pdf":        {"page"},
+		"web_search":    {"call"},
+		"web_fetch":     {"page", "call"},
+		"deep_research": {"task"},
+		"ocr":           {"page"},
+		"audio":         {"minute"},
+		"imagen":        {"task", "credit"},
+		"docx":          {"task"},
+		"xlsx":          {"task"},
+		"pptx":          {"task"},
+		"pdf":           {"page"},
 	}
 
 	for name, meters := range expected {
@@ -43,7 +43,7 @@ func TestDefaultRegistrySkillsDeclareBillingMeters(t *testing.T) {
 				t.Fatalf("expected agentex vendor, got %q", skill.VendorID)
 			}
 			expectedClass := "tool"
-			if name == "research" {
+			if name == "deep_research" {
 				expectedClass = "workflow"
 			}
 			if skill.Capability == nil || skill.Capability.Class != expectedClass {
@@ -85,13 +85,31 @@ func TestPlanInstallIncludesCommerceSummary(t *testing.T) {
 	}
 }
 
+func TestDeepResearchAliasesRemainCompatible(t *testing.T) {
+	service := NewService(PathsForRoot(t.TempDir()))
+	skill, ok := service.Registry.Find("research")
+	if !ok {
+		t.Fatal("expected research alias to resolve")
+	}
+	if skill.Name != deepResearchSkillName {
+		t.Fatalf("expected research alias to resolve to %s, got %s", deepResearchSkillName, skill.Name)
+	}
+	pack, err := service.GetCapabilityPack("research")
+	if err != nil {
+		t.Fatalf("get research pack alias: %v", err)
+	}
+	if pack.Pack.ID != deepResearchSkillName {
+		t.Fatalf("expected research pack alias to resolve to %s, got %#v", deepResearchSkillName, pack.Pack)
+	}
+}
+
 func TestDefaultCapabilityPacksExposeWebsiteFirstWaveAndBundles(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
 	packs, err := service.ListCapabilityPacks()
 	if err != nil {
 		t.Fatalf("list capability packs: %v", err)
 	}
-	expected := []string{"web_search", "web_fetch", "research", "ocr", "audio", "imagen", "docx", "xlsx", "pptx", "pdf", "documents", "standard", "advanced"}
+	expected := []string{"web_search", "web_fetch", "deep_research", "ocr", "audio", "imagen", "docx", "xlsx", "pptx", "pdf", "documents", "standard", "advanced"}
 	if len(packs) != len(expected) {
 		t.Fatalf("expected website first-wave packs and bundles, got %#v", packs)
 	}

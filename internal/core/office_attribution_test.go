@@ -79,6 +79,40 @@ func TestOfficeAttributionCandidatePathsUseEqualsAndCamelCaseOutputs(t *testing.
 	}
 }
 
+func TestOfficeAttributionCandidatePathsUseMacroEnabledOfficeOutputs(t *testing.T) {
+	root := t.TempDir()
+	firstOutput := filepath.Join(root, "macro.docm")
+	secondOutput := filepath.Join(root, "macro.xlsm")
+	thirdOutput := filepath.Join(root, "macro.pptm")
+	for _, path := range []string{firstOutput, secondOutput, thirdOutput} {
+		writeMinimalOfficeDocument(t, path)
+	}
+	stdout, err := json.Marshal(map[string]any{
+		"output": map[string]any{
+			"path": secondOutput,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal stdout: %v", err)
+	}
+
+	candidates := officeAttributionCandidatePaths("", RunOptions{
+		Args: []string{"--output", firstOutput},
+	}, RunResult{
+		Stdout: string(stdout),
+		Stderr: "Saved to: " + thirdOutput,
+	})
+
+	expected := []string{
+		filepath.Clean(firstOutput),
+		filepath.Clean(secondOutput),
+		filepath.Clean(thirdOutput),
+	}
+	if !sameOfficePathSet(candidates, expected) {
+		t.Fatalf("expected macro-enabled output candidates %#v, got %#v", expected, candidates)
+	}
+}
+
 func TestOfficeAttributionCandidatePathsUseShortAndExportOutputs(t *testing.T) {
 	root := t.TempDir()
 	firstOutput := filepath.Join(root, "short.docx")

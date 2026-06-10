@@ -123,7 +123,7 @@ agtx pro logout
 `agtx pro setup` is a no-side-effect preflight check: it does not refresh tokens or call the network, and instead reports current local status plus recommended next actions for either humans or agents.
 `agtx pro register-scheme` now targets both macOS and Windows; on macOS it installs a tiny local callback app bundle under the agtx config directory so browser login can return through `agtx://`.
 
-Set `agent_name` to pass default artifact attribution into installed skills, or use `agtx run --agent-name ...` for a single invocation. During `agtx run`, the value is exposed as `AGTX_AGENT_NAME`, `AGTX_BYLINE`, and `AGTX_GENERATED_BY` so document-generating skills can write Office creator metadata or visible bylines such as `by Codex`. After a successful run, agtx also best-effort updates explicit `.docx`, `.xlsx`, and `.pptx` output paths with Office core metadata (`creator`, `lastModifiedBy`, and a `by <agent>` description line), and reports successful writes in `attributed_files` for JSON/MCP callers. To avoid mutating source templates, pass generated files through output-style arguments such as `-o file.docx`, `--output file.docx`, `--output=file.docx`, `output=file.docx`, `outputPath=file.docx`, `saveAs=file.docx`, `exportPath=file.docx`, local `file://` URIs, JSON/NDJSON `outputs`, JSON output objects such as `{"output":{"path":"file.docx"}}` or `{"artifact":{"uri":"file:///..."}}`, text hints such as `Saved to: file.docx`, or `action=create path=file.docx`. agtx only annotates real OpenXML Office packages, so arbitrary zip files renamed to `.docx`, `.xlsx`, or `.pptx` are ignored.
+Set `agent_name` to pass default artifact attribution into installed skills, or use `agtx run --agent-name ...` for a single invocation. During `agtx run`, the value is exposed as `AGTX_AGENT_NAME`, `AGTX_BYLINE`, and `AGTX_GENERATED_BY` so document-generating skills can write Office creator metadata or visible bylines such as `by Codex`. After a successful run, agtx also best-effort updates explicit OpenXML Office output paths (`.docx`, `.docm`, `.xlsx`, `.xlsm`, `.pptx`, and `.pptm`) with Office core metadata (`creator`, `lastModifiedBy`, and a `by <agent>` description line), and reports successful writes in `attributed_files` for JSON/MCP callers. To avoid mutating source templates, pass generated files through output-style arguments such as `-o file.docx`, `--output file.docx`, `--output=file.docx`, `output=file.docx`, `outputPath=file.docx`, `saveAs=file.docx`, `exportPath=file.docx`, local `file://` URIs, JSON/NDJSON `outputs`, JSON output objects such as `{"output":{"path":"file.docx"}}` or `{"artifact":{"uri":"file:///..."}}`, text hints such as `Saved to: file.docx`, or `action=create path=file.docx`. agtx only annotates real OpenXML Office packages, so arbitrary zip files renamed to an Office extension are ignored.
 
 ## Registry
 
@@ -171,7 +171,7 @@ The built-in first-wave skills already declare default billing meters:
 
 - `web_search`: `call`
 - `web_fetch`: `page`, `call`
-- `research`: `task`
+- `deep_research`: `task`
 - `ocr` and `pdf`: `page`
 - `audio`: `minute`
 - `imagen`: `task`, `credit`
@@ -190,7 +190,7 @@ Website first-wave packs:
 
 - `web_search`: web discovery and ranked source candidates.
 - `web_fetch`: known-URL reading, article extraction, metadata, and relay fallback.
-- `research`: multi-step evidence gathering, synthesis, analysis, and UI review.
+- `deep_research` (alias: `research`): multi-step evidence gathering, synthesis, analysis, and UI review.
 - `ocr`: screenshots, scans, PDF pages, UI images, and photo text extraction.
 - `audio`: ASR, TTS, meeting notes, and batch audio jobs.
 - `imagen` (alias: `mediagen`): text-to-image, image-to-video, and media generation.

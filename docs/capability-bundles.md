@@ -95,7 +95,7 @@ Recommended stages:
       "reason": "Read selected pages and extract evidence from known URLs."
     },
     {
-      "id": "research",
+      "id": "deep_research",
       "role": "validation",
       "priority": "recommended",
       "stage": "verification",
@@ -135,7 +135,7 @@ orchestration bundles. They may reference skills from one or more commerce
 packs, but they do not define billing by themselves.
 
 The built-in pack catalog mirrors the first-wave packs shown on `agentex.cc`:
-`web_search`, `web_fetch`, `research`, `ocr`, `audio`, `imagen`, `docx`,
+`web_search`, `web_fetch`, `deep_research`, `ocr`, `audio`, `imagen`, `docx`,
 `xlsx`, `pptx`, and `pdf`. The registry-compatible `documents` pack groups the
 four native document packs. The `standard` and `advanced` packs remain ordinary
 and advanced bundles for users who want one install action to provision a whole
@@ -152,7 +152,7 @@ agtx ships a small set of first-party scenario views for website and MCP
 integrations. They are not separate billable products; they are task templates
 that map realistic workflows to the installable `standard` or `advanced`
 commerce pack. Websites can still filter scenarios by a first-wave pack such as
-`pdf`, `xlsx`, or `research` to show which real workflows use that capability.
+`pdf`, `xlsx`, or `deep_research` to show which real workflows use that capability.
 
 Current built-in scenarios include:
 

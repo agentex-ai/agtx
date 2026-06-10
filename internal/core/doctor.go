@@ -28,7 +28,7 @@ func (s *Service) VerifySkill(name string) (VerifyResult, error) {
 	if strings.TrimSpace(name) == "" {
 		return VerifyResult{}, NewError(CodeInvalidArgument, "skill name is required", nil)
 	}
-	normalized := normalizeName(name)
+	normalized := canonicalSkillName(name)
 	result := VerifyResult{Name: normalized}
 	checks := []DoctorCheck{}
 
@@ -46,14 +46,14 @@ func (s *Service) VerifySkill(name string) (VerifyResult, error) {
 
 	versions, err := s.installedVersions(name)
 	if err != nil {
-		checks = append(checks, errorCheck("installed_versions", "cannot list installed versions", filepath.Join(s.Paths.SkillsDir, normalized), err))
+		checks = append(checks, errorCheck("installed_versions", "cannot list installed versions", s.skillDir(name), err))
 		result.Checks = checks
 		result.Summary = summarizeChecks(checks)
 		result.OK = false
 		return result, err
 	}
 	result.InstalledVersions = versions
-	checks = append(checks, okCheck("installed_versions", "found installed versions", filepath.Join(s.Paths.SkillsDir, normalized)).withDetails(map[string]any{"versions": versions}))
+	checks = append(checks, okCheck("installed_versions", "found installed versions", s.skillDir(name)).withDetails(map[string]any{"versions": versions}))
 
 	currentFound := false
 	for _, version := range versions {
@@ -181,13 +181,15 @@ func (s *Service) checkInstalledSkills() []DoctorCheck {
 		}
 		skillDirs++
 		name := entry.Name()
-		current, err := s.currentVersion(name)
+		dir := s.directSkillDir(name)
+		currentPath := filepath.Join(dir, "current")
+		current, err := s.currentVersionInDir(name, dir)
 		if err != nil {
-			checks = append(checks, errorCheck("skill_current:"+name, "cannot read current version", s.currentPath(name), err))
+			checks = append(checks, errorCheck("skill_current:"+name, "cannot read current version", currentPath, err))
 			continue
 		}
-		checks = append(checks, okCheck("skill_current:"+name, "current version is "+current, s.currentPath(name)))
-		_, _, versionChecks, _ := s.checkSkillVersion(name, current, true)
+		checks = append(checks, okCheck("skill_current:"+name, "current version is "+current, currentPath))
+		_, _, versionChecks, _ := s.checkSkillVersionInDir(name, current, true, dir)
 		for _, check := range versionChecks {
 			check.Name = name + ":" + check.Name
 			checks = append(checks, check)
@@ -290,10 +292,14 @@ func checkLedgerPrivatePath(name, path string, directory bool, expected os.FileM
 }
 
 func (s *Service) checkSkillVersion(name, version string, currentOnly bool) (SkillManifest, string, []DoctorCheck, error) {
-	versionDir := s.versionDir(name, version)
+	return s.checkSkillVersionInDir(name, version, currentOnly, s.skillDir(name))
+}
+
+func (s *Service) checkSkillVersionInDir(name, version string, currentOnly bool, dir string) (SkillManifest, string, []DoctorCheck, error) {
+	versionDir := filepath.Join(dir, version)
 	manifestPath := filepath.Join(versionDir, "manifest.json")
 	checks := []DoctorCheck{}
-	manifest, _, err := s.readManifest(name, version)
+	manifest, _, err := s.readManifestInDir(name, version, dir)
 	if err != nil {
 		checks = append(checks, errorCheck("manifest", "cannot read skill manifest", manifestPath, err))
 		return SkillManifest{}, versionDir, checks, err
@@ -309,8 +315,8 @@ func (s *Service) checkSkillVersion(name, version string, currentOnly bool) (Ski
 		checks = append(checks, okCheck("manifest_schema", "skill manifest schema is valid", manifestPath))
 	}
 
-	if normalizeName(manifest.Name) != normalizeName(name) {
-		checks = append(checks, DoctorCheck{Name: "manifest_identity", OK: false, Severity: "error", Message: "manifest name does not match install directory", Path: manifestPath, Details: map[string]any{"expected": normalizeName(name), "actual": manifest.Name}})
+	if canonicalSkillName(manifest.Name) != canonicalSkillName(name) {
+		checks = append(checks, DoctorCheck{Name: "manifest_identity", OK: false, Severity: "error", Message: "manifest name does not match install directory", Path: manifestPath, Details: map[string]any{"expected": canonicalSkillName(name), "actual": manifest.Name}})
 	} else if manifest.Version != version {
 		checks = append(checks, DoctorCheck{Name: "manifest_identity", OK: false, Severity: "error", Message: "manifest version does not match install directory", Path: manifestPath, Details: map[string]any{"expected": version, "actual": manifest.Version}})
 	} else {

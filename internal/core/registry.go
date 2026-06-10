@@ -11,7 +11,7 @@ func DefaultRegistry() Registry {
 		Skills: []SkillManifest{
 			defaultSkill("web_search", "0.1.0", "Web search", "Discover pages and return ranked candidate results for agents and human workflows.", []string{"web", "search", "internet"}, []string{"search", "web", "web_query", "internet", "browser", "discover", "query", "搜索", "网页", "互联网", "查找"}, []string{"call"}),
 			defaultSkill("web_fetch", "0.1.0", "Web fetch", "Fetch web pages, extract readable text, and return metadata when a page is accessible.", []string{"web", "fetch", "reader"}, []string{"fetch", "read", "web_query", "article", "url", "html", "page", "webpage", "读取", "网页", "正文", "链接", "抓取"}, []string{"page", "call"}),
-			defaultSkill("research", "0.1.0", "Research workflow", "Collect evidence, synthesize findings, and produce structured research notes.", []string{"research", "analysis", "report"}, []string{"research", "report", "analysis", "evidence", "compare", "调研", "研究", "报告", "分析", "证据"}, []string{"task"}),
+			defaultSkill(deepResearchSkillName, "0.1.0", "Deep research workflow", "Collect evidence, synthesize findings, and produce structured research notes.", []string{"research", "analysis", "report"}, []string{"deep_research", "research", "report", "analysis", "evidence", "compare", "调研", "研究", "报告", "分析", "证据"}, []string{"task"}),
 			defaultSkill("ocr", "0.1.0", "OCR", "Extract text and coordinates from screenshots, scans, images, and PDF pages.", []string{"vision", "ocr", "image"}, []string{"ocr", "image", "screenshot", "scan", "text", "vision", "图片", "截图", "扫描", "文字", "识别"}, []string{"page"}),
 			defaultSkill("audio", "0.1.0", "Audio ASR/TTS", "Handle speech recognition, speech synthesis, and batch audio processing tasks.", []string{"audio", "asr", "tts"}, []string{"audio", "speech", "transcribe", "voice", "meeting", "notes", "录音", "语音", "转写", "会议", "纪要"}, []string{"minute"}),
 			defaultSkill("imagen", "0.1.0", "Media generation", "Expose image and media generation workflows through a lightweight skill entry.", []string{"image", "media", "generation"}, []string{"image", "generate", "mediagen", "media", "picture", "video", "creator", "图片", "生成", "绘图", "视频", "创作"}, []string{"task", "credit"}),
@@ -25,7 +25,7 @@ func DefaultRegistry() Registry {
 
 func defaultSkill(name, version, summary, description string, tags, keywords, meters []string) SkillManifest {
 	capabilityClass := "tool"
-	if normalizeName(name) == "research" {
+	if canonicalSkillName(name) == deepResearchSkillName {
 		capabilityClass = "workflow"
 	}
 	return SkillManifest{
@@ -89,6 +89,17 @@ func (r Registry) Find(name string) (SkillManifest, bool) {
 			return skill, true
 		}
 	}
+	canonicalNeedle := canonicalSkillName(name)
+	for _, skill := range r.Skills {
+		if canonicalSkillName(skill.Name) == canonicalNeedle {
+			return skill, true
+		}
+		for _, alias := range skillAliases(skill) {
+			if normalizeName(alias) == needle {
+				return skill, true
+			}
+		}
+	}
 	return SkillManifest{}, false
 }
 
@@ -122,6 +133,7 @@ func scoreSkill(skill SkillManifest, query string) (int, []string) {
 	searchText := strings.ToLower(strings.Join([]string{
 		skill.Name,
 		strings.ReplaceAll(skill.Name, "_", " "),
+		strings.Join(skillAliases(skill), " "),
 		skill.Summary,
 		skill.Description,
 		strings.Join(skill.Tags, " "),
@@ -140,7 +152,7 @@ func scoreSkill(skill SkillManifest, query string) (int, []string) {
 		termScore := 0
 		name := strings.ToLower(skill.Name)
 		switch {
-		case normalizeName(term) == normalizeName(skill.Name):
+		case normalizeName(term) == normalizeName(skill.Name) || canonicalSkillName(term) == canonicalSkillName(skill.Name):
 			termScore = 120
 		case strings.Contains(name, strings.ToLower(term)):
 			termScore = 80
@@ -201,6 +213,27 @@ func containsFold(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+const deepResearchSkillName = "deep_research"
+
+func canonicalSkillName(value string) string {
+	normalized := normalizeName(value)
+	switch normalized {
+	case "research":
+		return deepResearchSkillName
+	default:
+		return normalized
+	}
+}
+
+func skillAliases(skill SkillManifest) []string {
+	switch normalizeName(skill.Name) {
+	case deepResearchSkillName:
+		return []string{"research"}
+	default:
+		return nil
+	}
 }
 
 func normalizeName(value string) string {

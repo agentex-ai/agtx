@@ -36,15 +36,15 @@ func DefaultCapabilityScenarios() []CapabilityScenario {
 			Workflow: []CapabilityScenarioStep{
 				{ID: "intake_documents", Title: "Intake invoices", Stage: "task_profile", Description: "Classify invoice files and preserve original source references.", Skills: []string{"pdf", "ocr", "docx"}},
 				{ID: "extract_fields", Title: "Extract fields", Stage: "editing", Description: "Extract headers, taxes, totals, and line items from documents and scans.", Skills: []string{"pdf", "ocr", "xlsx"}},
-				{ID: "reconcile_rows", Title: "Reconcile against references", Stage: "verification", Description: "Compare invoice values with spreadsheet rows and flag mismatches.", Skills: []string{"xlsx", "research"}},
-				{ID: "prepare_handoff", Title: "Prepare AP handoff", Stage: "handoff", Description: "Package clean rows and exceptions for accounting review.", Skills: []string{"xlsx", "docx", "research"}},
+				{ID: "reconcile_rows", Title: "Reconcile against references", Stage: "verification", Description: "Compare invoice values with spreadsheet rows and flag mismatches.", Skills: []string{"xlsx", deepResearchSkillName}},
+				{ID: "prepare_handoff", Title: "Prepare AP handoff", Stage: "handoff", Description: "Package clean rows and exceptions for accounting review.", Skills: []string{"xlsx", "docx", deepResearchSkillName}},
 			},
 			Skills: []CapabilityScenarioSkill{
 				{Name: "pdf", Role: "implementation", Priority: "required", Stage: "editing", Reason: "Extract text, pages, and attachments from PDF invoices."},
 				{Name: "ocr", Role: "fallback", Priority: "required", Stage: "editing", Reason: "Recover text from scanned or photographed invoices."},
 				{Name: "xlsx", Role: "validation", Priority: "required", Stage: "verification", Reason: "Read purchase-order, line-item, and accounting spreadsheet exports."},
 				{Name: "docx", Role: "implementation", Priority: "conditional", Stage: "editing", Reason: "Handle invoices or remittance notes delivered as Word documents.", Condition: "Use when the input includes DOCX attachments."},
-				{Name: "research", Role: "validation", Priority: "recommended", Stage: "verification", Reason: "Summarize exceptions, confidence, and human review items."},
+				{Name: deepResearchSkillName, Role: "validation", Priority: "recommended", Stage: "verification", Reason: "Summarize exceptions, confidence, and human review items."},
 			},
 			AcceptanceCriteria: []string{
 				"Every payable line keeps source file, page, vendor, invoice number, currency, and total.",
@@ -85,13 +85,13 @@ func DefaultCapabilityScenarios() []CapabilityScenario {
 			Workflow: []CapabilityScenarioStep{
 				{ID: "discover_sources", Title: "Discover sources", Stage: "task_profile", Description: "Find candidate primary, recent, and relevant sources.", Skills: []string{"web_search"}},
 				{ID: "fetch_evidence", Title: "Fetch evidence", Stage: "editing", Description: "Read selected web pages and source documents.", Skills: []string{"web_fetch", "pdf", "docx"}},
-				{ID: "synthesize_findings", Title: "Synthesize findings", Stage: "verification", Description: "Turn evidence into findings, caveats, and confidence notes.", Skills: []string{"research"}},
-				{ID: "package_brief", Title: "Package brief", Stage: "handoff", Description: "Prepare a concise decision-ready diligence handoff.", Skills: []string{"research", "docx"}},
+				{ID: "synthesize_findings", Title: "Synthesize findings", Stage: "verification", Description: "Turn evidence into findings, caveats, and confidence notes.", Skills: []string{deepResearchSkillName}},
+				{ID: "package_brief", Title: "Package brief", Stage: "handoff", Description: "Prepare a concise decision-ready diligence handoff.", Skills: []string{deepResearchSkillName, "docx"}},
 			},
 			Skills: []CapabilityScenarioSkill{
 				{Name: "web_search", Role: "discovery", Priority: "required", Stage: "task_profile", Reason: "Find candidate public sources and references."},
 				{Name: "web_fetch", Role: "implementation", Priority: "required", Stage: "editing", Reason: "Read selected pages and extract source text."},
-				{Name: "research", Role: "validation", Priority: "required", Stage: "verification", Reason: "Synthesize findings, caveats, and evidence trails."},
+				{Name: deepResearchSkillName, Role: "validation", Priority: "required", Stage: "verification", Reason: "Synthesize findings, caveats, and evidence trails."},
 				{Name: "pdf", Role: "implementation", Priority: "recommended", Stage: "editing", Reason: "Read annual reports, filings, whitepapers, or attached source PDFs."},
 				{Name: "docx", Role: "handoff", Priority: "conditional", Stage: "handoff", Reason: "Prepare or inspect a Word-format diligence memo.", Condition: "Use when the deliverable or input is a DOCX file."},
 			},
@@ -134,15 +134,15 @@ func DefaultCapabilityScenarios() []CapabilityScenario {
 			Workflow: []CapabilityScenarioStep{
 				{ID: "intake_contracts", Title: "Intake contracts", Stage: "task_profile", Description: "Read document set, identify versions, and preserve references.", Skills: []string{"docx", "pdf", "ocr"}},
 				{ID: "extract_clauses", Title: "Extract clauses", Stage: "editing", Description: "Extract clauses, obligations, dates, and referenced materials.", Skills: []string{"docx", "pdf"}},
-				{ID: "compare_context", Title: "Compare context", Stage: "verification", Description: "Compare extracted terms with playbooks or public references.", Skills: []string{"web_fetch", "research"}},
-				{ID: "prepare_review", Title: "Prepare review", Stage: "handoff", Description: "Create a human-review memo with caveats and questions.", Skills: []string{"research", "docx"}},
+				{ID: "compare_context", Title: "Compare context", Stage: "verification", Description: "Compare extracted terms with playbooks or public references.", Skills: []string{"web_fetch", deepResearchSkillName}},
+				{ID: "prepare_review", Title: "Prepare review", Stage: "handoff", Description: "Create a human-review memo with caveats and questions.", Skills: []string{deepResearchSkillName, "docx"}},
 			},
 			Skills: []CapabilityScenarioSkill{
 				{Name: "docx", Role: "implementation", Priority: "required", Stage: "editing", Reason: "Read contract drafts, redlines, and clause libraries."},
 				{Name: "pdf", Role: "implementation", Priority: "required", Stage: "editing", Reason: "Read executed contracts and PDF attachments."},
 				{Name: "ocr", Role: "fallback", Priority: "recommended", Stage: "editing", Reason: "Extract text from scanned signature packets."},
 				{Name: "web_fetch", Role: "discovery", Priority: "conditional", Stage: "task_profile", Reason: "Fetch public policies, referenced terms, or vendor pages.", Condition: "Use when the contract references external public URLs."},
-				{Name: "research", Role: "validation", Priority: "required", Stage: "verification", Reason: "Summarize key obligations, open questions, and human-review risks."},
+				{Name: deepResearchSkillName, Role: "validation", Priority: "required", Stage: "verification", Reason: "Summarize key obligations, open questions, and human-review risks."},
 			},
 			AcceptanceCriteria: []string{
 				"Clause findings include document, section, and page references when available.",
@@ -182,13 +182,13 @@ func DefaultCapabilityScenarios() []CapabilityScenario {
 			},
 			Workflow: []CapabilityScenarioStep{
 				{ID: "transcribe_audio", Title: "Transcribe audio", Stage: "editing", Description: "Convert recording to structured meeting notes.", Skills: []string{"audio"}},
-				{ID: "summarize_decisions", Title: "Summarize decisions", Stage: "verification", Description: "Separate decisions, owners, dates, and speculative notes.", Skills: []string{"research"}},
+				{ID: "summarize_decisions", Title: "Summarize decisions", Stage: "verification", Description: "Separate decisions, owners, dates, and speculative notes.", Skills: []string{deepResearchSkillName}},
 				{ID: "assemble_deck", Title: "Assemble deck", Stage: "editing", Description: "Create or update slide structure and speaker notes.", Skills: []string{"pptx"}},
 				{ID: "create_assets", Title: "Create supporting visuals", Stage: "editing", Description: "Generate optional diagrams or images when they clarify the narrative.", Skills: []string{"imagen"}},
 			},
 			Skills: []CapabilityScenarioSkill{
 				{Name: "audio", Role: "implementation", Priority: "required", Stage: "editing", Reason: "Transcribe meeting recordings and extract speaker-level notes."},
-				{Name: "research", Role: "validation", Priority: "required", Stage: "verification", Reason: "Organize decisions, risks, and next steps into a briefing outline."},
+				{Name: deepResearchSkillName, Role: "validation", Priority: "required", Stage: "verification", Reason: "Organize decisions, risks, and next steps into a briefing outline."},
 				{Name: "pptx", Role: "implementation", Priority: "required", Stage: "editing", Reason: "Read or update slide decks and speaker notes."},
 				{Name: "imagen", Role: "asset_creation", Priority: "recommended", Stage: "editing", Reason: "Create supporting diagrams or visual assets for slides."},
 				{Name: "docx", Role: "handoff", Priority: "conditional", Stage: "handoff", Reason: "Generate a Word-format meeting brief or handout.", Condition: "Use when stakeholders need a document handoff alongside slides."},
@@ -230,14 +230,14 @@ func DefaultCapabilityScenarios() []CapabilityScenario {
 				{ID: "campaign_deck", Label: "Campaign deck", Description: "Stakeholder presentation with concept options and copy notes.", Formats: []string{"pptx"}, Required: false},
 			},
 			Workflow: []CapabilityScenarioStep{
-				{ID: "research_context", Title: "Research context", Stage: "task_profile", Description: "Find market, competitor, and product context for the campaign.", Skills: []string{"web_search", "web_fetch", "research"}},
-				{ID: "draft_positioning", Title: "Draft positioning", Stage: "verification", Description: "Prepare claims, caveats, and audience-specific messaging.", Skills: []string{"research", "docx"}},
+				{ID: "research_context", Title: "Research context", Stage: "task_profile", Description: "Find market, competitor, and product context for the campaign.", Skills: []string{"web_search", "web_fetch", deepResearchSkillName}},
+				{ID: "draft_positioning", Title: "Draft positioning", Stage: "verification", Description: "Prepare claims, caveats, and audience-specific messaging.", Skills: []string{deepResearchSkillName, "docx"}},
 				{ID: "generate_visuals", Title: "Generate visuals", Stage: "editing", Description: "Create visual concepts using approved constraints.", Skills: []string{"imagen"}},
 				{ID: "package_campaign", Title: "Package campaign", Stage: "handoff", Description: "Assemble deck, copy, and review notes for stakeholders.", Skills: []string{"pptx", "docx"}},
 			},
 			Skills: []CapabilityScenarioSkill{
 				{Name: "web_search", Role: "discovery", Priority: "required", Stage: "task_profile", Reason: "Discover market references, competitors, and campaign context."},
-				{Name: "research", Role: "validation", Priority: "required", Stage: "verification", Reason: "Turn sources into positioning notes and claims that can be checked."},
+				{Name: deepResearchSkillName, Role: "validation", Priority: "required", Stage: "verification", Reason: "Turn sources into positioning notes and claims that can be checked."},
 				{Name: "imagen", Role: "asset_creation", Priority: "required", Stage: "editing", Reason: "Generate or adapt visual assets for campaign concepts."},
 				{Name: "pptx", Role: "handoff", Priority: "recommended", Stage: "handoff", Reason: "Package concepts into a stakeholder presentation."},
 				{Name: "docx", Role: "handoff", Priority: "recommended", Stage: "handoff", Reason: "Prepare copy, captions, and review notes in document form."},
@@ -281,8 +281,8 @@ func DefaultCapabilityScenarios() []CapabilityScenario {
 			Workflow: []CapabilityScenarioStep{
 				{ID: "ingest_sources", Title: "Ingest sources", Stage: "task_profile", Description: "Collect manuals, docs, spreadsheets, screenshots, and support pages.", Skills: []string{"pdf", "docx", "xlsx", "web_fetch"}},
 				{ID: "extract_topics", Title: "Extract topics", Stage: "editing", Description: "Identify procedures, product versions, and repeated support questions.", Skills: []string{"pdf", "docx", "xlsx", "ocr"}},
-				{ID: "draft_articles", Title: "Draft articles", Stage: "editing", Description: "Create structured user-facing article drafts.", Skills: []string{"research", "docx"}},
-				{ID: "validate_coverage", Title: "Validate coverage", Stage: "verification", Description: "Flag contradictions, missing versions, and internal-only notes.", Skills: []string{"research", "xlsx"}},
+				{ID: "draft_articles", Title: "Draft articles", Stage: "editing", Description: "Create structured user-facing article drafts.", Skills: []string{deepResearchSkillName, "docx"}},
+				{ID: "validate_coverage", Title: "Validate coverage", Stage: "verification", Description: "Flag contradictions, missing versions, and internal-only notes.", Skills: []string{deepResearchSkillName, "xlsx"}},
 			},
 			Skills: []CapabilityScenarioSkill{
 				{Name: "web_fetch", Role: "discovery", Priority: "required", Stage: "task_profile", Reason: "Read existing public docs, release notes, or support pages."},
@@ -290,7 +290,7 @@ func DefaultCapabilityScenarios() []CapabilityScenario {
 				{Name: "docx", Role: "implementation", Priority: "required", Stage: "editing", Reason: "Read internal support drafts and article templates."},
 				{Name: "xlsx", Role: "implementation", Priority: "recommended", Stage: "editing", Reason: "Read ticket exports, product matrices, and FAQ spreadsheets."},
 				{Name: "ocr", Role: "fallback", Priority: "conditional", Stage: "editing", Reason: "Recover text from screenshots embedded in support materials.", Condition: "Use when screenshots or scanned pages contain important instructions."},
-				{Name: "research", Role: "validation", Priority: "recommended", Stage: "verification", Reason: "Create concise article drafts with caveats and source references."},
+				{Name: deepResearchSkillName, Role: "validation", Priority: "recommended", Stage: "verification", Reason: "Create concise article drafts with caveats and source references."},
 			},
 			AcceptanceCriteria: []string{
 				"Article drafts preserve product version, policy date, and source provenance where available.",

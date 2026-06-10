@@ -65,8 +65,8 @@ func DefaultCapabilityPacks() []CapabilityPack {
 		},
 		{
 			SchemaVersion:   1,
-			ID:              "research",
-			Name:            "research",
+			ID:              deepResearchSkillName,
+			Name:            "deep_research",
 			Tier:            "first_wave",
 			CapabilityClass: "workflow",
 			UseWhen:         "Handle multi-step evidence gathering, synthesis, product analysis, UI review, or decision support.",
@@ -75,7 +75,7 @@ func DefaultCapabilityPacks() []CapabilityPack {
 			Inputs:          []string{"research question", "scope", "depth", "preferred output format"},
 			Outputs:         []string{"structured report", "evidence trail", "caveats", "next actions"},
 			Tags:            []string{"research", "synthesis", "analysis", "report"},
-			SkillNames:      []string{"research"},
+			SkillNames:      []string{deepResearchSkillName},
 			Billing: &BillingInfo{
 				Meters: []BillingMeter{
 					{Meter: "task", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Failed research tasks are not billed."},
@@ -266,7 +266,7 @@ func DefaultCapabilityPacks() []CapabilityPack {
 			Inputs:          []string{"ordinary productivity task", "documents", "web sources", "optional scans"},
 			Outputs:         []string{"installed web, research, OCR, and document skills", "local install records", "billing records"},
 			Tags:            []string{"bundle", "standard", "web", "documents", "research"},
-			SkillNames:      []string{"web_search", "web_fetch", "research", "ocr", "docx", "xlsx", "pdf"},
+			SkillNames:      []string{"web_search", "web_fetch", deepResearchSkillName, "ocr", "docx", "xlsx", "pdf"},
 			Billing: &BillingInfo{
 				Meters: []BillingMeter{
 					{Meter: "seat", UnitPrice: 990, Currency: "USD", HardLimitSupported: true, RefundPolicy: "Seat charges are reversed when provisioning fails."},
@@ -288,7 +288,7 @@ func DefaultCapabilityPacks() []CapabilityPack {
 			Inputs:          []string{"advanced productivity task", "media or audio sources", "documents", "presentations"},
 			Outputs:         []string{"installed first-wave skills", "local install records", "billing records"},
 			Tags:            []string{"bundle", "advanced", "audio", "media", "documents"},
-			SkillNames:      []string{"web_search", "web_fetch", "research", "ocr", "audio", "imagen", "docx", "xlsx", "pptx", "pdf"},
+			SkillNames:      []string{"web_search", "web_fetch", deepResearchSkillName, "ocr", "audio", "imagen", "docx", "xlsx", "pptx", "pdf"},
 			Billing: &BillingInfo{
 				Meters: []BillingMeter{
 					{Meter: "seat", UnitPrice: 2990, Currency: "USD", HardLimitSupported: true, RefundPolicy: "Seat charges are reversed when provisioning fails."},
@@ -441,7 +441,7 @@ func (s *Service) ListInstallRecordsWithIntegrity(options RecordQueryOptions) (I
 	}
 	filtered := make([]InstallRecord, 0, len(records))
 	for _, record := range records {
-		if options.PackID != "" && normalizeName(record.PackID) != normalizeName(options.PackID) {
+		if options.PackID != "" && !capabilityRecordPackMatches(record.PackID, options.PackID) {
 			continue
 		}
 		if options.ScenarioID != "" && normalizeName(record.ScenarioID) != normalizeName(options.ScenarioID) {
@@ -478,13 +478,13 @@ func (s *Service) ListBillingRecords(options RecordQueryOptions) (BillingRecordL
 	}
 	filtered := make([]BillingRecord, 0, len(records))
 	for _, record := range records {
-		if options.PackID != "" && normalizeName(record.PackID) != normalizeName(options.PackID) {
+		if options.PackID != "" && !capabilityRecordPackMatches(record.PackID, options.PackID) {
 			continue
 		}
 		if options.ScenarioID != "" && normalizeName(record.ScenarioID) != normalizeName(options.ScenarioID) {
 			continue
 		}
-		if options.Skill != "" && normalizeName(record.SkillName) != normalizeName(options.Skill) {
+		if options.Skill != "" && canonicalSkillName(record.SkillName) != canonicalSkillName(options.Skill) {
 			continue
 		}
 		if options.Status != "" && normalizeName(record.Status) != normalizeName(options.Status) {
@@ -536,6 +536,9 @@ func ValidateRecordQueryOptions(options RecordQueryOptions) error {
 func canonicalRecordQueryOptions(options RecordQueryOptions) RecordQueryOptions {
 	if pack, ok := findCapabilityPack(options.PackID); ok {
 		options.PackID = pack.ID
+	}
+	if strings.TrimSpace(options.Skill) != "" {
+		options.Skill = canonicalSkillName(options.Skill)
 	}
 	if scenario, ok := findCapabilityScenario(options.ScenarioID); ok {
 		options.ScenarioID = scenario.ID
@@ -747,8 +750,8 @@ func capabilityPackAliases(pack CapabilityPack) []string {
 		return []string{"web-search", "search", "web query search", "wangye_sousuo", "sousuo", "\u641c\u7d22", "\u7f51\u9875\u641c\u7d22"}
 	case "web_fetch":
 		return []string{"web-fetch", "web_read", "web-query-read", "fetch", "read_url", "wangye_duqu", "\u7f51\u9875\u8bfb\u53d6", "\u6293\u53d6"}
-	case "research":
-		return []string{"deep_research", "analyze", "advisor", "ui_review", "diaoyan", "\u8c03\u7814", "\u7814\u7a76"}
+	case deepResearchSkillName:
+		return []string{"research", "analyze", "advisor", "ui_review", "diaoyan", "\u8c03\u7814", "\u7814\u7a76"}
 	case "ocr":
 		return []string{"vision", "screen_ocr", "image_text", "shibie", "\u8bc6\u522b", "\u6587\u5b57\u8bc6\u522b"}
 	case "audio":
@@ -803,7 +806,7 @@ func packSortRank(pack CapabilityPack) int {
 		return 10
 	case "web_fetch":
 		return 20
-	case "research":
+	case deepResearchSkillName:
 		return 30
 	case "ocr":
 		return 40
@@ -988,11 +991,11 @@ func billingRecordsForUsage(manifest SkillManifest, result RunResult, events []U
 
 func packForSkill(name string) CapabilityPack {
 	var fallback CapabilityPack
-	needle := normalizeName(name)
+	needle := canonicalSkillName(name)
 	for _, pack := range DefaultCapabilityPacks() {
 		for _, skill := range pack.SkillNames {
-			if normalizeName(skill) == needle {
-				if normalizeName(pack.ID) == needle {
+			if canonicalSkillName(skill) == needle {
+				if canonicalSkillName(pack.ID) == needle {
 					return pack
 				}
 				if fallback.ID == "" || packTierRank(pack.Tier) < packTierRank(fallback.Tier) {
@@ -1022,6 +1025,9 @@ func (s *Service) latestPackInstallRecords() (map[string]InstallRecord, error) {
 			continue
 		}
 		key := normalizeName(record.PackID)
+		if pack, ok := findCapabilityPack(record.PackID); ok {
+			key = normalizeName(pack.ID)
+		}
 		if latest[key].OccurredAt < record.OccurredAt {
 			latest[key] = record
 		}
@@ -1030,16 +1036,25 @@ func (s *Service) latestPackInstallRecords() (map[string]InstallRecord, error) {
 }
 
 func installRecordMatchesSkill(record InstallRecord, skill string) bool {
-	needle := normalizeName(skill)
-	if normalizeName(record.SkillName) == needle {
+	needle := canonicalSkillName(skill)
+	if canonicalSkillName(record.SkillName) == needle {
 		return true
 	}
 	for _, item := range record.Skills {
-		if normalizeName(item.Name) == needle {
+		if canonicalSkillName(item.Name) == needle {
 			return true
 		}
 	}
 	return false
+}
+
+func capabilityRecordPackMatches(recordPackID, queryPackID string) bool {
+	if normalizeName(recordPackID) == normalizeName(queryPackID) {
+		return true
+	}
+	recordPack, recordOK := findCapabilityPack(recordPackID)
+	queryPack, queryOK := findCapabilityPack(queryPackID)
+	return recordOK && queryOK && normalizeName(recordPack.ID) == normalizeName(queryPack.ID)
 }
 
 func recordTimeInRange(value string, options RecordQueryOptions) bool {

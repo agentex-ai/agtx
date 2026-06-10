@@ -22,6 +22,8 @@ const (
 	officeCorePropertiesTarget = "docProps/core.xml"
 )
 
+var officeDocumentExtensions = []string{".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm"}
+
 type officeCoreProperties struct {
 	XMLName        xml.Name `xml:"http://schemas.openxmlformats.org/package/2006/metadata/core-properties coreProperties"`
 	Title          string   `xml:"http://purl.org/dc/elements/1.1/ title,omitempty"`
@@ -354,7 +356,7 @@ func extractOfficeTextPathValue(value string) string {
 		return strings.Trim(value[1:], " \t\r\n.,;")
 	}
 	lower := strings.ToLower(value)
-	for _, ext := range []string{".docx", ".xlsx", ".pptx"} {
+	for _, ext := range officeDocumentExtensions {
 		if index := strings.LastIndex(lower, ext); index >= 0 {
 			end := index + len(ext)
 			if end == len(value) || isOfficeTextPathBoundary(value[end]) {
@@ -503,12 +505,13 @@ func normalizeAttributionKey(key string) string {
 }
 
 func isOfficeDocumentPath(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".docx", ".xlsx", ".pptx":
-		return true
-	default:
-		return false
+	ext := strings.ToLower(filepath.Ext(path))
+	for _, officeExt := range officeDocumentExtensions {
+		if ext == officeExt {
+			return true
+		}
 	}
+	return false
 }
 
 func isOfficeMutationAction(action string) bool {

@@ -151,21 +151,35 @@ func (s *Service) ListInstalled() ([]InstalledSkill, error) {
 		}
 		return nil, err
 	}
-	installed := make([]InstalledSkill, 0)
+	installedByName := make(map[string]InstalledSkill)
+	dirByName := make(map[string]string)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		name := entry.Name()
-		version, err := s.currentVersion(name)
+		dir := s.directSkillDir(name)
+		version, err := s.currentVersionInDir(name, dir)
 		if err != nil {
 			continue
 		}
-		manifest, path, err := s.readManifest(name, version)
+		manifest, path, err := s.readManifestInDir(name, version, dir)
 		if err != nil {
 			continue
 		}
-		installed = append(installed, InstalledSkill{Name: name, Version: version, Path: path, Current: true, Manifest: manifest})
+		displayName := canonicalSkillName(name)
+		if strings.TrimSpace(manifest.Name) != "" {
+			displayName = canonicalSkillName(manifest.Name)
+		}
+		skill := InstalledSkill{Name: displayName, Version: version, Path: path, Current: true, Manifest: manifest}
+		if existing, ok := installedByName[displayName]; !ok || preferInstalledDirectory(displayName, name, dirByName[displayName], skill, existing) {
+			installedByName[displayName] = skill
+			dirByName[displayName] = name
+		}
+	}
+	installed := make([]InstalledSkill, 0, len(installedByName))
+	for _, skill := range installedByName {
+		installed = append(installed, skill)
 	}
 	sort.Slice(installed, func(i, j int) bool { return installed[i].Name < installed[j].Name })
 	return installed, nil
@@ -390,6 +404,7 @@ func (s *Service) RollbackSkill(name, targetVersion string) (RollbackResult, err
 }
 
 func (s *Service) UninstallSkill(name string, allVersions bool) (UninstallResult, error) {
+	canonicalName := canonicalSkillName(name)
 	var result UninstallResult
 	err := s.withMutationLock(func() error {
 		current, err := s.currentVersion(name)
@@ -414,7 +429,7 @@ func (s *Service) UninstallSkill(name string, allVersions bool) (UninstallResult
 			return err
 		}
 		if len(remaining) == 0 {
-			if err := os.RemoveAll(filepath.Join(s.Paths.SkillsDir, normalizeName(name))); err != nil {
+			if err := os.RemoveAll(s.skillDir(name)); err != nil {
 				return err
 			}
 		} else {
@@ -426,7 +441,7 @@ func (s *Service) UninstallSkill(name string, allVersions bool) (UninstallResult
 				return err
 			}
 		}
-		result = UninstallResult{Name: normalizeName(name), RemovedVersions: targets, Status: "uninstalled"}
+		result = UninstallResult{Name: canonicalName, RemovedVersions: targets, Status: "uninstalled"}
 		return nil
 	})
 	return result, err
@@ -448,11 +463,11 @@ func (s *Service) PlanUninstall(name string, allVersions bool) (MutationPlan, er
 	return MutationPlan{
 		Action: "uninstall",
 		Changes: []PlannedChange{{
-			Name:           normalizeName(name),
+			Name:           canonicalSkillName(name),
 			CurrentVersion: current,
 			TargetVersion:  target,
 			Status:         "uninstall",
-			Path:           filepath.Join(s.Paths.SkillsDir, normalizeName(name)),
+			Path:           s.skillDir(name),
 		}},
 	}, nil
 }
@@ -490,7 +505,7 @@ func (s *Service) PlanRollback(name, targetVersion string) (MutationPlan, error)
 	return MutationPlan{
 		Action: "rollback",
 		Changes: []PlannedChange{{
-			Name:           normalizeName(name),
+			Name:           canonicalSkillName(name),
 			CurrentVersion: current,
 			TargetVersion:  targetVersion,
 			Status:         "rollback",
@@ -733,6 +748,24 @@ func (s *Service) currentVersion(name string) (string, error) {
 		}
 		return "", err
 	}
+	return parseCurrentVersion(name, data)
+}
+
+func (s *Service) currentVersionInDir(name, dir string) (string, error) {
+	if err := validateSkillName(name); err != nil {
+		return "", err
+	}
+	data, err := readFileLimited(filepath.Join(dir, "current"), defaultCurrentMaxBytes, "current pointer")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", NewError(CodeNotInstalled, "skill is not installed", map[string]any{"skill": name})
+		}
+		return "", err
+	}
+	return parseCurrentVersion(name, data)
+}
+
+func parseCurrentVersion(name string, data []byte) (string, error) {
 	version := strings.TrimSpace(string(data))
 	if version == "" {
 		return "", NewError(CodeNotInstalled, "skill has no current version", map[string]any{"skill": name})
@@ -747,7 +780,7 @@ func (s *Service) installedVersions(name string) ([]string, error) {
 	if err := validateSkillName(name); err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(s.Paths.SkillsDir, normalizeName(name))
+	dir := s.skillDir(name)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -771,7 +804,11 @@ func (s *Service) installedVersions(name string) ([]string, error) {
 }
 
 func (s *Service) readManifest(name, version string) (SkillManifest, string, error) {
-	versionDir := s.versionDir(name, version)
+	return s.readManifestInDir(name, version, s.skillDir(name))
+}
+
+func (s *Service) readManifestInDir(name, version, dir string) (SkillManifest, string, error) {
+	versionDir := filepath.Join(dir, version)
 	if err := validateSkillName(name); err != nil {
 		return SkillManifest{}, versionDir, err
 	}
@@ -806,8 +843,8 @@ func decodeJSONStrict(data []byte, value any) error {
 }
 
 func validateInstalledManifestIdentity(name, version string, manifest SkillManifest) error {
-	if normalizeName(manifest.Name) != normalizeName(name) {
-		return NewError(CodeIntegrityFailed, "installed skill manifest name does not match install directory", map[string]any{"expected": normalizeName(name), "actual": manifest.Name})
+	if canonicalSkillName(manifest.Name) != canonicalSkillName(name) {
+		return NewError(CodeIntegrityFailed, "installed skill manifest name does not match install directory", map[string]any{"expected": canonicalSkillName(name), "actual": manifest.Name})
 	}
 	if manifest.Version != version {
 		return NewError(CodeIntegrityFailed, "installed skill manifest version does not match current pointer", map[string]any{"expected": version, "actual": manifest.Version})
@@ -816,11 +853,49 @@ func validateInstalledManifestIdentity(name, version string, manifest SkillManif
 }
 
 func (s *Service) currentPath(name string) string {
-	return filepath.Join(s.Paths.SkillsDir, normalizeName(name), "current")
+	return filepath.Join(s.skillDir(name), "current")
 }
 
 func (s *Service) versionDir(name, version string) string {
-	return filepath.Join(s.Paths.SkillsDir, normalizeName(name), version)
+	return filepath.Join(s.skillDir(name), version)
+}
+
+func (s *Service) skillDir(name string) string {
+	canonical := canonicalSkillName(name)
+	canonicalDir := filepath.Join(s.Paths.SkillsDir, canonical)
+	if _, err := os.Stat(canonicalDir); err == nil {
+		return canonicalDir
+	}
+	for _, alias := range legacySkillNames(canonical) {
+		legacyDir := filepath.Join(s.Paths.SkillsDir, alias)
+		if _, err := os.Stat(legacyDir); err == nil {
+			return legacyDir
+		}
+	}
+	return canonicalDir
+}
+
+func (s *Service) directSkillDir(name string) string {
+	return filepath.Join(s.Paths.SkillsDir, normalizeName(name))
+}
+
+func legacySkillNames(canonical string) []string {
+	switch canonicalSkillName(canonical) {
+	case deepResearchSkillName:
+		return []string{"research"}
+	default:
+		return nil
+	}
+}
+
+func preferInstalledDirectory(canonicalName, candidateDir, existingDir string, candidate, existing InstalledSkill) bool {
+	if normalizeName(candidateDir) == canonicalName && normalizeName(existingDir) != canonicalName {
+		return true
+	}
+	if normalizeName(candidateDir) != canonicalName && normalizeName(existingDir) == canonicalName {
+		return false
+	}
+	return compareVersion(existing.Version, candidate.Version) < 0
 }
 
 func validateSkillName(name string) error {

@@ -78,7 +78,7 @@ agtx pro status --json
 Long-running tasks should use `--ndjson`:
 
 ```sh
-agtx run research --input task.json --ndjson
+agtx run deep_research --input task.json --ndjson
 ```
 
 Do not pass `--json` and `--ndjson` together. If initialization or input reading fails before a run starts, `--ndjson` still emits a single `failed` event instead of falling back to plain stderr.

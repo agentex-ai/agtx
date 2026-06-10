@@ -48,6 +48,50 @@ func TestInstallListAndRunStub(t *testing.T) {
 	}
 }
 
+func TestDeepResearchReadsLegacyResearchInstallDirectory(t *testing.T) {
+	service := NewService(PathsForRoot(t.TempDir()))
+	manifest, ok := DefaultRegistry().Find(deepResearchSkillName)
+	if !ok {
+		t.Fatal("default deep_research skill missing")
+	}
+	manifest.Name = "research"
+	versionDir := filepath.Join(service.Paths.SkillsDir, "research", manifest.Version)
+	if err := os.MkdirAll(versionDir, 0o755); err != nil {
+		t.Fatalf("create legacy install dir: %v", err)
+	}
+	manifestData, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(versionDir, "manifest.json"), manifestData, 0o644); err != nil {
+		t.Fatalf("write legacy manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(service.Paths.SkillsDir, "research", "current"), []byte(manifest.Version+"\n"), 0o644); err != nil {
+		t.Fatalf("write legacy current pointer: %v", err)
+	}
+
+	installed, err := service.ListInstalled()
+	if err != nil {
+		t.Fatalf("list installed: %v", err)
+	}
+	if len(installed) != 1 || installed[0].Name != deepResearchSkillName || installed[0].Manifest.Name != "research" {
+		t.Fatalf("expected legacy research install to list as deep_research: %#v", installed)
+	}
+	if !strings.Contains(installed[0].Path, filepath.Join("skills", "research")) {
+		t.Fatalf("expected legacy install path, got %q", installed[0].Path)
+	}
+	result, err := service.VerifySkill(deepResearchSkillName)
+	if err != nil {
+		t.Fatalf("verify legacy install through canonical name: %v result=%#v", err, result)
+	}
+	if !result.OK || result.Name != deepResearchSkillName || result.Version != manifest.Version {
+		t.Fatalf("unexpected verify result: %#v", result)
+	}
+	if _, err := service.RunSkill(context.Background(), deepResearchSkillName, nil, nil); !IsErrorCode(err, CodeNotImplemented) {
+		t.Fatalf("expected legacy install to run as stub through canonical name, got %v", err)
+	}
+}
+
 func TestRollbackToInstalledVersion(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
 	if _, err := service.InstallSkills(context.Background(), []string{"pdf"}); err != nil {
