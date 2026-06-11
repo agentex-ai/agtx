@@ -602,13 +602,93 @@ func runRegistry(ctx context.Context, service *core.Service, args []string, stdo
 			fmt.Fprintf(stdout, "warning: %s\n", warning)
 		}
 		return 0
+	case "status":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		known := flagSet(registryStatusFlags())
+		path := takeStringFlag(&rest, "--file", "", known)
+		platformsValue := takeStringFlag(&rest, "--platforms", "", known)
+		accountsValue := takeStringFlag(&rest, "--accounts", "", known)
+		if hasInternalInvalidFlag(rest) {
+			return fail(stdout, stderr, jsonOut, internalFlagError(rest, registryStatusFlags()))
+		}
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected registry status arguments", rest, registryStatusFlags()))
+		}
+		options := core.RegistryImplementationStatusOptions{Platforms: splitListFlag(platformsValue), Accounts: splitListFlag(accountsValue)}
+		var result core.RegistryImplementationStatus
+		var err error
+		if strings.TrimSpace(path) != "" {
+			result, err = core.BuildRegistryImplementationStatusForFile(path, options)
+		} else {
+			result, err = core.BuildRegistryImplementationStatus(service.Registry, options)
+		}
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(result, nil), 0)
+		}
+		printRegistryImplementationStatus(stdout, result)
+		return 0
+	case "demo-release":
+		rest := args[1:]
+		jsonOut := takeBoolFlag(&rest, "--json", "")
+		known := flagSet(registryDemoReleaseFlags())
+		outDir := takeStringFlag(&rest, "--out", "", known)
+		baseURL := takeStringFlag(&rest, "--base-url", "", known)
+		version := takeStringFlag(&rest, "--version", "", known)
+		packagePrefix := takeStringFlag(&rest, "--package-prefix", "", known)
+		skillsValue := takeStringFlag(&rest, "--skills", "", known)
+		platformsValue := takeStringFlag(&rest, "--platforms", "", known)
+		accountsValue := takeStringFlag(&rest, "--accounts", "", known)
+		if hasInternalInvalidFlag(rest) {
+			return fail(stdout, stderr, jsonOut, internalFlagError(rest, registryDemoReleaseFlags()))
+		}
+		if len(rest) > 0 {
+			return fail(stdout, stderr, jsonOut, unexpectedArgumentsError("unexpected registry demo-release arguments", rest, registryDemoReleaseFlags()))
+		}
+		result, err := core.CreateDemoRelease(core.DemoReleaseOptions{
+			OutDir:        outDir,
+			BaseURL:       baseURL,
+			Version:       version,
+			PackagePrefix: packagePrefix,
+			Skills:        splitListFlag(skillsValue),
+			Platforms:     splitListFlag(platformsValue),
+			Accounts:      splitListFlag(accountsValue),
+		})
+		if err != nil {
+			return fail(stdout, stderr, jsonOut, err)
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(result, nil), 0)
+		}
+		fmt.Fprintf(stdout, "registry: %s\n", result.RegistryPath)
+		for _, registry := range result.Registries {
+			fmt.Fprintf(stdout, "registry_%s: %s\n", registry.AccountMode, registry.Path)
+		}
+		for _, pkg := range result.Packages {
+			fmt.Fprintf(stdout, "package: %s\t%s\t%s\n", pkg.Skill, pkg.Key, pkg.Path)
+		}
+		for _, hint := range result.UploadHints {
+			fmt.Fprintf(stdout, "upload: %s\n", hint)
+		}
+		return 0
 	default:
 		return fail(stdout, stderr, jsonOut, core.NewError(core.CodeInvalidArgument, "unknown registry subcommand", map[string]any{"subcommand": args[0], "supported_subcommands": registrySubcommands()}))
 	}
 }
 
 func registrySubcommands() []string {
-	return []string{"sources", "refresh", "validate"}
+	return []string{"sources", "refresh", "validate", "status", "demo-release"}
+}
+
+func registryStatusFlags() []string {
+	return []string{"--json", "--file", "--platforms", "--accounts"}
+}
+
+func registryDemoReleaseFlags() []string {
+	return []string{"--json", "--out", "--base-url", "--version", "--package-prefix", "--skills", "--platforms", "--accounts"}
 }
 
 func runCommerce(ctx context.Context, service *core.Service, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -1574,6 +1654,32 @@ func printPlan(stdout io.Writer, plan core.MutationPlan) {
 	}
 }
 
+func printRegistryImplementationStatus(stdout io.Writer, status core.RegistryImplementationStatus) {
+	if status.Source != "" {
+		fmt.Fprintf(stdout, "registry: %s\n", status.Source)
+	}
+	fmt.Fprintf(stdout, "skills: %d\nimplemented: %d\npartial: %d\nstub: %d\nincomplete: %d\n", status.Total, status.Implemented, status.Partial, status.Stub, status.Incomplete)
+	if len(status.RequestedPlatforms) > 0 {
+		fmt.Fprintf(stdout, "platforms: %s\n", strings.Join(status.RequestedPlatforms, ","))
+	}
+	if len(status.AccountModes) > 0 {
+		fmt.Fprintf(stdout, "accounts: %s\n", strings.Join(status.AccountModes, ","))
+	}
+	for _, coverage := range status.PlatformCoverage {
+		fmt.Fprintf(stdout, "platform\t%s\timplemented=%d\tstub=%d\tincomplete=%d\tmissing=%d\n", coverage.Platform, coverage.Implemented, coverage.Stub, coverage.Incomplete, coverage.Missing)
+	}
+	for _, skill := range status.Skills {
+		fmt.Fprintf(stdout, "%s\t%s\t%s", skill.Name, skill.Version, skill.Status)
+		if len(skill.RunnablePlatforms) > 0 {
+			fmt.Fprintf(stdout, "\trunnable=%s", strings.Join(skill.RunnablePlatforms, ","))
+		}
+		if len(skill.MissingPlatforms) > 0 {
+			fmt.Fprintf(stdout, "\tmissing_platforms=%s", strings.Join(skill.MissingPlatforms, ","))
+		}
+		fmt.Fprintln(stdout)
+	}
+}
+
 func printCapabilityPacks(stdout io.Writer, packs []core.CapabilityPackView) {
 	if len(packs) == 0 {
 		fmt.Fprintln(stdout, "No capability packs found.")
@@ -2027,6 +2133,16 @@ func takeStringFlag(args *[]string, name, fallback string, knownFlags map[string
 	return result
 }
 
+func splitListFlag(value string) []string {
+	var out []string
+	for _, item := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ';' || r == ' ' }) {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
 func hasFlag(args []string, name string) bool {
 	for _, arg := range args {
 		if arg == name || strings.HasPrefix(arg, name+"=") {
@@ -2200,6 +2316,8 @@ Usage:
   agtx verify <skill> [--json]
   agtx config init|show|path|keys|set|unset [--json]
   agtx registry sources|refresh|validate [--json]
+  agtx registry status [--file path] [--platforms os/arch,csv] [--accounts normal,pro] [--json]
+  agtx registry demo-release --out dir [--skills csv|all] [--platforms os/arch,csv] [--accounts normal,pro] [--base-url url] [--json]
   agtx commerce packs [--json]
   agtx commerce scenarios [--scenario-id id] [--pack-id id] [--json]
   agtx commerce install-pack <pack> [--plan] [--yes] [--json]

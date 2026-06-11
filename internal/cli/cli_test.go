@@ -498,6 +498,80 @@ func TestConfigSetUnsetAndRegistryValidate(t *testing.T) {
 	}
 }
 
+func TestRegistryDemoReleaseCLIProducesNonStubRegistry(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", filepath.Join(root, "home"))
+	releaseDir := filepath.Join(root, "release")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{
+		"registry", "demo-release",
+		"--out", releaseDir,
+		"--skills", "pdf",
+		"--platforms", "windows/amd64",
+		"--accounts", "normal,pro",
+		"--json",
+	}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("demo release failed with code %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var response struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			RegistryPath string `json:"registry_path"`
+			Packages     []struct {
+				Skill string `json:"skill"`
+				Path  string `json:"path"`
+			} `json:"packages"`
+			Registry struct {
+				Skills []struct {
+					Name string `json:"name"`
+					Stub bool   `json:"stub"`
+				} `json:"skills"`
+			} `json:"registry"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid demo release json: %v\n%s", err, stdout.String())
+	}
+	if !response.OK || response.Data.RegistryPath == "" || len(response.Data.Packages) != 1 || len(response.Data.Registry.Skills) != 1 {
+		t.Fatalf("unexpected demo release response: %s", stdout.String())
+	}
+	if response.Data.Registry.Skills[0].Name != "pdf" || response.Data.Registry.Skills[0].Stub {
+		t.Fatalf("expected non-stub pdf registry skill: %#v", response.Data.Registry.Skills[0])
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"registry", "validate", response.Data.RegistryPath, "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 || !bytes.Contains(stdout.Bytes(), []byte(`"ok": true`)) {
+		t.Fatalf("validate generated registry failed code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"registry", "status", "--file", response.Data.RegistryPath, "--platforms", "windows/amd64", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("registry status failed code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var statusResponse struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Total       int `json:"total"`
+			Implemented int `json:"implemented"`
+			Stub        int `json:"stub"`
+			Skills      []struct {
+				Name   string `json:"name"`
+				Status string `json:"status"`
+			} `json:"skills"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &statusResponse); err != nil {
+		t.Fatalf("invalid registry status json: %v\n%s", err, stdout.String())
+	}
+	if !statusResponse.OK || statusResponse.Data.Total != 1 || statusResponse.Data.Implemented != 1 || statusResponse.Data.Stub != 0 || len(statusResponse.Data.Skills) != 1 || statusResponse.Data.Skills[0].Status != "implemented" {
+		t.Fatalf("unexpected registry status: %s", stdout.String())
+	}
+}
+
 func TestArgumentCountErrorsIncludeExpectedArgs(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -2050,6 +2124,8 @@ func TestDiscoveryHelperListsAreStable(t *testing.T) {
 		"commerce submit flags":    commerceSubmitProofFlags(),
 		"commerce snapshot flags":  commerceSnapshotFlags(),
 		"commerce serve flags":     commerceServeFlags(),
+		"registry status flags":    registryStatusFlags(),
+		"registry demo flags":      registryDemoReleaseFlags(),
 		"agent init flags":         agentInitFlags(),
 		"json only flags":          jsonOnlyFlags(),
 	}

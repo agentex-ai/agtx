@@ -166,6 +166,89 @@ func TestInstallLocalZipPackageAndRun(t *testing.T) {
 	}
 }
 
+func TestCreateDemoReleaseProducesInstallableNonStubPackage(t *testing.T) {
+	root := t.TempDir()
+	release, err := CreateDemoRelease(DemoReleaseOptions{
+		OutDir:    filepath.Join(root, "release"),
+		Skills:    []string{"pdf"},
+		Platforms: []string{runtime.GOOS + "/" + runtime.GOARCH},
+		Accounts:  []string{"normal,pro"},
+		Version:   "1.2.3-demo",
+	})
+	if err != nil {
+		t.Fatalf("create demo release: %v", err)
+	}
+	if len(release.Packages) != 1 || len(release.Registries) != 2 || len(release.Registry.Skills) != 1 {
+		t.Fatalf("unexpected demo release: %#v", release)
+	}
+	if release.Registry.Skills[0].Stub || release.Registry.Skills[0].Platforms[0].Entrypoint == "" {
+		t.Fatalf("expected non-stub registry entry: %#v", release.Registry.Skills[0])
+	}
+	for _, registry := range release.Registries {
+		validation, err := ValidateRegistryFile(registry.Path)
+		if err != nil || !validation.OK || validation.Skills != 1 {
+			t.Fatalf("generated registry invalid account=%s validation=%#v err=%v", registry.AccountMode, validation, err)
+		}
+	}
+
+	service := NewService(PathsForRoot(filepath.Join(root, "home")))
+	service.Registry = release.Registry
+	results, err := service.InstallSkills(context.Background(), []string{"pdf"})
+	if err != nil {
+		t.Fatalf("install demo release package: %v", err)
+	}
+	if len(results) != 1 || results[0].Stub {
+		t.Fatalf("expected non-stub install result: %#v", results)
+	}
+	run, err := service.RunSkill(context.Background(), "pdf", []string{"hello"}, nil)
+	if err != nil {
+		t.Fatalf("run demo release package: %v result=%#v", err, run)
+	}
+	if run.ExitCode != 0 || !strings.Contains(run.Stdout, `"demo":true`) || !strings.Contains(run.Stdout, `"skill":"pdf"`) {
+		t.Fatalf("unexpected demo stdout: %#v", run)
+	}
+}
+
+func TestRegistryImplementationStatusReportsDefaultStubs(t *testing.T) {
+	status, err := BuildRegistryImplementationStatus(DefaultRegistry(), RegistryImplementationStatusOptions{
+		Platforms: []string{"windows/amd64", "darwin/arm64"},
+		Accounts:  []string{"normal,pro"},
+	})
+	if err != nil {
+		t.Fatalf("build status: %v", err)
+	}
+	if status.Total != 10 || status.Implemented != 0 || status.Partial != 0 || status.Stub != 10 || status.Incomplete != 0 {
+		t.Fatalf("unexpected implementation totals: %#v", status)
+	}
+	if len(status.Missing) != 10 || !containsString(status.Missing, "pdf") || !containsString(status.Missing, "ocr") {
+		t.Fatalf("expected default skills to be missing native packages: %#v", status.Missing)
+	}
+	if len(status.PlatformCoverage) != 2 || status.PlatformCoverage[0].Stub != 10 || status.PlatformCoverage[1].Stub != 10 {
+		t.Fatalf("unexpected platform coverage: %#v", status.PlatformCoverage)
+	}
+}
+
+func TestRegistryImplementationStatusReportsPartialPlatformCoverage(t *testing.T) {
+	release, err := CreateDemoRelease(DemoReleaseOptions{
+		OutDir:    filepath.Join(t.TempDir(), "release"),
+		Skills:    []string{"pdf"},
+		Platforms: []string{"windows/amd64"},
+	})
+	if err != nil {
+		t.Fatalf("create release: %v", err)
+	}
+	status, err := BuildRegistryImplementationStatus(release.Registry, RegistryImplementationStatusOptions{Platforms: []string{"windows/amd64", "darwin/arm64"}})
+	if err != nil {
+		t.Fatalf("build status: %v", err)
+	}
+	if status.Total != 1 || status.Implemented != 0 || status.Partial != 1 || status.Stub != 0 || len(status.Missing) != 1 || status.Missing[0] != "pdf" {
+		t.Fatalf("expected partial platform coverage: %#v", status)
+	}
+	if len(status.Skills) != 1 || status.Skills[0].Status != "partial" || !containsString(status.Skills[0].MissingPlatforms, "darwin/arm64") {
+		t.Fatalf("expected partial pdf status: %#v", status.Skills)
+	}
+}
+
 func TestInstallInfersArchiveTypeWithURLQuery(t *testing.T) {
 	root := t.TempDir()
 	entrypoint := "echo.sh"
@@ -1715,4 +1798,13 @@ func normalizeTestOutputLines(value string) string {
 	value = strings.ReplaceAll(value, "\r\n", "\n")
 	value = strings.ReplaceAll(value, "\r", "\n")
 	return strings.TrimSpace(value)
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
