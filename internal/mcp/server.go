@@ -1757,9 +1757,23 @@ func skillManifestSchema() map[string]any {
 			"attribution":    attributionInfoSchema(),
 			"support":        supportInfoSchema(),
 			"signature":      signatureInfoSchema(),
+			"builtin":        builtinInfoSchema(),
 			"stub":           booleanSchema("Whether the skill is currently a stub package."),
 		},
 		[]string{"name", "version"},
+		nil,
+	)
+}
+
+func builtinInfoSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"runtime":        stringSchema("Built-in runtime identifier provided by agtx."),
+			"backends":       stringArraySchema("Native inference backends supported by the built-in runtime.", false),
+			"model_profiles": stringArraySchema("Model profiles supported by the built-in runtime.", false),
+			"no_python":      booleanSchema("Whether this built-in runtime avoids Python and NPM runtimes."),
+		},
+		nil,
 		nil,
 	)
 }

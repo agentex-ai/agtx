@@ -135,11 +135,11 @@ orchestration bundles. They may reference skills from one or more commerce
 packs, but they do not define billing by themselves.
 
 The built-in pack catalog mirrors the first-wave packs shown on `agentex.cc`:
-`web_search`, `web_fetch`, `deep_research`, `ocr`, `audio`, `imagen`, `docx`,
-`xlsx`, `pptx`, and `pdf`. The registry-compatible `documents` pack groups the
-four native document packs. The `standard` and `advanced` packs remain ordinary
-and advanced bundles for users who want one install action to provision a whole
-working set.
+`web_search`, `web_fetch`, `deep_research`, `ocr` (aliases: `rapidocr`,
+`ppocrv6`), `audio`, `imagen`, `docx`, `xlsx`, `pptx`, and `pdf`. The
+registry-compatible `documents` pack groups the four native document packs. The
+`standard` and `advanced` packs remain ordinary and advanced bundles for users
+who want one install action to provision a whole working set.
 
 Billing, revenue share, and CPA/CPS attribution stay in the Capability Commerce
 Standard under `docs/standards/`. A task-level capability bundle should carry

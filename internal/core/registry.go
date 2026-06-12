@@ -12,7 +12,7 @@ func DefaultRegistry() Registry {
 			defaultSkill("web_search", "0.1.0", "Web search", "Discover pages and return ranked candidate results for agents and human workflows.", []string{"web", "search", "internet"}, []string{"search", "web", "web_query", "internet", "browser", "discover", "query", "搜索", "网页", "互联网", "查找"}, []string{"call"}),
 			defaultSkill("web_fetch", "0.1.0", "Web fetch", "Fetch web pages, extract readable text, and return metadata when a page is accessible.", []string{"web", "fetch", "reader"}, []string{"fetch", "read", "web_query", "article", "url", "html", "page", "webpage", "读取", "网页", "正文", "链接", "抓取"}, []string{"page", "call"}),
 			defaultSkill(deepResearchSkillName, "0.1.0", "Deep research workflow", "Collect evidence, synthesize findings, and produce structured research notes.", []string{"research", "analysis", "report"}, []string{"deep_research", "research", "report", "analysis", "evidence", "compare", "调研", "研究", "报告", "分析", "证据"}, []string{"task"}),
-			defaultSkill("ocr", "0.1.0", "OCR", "Extract text and coordinates from screenshots, scans, images, and PDF pages.", []string{"vision", "ocr", "image"}, []string{"ocr", "image", "screenshot", "scan", "text", "vision", "图片", "截图", "扫描", "文字", "识别"}, []string{"page"}),
+			defaultOCRSkill(),
 			defaultSkill("audio", "0.1.0", "Audio ASR/TTS", "Handle speech recognition, speech synthesis, and batch audio processing tasks.", []string{"audio", "asr", "tts"}, []string{"audio", "speech", "transcribe", "voice", "meeting", "notes", "录音", "语音", "转写", "会议", "纪要"}, []string{"minute"}),
 			defaultSkill("imagen", "0.1.0", "Media generation", "Expose image and media generation workflows through a lightweight skill entry.", []string{"image", "media", "generation"}, []string{"image", "generate", "mediagen", "media", "picture", "video", "creator", "图片", "生成", "绘图", "视频", "创作"}, []string{"task", "credit"}),
 			defaultSkill("docx", "0.1.0", "Word document", "Read, summarize, and extract structured content from Word documents.", []string{"document", "docx", "word"}, []string{"docx", "word", "document", "summary", "summarize", "contract", "文档", "Word", "摘要", "总结", "合同"}, []string{"task"}),
@@ -21,6 +21,168 @@ func DefaultRegistry() Registry {
 			defaultSkill("pdf", "0.1.0", "PDF", "Extract text, split pages, prepare OCR fallback, and index PDF documents.", []string{"document", "pdf"}, []string{"pdf", "paper", "ebook", "bill", "invoice", "summary", "summarize", "PDF", "论文", "账单", "发票", "摘要"}, []string{"page"}),
 		},
 	}
+}
+
+func defaultOCRSkill() SkillManifest {
+	skill := defaultSkill(
+		"ocr",
+		"0.6.0",
+		"RapidOCR OCR",
+		"Extract text, layout, coordinates, and confidence from screenshots, scans, images, and PDF pages with RapidOCR-compatible PP-OCRv6 profiles.",
+		[]string{"vision", "ocr", "image", "rapidocr", "ppocrv6", "documents"},
+		[]string{"ocr", "rapidocr", "rapid_ocr", "ppocr", "ppocrv6", "pp-ocrv6", "paddleocr", "paddle_ocr", "image", "screenshot", "scan", "text", "vision", "layout", "coordinates", "confidence", "图片", "截图", "扫描", "文字", "识别"},
+		[]string{"page"},
+	)
+	skill.InputSchema = map[string]any{
+		"type":                 "object",
+		"description":          "RapidOCR-compatible OCR input for the built-in native OCR runtime.",
+		"additionalProperties": true,
+		"properties": map[string]any{
+			"input": map[string]any{
+				"type":        "string",
+				"description": "Image, PDF page, local path, or URL accepted by the installed OCR package.",
+			},
+			"model_profile": map[string]any{
+				"type":        "string",
+				"description": "Preferred OCR model family. Native packages should prefer ppocrv6 when available and fall back explicitly when not.",
+				"enum":        []string{"auto", "ppocrv6", "ppocrv5", "ppocrv4"},
+				"default":     "ppocrv6",
+			},
+			"model_size": map[string]any{
+				"type":        "string",
+				"description": "PP-OCRv6 ONNX asset size used by the built-in model downloader.",
+				"enum":        []string{"auto", "tiny", "small", "medium"},
+				"default":     "tiny",
+			},
+			"backend": map[string]any{
+				"type":        "string",
+				"description": "Native built-in OCR inference backend. Python and NPM engines are not used.",
+				"enum":        []string{"auto", "onnxruntime", "ncnn"},
+				"default":     "auto",
+			},
+			"det_model": map[string]any{
+				"type":        "string",
+				"description": "Optional local detector model override, absolute or relative to the OCR model directory.",
+			},
+			"rec_model": map[string]any{
+				"type":        "string",
+				"description": "Optional local recognizer model override, absolute or relative to the OCR model directory.",
+			},
+			"keys": map[string]any{
+				"type":        "string",
+				"description": "Optional recognition keys dictionary override, absolute or relative to the OCR model directory.",
+			},
+			"det_limit_side_len": map[string]any{
+				"type":        "integer",
+				"description": "Detector resize side limit used by the native OCR path.",
+				"default":     736,
+			},
+			"det_threshold": map[string]any{
+				"type":        "number",
+				"description": "Detector binary map threshold.",
+				"default":     0.3,
+			},
+			"box_threshold": map[string]any{
+				"type":        "number",
+				"description": "Minimum average score for a detected text box.",
+				"default":     0.5,
+			},
+			"unclip_ratio": map[string]any{
+				"type":        "number",
+				"description": "Expansion ratio for detector boxes before recognition crops.",
+				"default":     1.6,
+			},
+			"max_candidates": map[string]any{
+				"type":        "integer",
+				"description": "Maximum detector boxes to send to recognition.",
+				"default":     1000,
+			},
+			"text_score": map[string]any{
+				"type":        "number",
+				"description": "Minimum recognizer confidence for returned text lines.",
+				"default":     0.5,
+			},
+			"language_hints": map[string]any{
+				"type":        "array",
+				"description": "Optional language hints such as ch, en, latin, korean, arabic, or cyrillic.",
+				"items":       map[string]any{"type": "string"},
+			},
+			"return_layout": map[string]any{
+				"type":        "boolean",
+				"description": "Return detected text boxes, confidence, and reading order when supported.",
+			},
+			"return_markdown": map[string]any{
+				"type":        "boolean",
+				"description": "Return markdown-friendly text when supported.",
+			},
+		},
+	}
+	skill.OutputSchema = map[string]any{
+		"type":        "object",
+		"description": "RapidOCR-compatible OCR result.",
+		"properties": map[string]any{
+			"text": map[string]any{
+				"type":        "string",
+				"description": "Plain recognized text.",
+			},
+			"markdown": map[string]any{
+				"type":        "string",
+				"description": "Markdown-oriented text when requested and supported.",
+			},
+			"model_profile": map[string]any{
+				"type":        "string",
+				"description": "OCR model profile actually used, such as ppocrv6 or a documented fallback.",
+			},
+			"engine": map[string]any{
+				"type":        "string",
+				"description": "Inference engine actually used.",
+			},
+			"detected_boxes": map[string]any{
+				"type":        "integer",
+				"description": "Number of text boxes detected before recognition filtering.",
+			},
+			"processed_boxes": map[string]any{
+				"type":        "integer",
+				"description": "Number of detected boxes sent to the recognizer.",
+			},
+			"lines": map[string]any{
+				"type":        "array",
+				"description": "Recognized text lines with optional layout metadata.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"text":                 map[string]any{"type": "string"},
+						"confidence":           map[string]any{"type": "number"},
+						"detection_confidence": map[string]any{"type": "number"},
+						"bbox": map[string]any{
+							"type":        "array",
+							"description": "Bounding polygon or rectangle coordinates.",
+							"items":       map[string]any{"type": "number"},
+						},
+						"page": map[string]any{"type": "integer"},
+					},
+				},
+			},
+			"pages": map[string]any{
+				"type":        "array",
+				"description": "Per-page text and layout summaries for multi-page inputs.",
+				"items":       map[string]any{"type": "object"},
+			},
+			"warnings": map[string]any{
+				"type":        "array",
+				"description": "Fallbacks, unsupported options, or quality warnings.",
+				"items":       map[string]any{"type": "string"},
+			},
+		},
+	}
+	skill.Builtin = &BuiltinInfo{
+		Runtime:       "agtx-native-ocr-v1",
+		Backends:      []string{"onnxruntime", "ncnn"},
+		ModelProfiles: []string{"ppocrv6", "ppocrv5", "ppocrv4"},
+		NoPython:      true,
+	}
+	skill.Stub = false
+	return skill
 }
 
 func defaultSkill(name, version, summary, description string, tags, keywords, meters []string) SkillManifest {
@@ -222,6 +384,8 @@ func canonicalSkillName(value string) string {
 	switch normalized {
 	case "research":
 		return deepResearchSkillName
+	case "rapidocr", "rapid_ocr", "rapidocr_v6", "rapid_ocr_v6", "paddleocr", "paddle_ocr", "ppocr", "pp_ocr", "ppocrv6", "pp_ocrv6", "pp_ocr_v6", "ocr_v6":
+		return "ocr"
 	default:
 		return normalized
 	}
@@ -231,6 +395,8 @@ func skillAliases(skill SkillManifest) []string {
 	switch normalizeName(skill.Name) {
 	case deepResearchSkillName:
 		return []string{"research"}
+	case "ocr":
+		return []string{"rapidocr", "rapid_ocr", "rapidocr_v6", "paddleocr", "paddle_ocr", "ppocr", "pp_ocr", "ppocrv6", "pp_ocrv6", "pp_ocr_v6", "ocr_v6"}
 	default:
 		return nil
 	}

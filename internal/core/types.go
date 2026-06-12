@@ -25,7 +25,15 @@ type SkillManifest struct {
 	Attribution   *AttributionInfo `json:"attribution,omitempty"`
 	Support       *SupportInfo     `json:"support,omitempty"`
 	Signature     *SignatureInfo   `json:"signature,omitempty"`
+	Builtin       *BuiltinInfo     `json:"builtin,omitempty"`
 	Stub          bool             `json:"stub"`
+}
+
+type BuiltinInfo struct {
+	Runtime       string   `json:"runtime,omitempty"`
+	Backends      []string `json:"backends,omitempty"`
+	ModelProfiles []string `json:"model_profiles,omitempty"`
+	NoPython      bool     `json:"no_python,omitempty"`
 }
 
 type CapabilityInfo struct {

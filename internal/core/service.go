@@ -539,6 +539,11 @@ func (s *Service) RunSkillWithOptions(ctx context.Context, name string, options 
 	}
 	version, err := s.currentVersion(name)
 	if err != nil {
+		if IsErrorCode(err, CodeNotInstalled) {
+			if manifest, ok := s.builtinRegistrySkill(name); ok {
+				return s.runBuiltinManifest(ctx, manifest, options, start)
+			}
+		}
 		return RunResult{}, err
 	}
 	manifest, versionDir, err := s.readManifest(name, version)
@@ -555,6 +560,9 @@ func (s *Service) RunSkillWithOptions(ctx context.Context, name string, options 
 	if manifest.Stub {
 		result.DurationMS = time.Since(start).Milliseconds()
 		return result, NewError(CodeNotImplemented, "skill is installed as a v1 stub; native package is not published yet", map[string]any{"skill": manifest.Name, "version": manifest.Version})
+	}
+	if manifest.Builtin != nil {
+		return s.runBuiltinManifest(ctx, manifest, options, start)
 	}
 	bundle, ok := manifest.BundleFor(runtime.GOOS, runtime.GOARCH)
 	if !ok {
@@ -576,7 +584,9 @@ func (s *Service) RunSkillWithOptions(ctx context.Context, name string, options 
 		return runResult, err
 	}
 	runResult.AttributedFiles = applyOfficeAttributionForRun(versionDir, options, runResult)
-	runResult.UsageEvents = s.recordRunUsage(ctx, manifest, runResult)
+	if builtinRunShouldBill(manifest, options) {
+		runResult.UsageEvents = s.recordRunUsage(ctx, manifest, runResult)
+	}
 	if len(runResult.UsageEvents) > 0 {
 		if err := s.withMutationLock(func() error {
 			_, err := s.appendBillingRecords(billingRecordsForUsage(manifest, runResult, runResult.UsageEvents))
@@ -617,7 +627,7 @@ func (s *Service) Status() (Status, error) {
 		RegistrySkills:  len(s.Registry.Skills),
 		RegistrySources: s.RegistrySources,
 		Installed:       len(installed),
-		DependencyMode:  "go-stdlib-first,cgo-disabled-release,no-third-party-runtime",
+		DependencyMode:  "go-stdlib-first,builtin-native-ocr,no-python-no-npm",
 		Channel:         s.Config.Channel,
 		Telemetry:       s.Config.Telemetry,
 	}, nil
@@ -642,7 +652,7 @@ func (s *Service) materializeSkill(ctx context.Context, skill SkillManifest, bun
 		}
 	}()
 
-	if !skill.Stub && bundle.URL != "" {
+	if !skill.Stub && skill.Builtin == nil && bundle.URL != "" {
 		if bundle.SHA256 == "" {
 			return NewError(CodeIntegrityFailed, "non-stub packages must declare sha256", map[string]any{"skill": skill.Name})
 		}
@@ -679,7 +689,11 @@ func (s *Service) materializeSkill(ctx context.Context, skill SkillManifest, bun
 	if err := os.WriteFile(filepath.Join(tempDir, "manifest.json"), append(manifestBytes, '\n'), 0o644); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(tempDir, "README.txt"), []byte("This skill is installed by agtx. v1 registry entries may be stubs until native packages are published.\n"), 0o644); err != nil {
+	readme := "This skill is installed by agtx. v1 registry entries may be stubs until native packages are published.\n"
+	if skill.Builtin != nil {
+		readme = "This built-in skill is provided by agtx and runs through the native in-process runtime path.\n"
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "README.txt"), []byte(readme), 0o644); err != nil {
 		return err
 	}
 

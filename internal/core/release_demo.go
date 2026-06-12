@@ -198,6 +198,7 @@ func createDemoSkillPackages(options DemoReleaseOptions, platforms []demoRelease
 	}
 	skill.Version = options.Version
 	skill.Stub = false
+	skill.Builtin = nil
 	skill.Platforms = nil
 	if skill.Signature == nil {
 		skill.Signature = &SignatureInfo{}

@@ -183,6 +183,9 @@ func validateSkillManifest(skill SkillManifest) ([]string, error) {
 	if len(skill.Platforms) == 0 {
 		warnings = append(warnings, "skill has no platforms: "+skill.Name)
 	}
+	if err := validateBuiltinInfo(skill); err != nil {
+		return warnings, err
+	}
 	for _, bundle := range skill.Platforms {
 		if err := validatePlatformBundle(skill, bundle); err != nil {
 			return warnings, err
@@ -201,6 +204,42 @@ func validateSkillManifest(skill SkillManifest) ([]string, error) {
 		return warnings, err
 	}
 	return warnings, nil
+}
+
+func validateBuiltinInfo(skill SkillManifest) error {
+	if skill.Builtin == nil {
+		return nil
+	}
+	if skill.Stub {
+		return NewError(CodeInvalidArgument, "built-in skill must not be marked as a stub", map[string]any{"skill": skill.Name})
+	}
+	if strings.TrimSpace(skill.Builtin.Runtime) == "" {
+		return NewError(CodeInvalidArgument, "built-in skill requires runtime", map[string]any{"skill": skill.Name})
+	}
+	if strings.TrimSpace(skill.Builtin.Runtime) != skill.Builtin.Runtime || strings.ContainsRune(skill.Builtin.Runtime, 0) {
+		return NewError(CodeInvalidArgument, "built-in runtime is invalid", map[string]any{"skill": skill.Name})
+	}
+	for _, backend := range skill.Builtin.Backends {
+		switch strings.TrimSpace(backend) {
+		case "onnxruntime", "ncnn":
+		default:
+			return NewError(CodeInvalidArgument, "unsupported built-in OCR backend", map[string]any{"skill": skill.Name, "backend": backend})
+		}
+		if strings.TrimSpace(backend) != backend {
+			return NewError(CodeInvalidArgument, "built-in backend must not contain leading or trailing whitespace", map[string]any{"skill": skill.Name, "backend": backend})
+		}
+	}
+	for _, profile := range skill.Builtin.ModelProfiles {
+		switch strings.TrimSpace(profile) {
+		case "ppocrv6", "ppocrv5", "ppocrv4":
+		default:
+			return NewError(CodeInvalidArgument, "unsupported built-in OCR model profile", map[string]any{"skill": skill.Name, "model_profile": profile})
+		}
+		if strings.TrimSpace(profile) != profile {
+			return NewError(CodeInvalidArgument, "built-in model profile must not contain leading or trailing whitespace", map[string]any{"skill": skill.Name, "model_profile": profile})
+		}
+	}
+	return nil
 }
 
 func validateCapabilityInfo(skill SkillManifest) error {
@@ -333,7 +372,7 @@ func validatePlatformBundle(skill SkillManifest, bundle PlatformBundle) error {
 	if err := validatePathSegment("platform arch", bundle.Arch); err != nil {
 		return err
 	}
-	if skill.Stub {
+	if skill.Stub || skill.Builtin != nil {
 		return nil
 	}
 	if strings.TrimSpace(bundle.URL) == "" {

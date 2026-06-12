@@ -90,12 +90,12 @@ func DefaultCapabilityPacks() []CapabilityPack {
 			Name:            "ocr",
 			Tier:            "first_wave",
 			CapabilityClass: "tool",
-			UseWhen:         "Extract text from screenshots, scans, PDF pages, UI images, or photos.",
-			Summary:         "Native OCR for screenshots, scans, PDF pages, and UI text, built for document work and automation.",
-			Description:     "Use when text must be recovered from image-like inputs with structure, coordinates, or confidence notes.",
-			Inputs:          []string{"image or page file", "optional language hints"},
-			Outputs:         []string{"text", "structure", "coordinates", "confidence notes"},
-			Tags:            []string{"vision", "ocr", "documents", "screenshots"},
+			UseWhen:         "Extract text from screenshots, scans, PDF pages, UI images, or photos with RapidOCR-compatible PP-OCRv6 profiles.",
+			Summary:         "RapidOCR-compatible native OCR for screenshots, scans, PDF pages, and UI text, built for document work and automation.",
+			Description:     "Use when text must be recovered from image-like inputs with structure, coordinates, confidence notes, or PP-OCRv6 model selection.",
+			Inputs:          []string{"image or page file", "optional language hints", "optional model profile such as ppocrv6", "optional engine preference"},
+			Outputs:         []string{"text", "layout structure", "coordinates", "confidence notes", "model profile used"},
+			Tags:            []string{"vision", "ocr", "rapidocr", "ppocrv6", "documents", "screenshots"},
 			SkillNames:      []string{"ocr"},
 			Billing: &BillingInfo{
 				Meters: []BillingMeter{
@@ -753,7 +753,7 @@ func capabilityPackAliases(pack CapabilityPack) []string {
 	case deepResearchSkillName:
 		return []string{"research", "analyze", "advisor", "ui_review", "diaoyan", "\u8c03\u7814", "\u7814\u7a76"}
 	case "ocr":
-		return []string{"vision", "screen_ocr", "image_text", "shibie", "\u8bc6\u522b", "\u6587\u5b57\u8bc6\u522b"}
+		return []string{"vision", "screen_ocr", "image_text", "rapidocr", "rapid_ocr", "rapidocr_v6", "paddleocr", "paddle_ocr", "ppocr", "ppocrv6", "pp_ocrv6", "shibie", "\u8bc6\u522b", "\u6587\u5b57\u8bc6\u522b"}
 	case "audio":
 		return []string{"asr", "tts", "transcribe", "speech", "yuyin", "\u97f3\u9891", "\u8bed\u97f3", "\u8f6c\u5199"}
 	case "imagen":

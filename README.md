@@ -6,7 +6,10 @@
 
 `agtx` is a macOS and Windows friendly, low-dependency native skill manager for Agentex skills.
 
-The v1 implementation is intentionally small: one Go binary, standard library first, no Python/NPM/Homebrew runtime dependency, and no third-party Go modules.
+The v1 implementation is intentionally small: one Go binary, standard library
+first, and no Python/NPM/Homebrew runtime dependency. The built-in OCR path is
+native-only and uses explicit ONNX Runtime or ncnn adapter builds instead of
+Python wrappers.
 
 ## Commands
 
@@ -79,6 +82,55 @@ On macOS, audit dynamic links before release:
 ```sh
 otool -L dist/agtx-darwin-arm64
 ```
+
+### Native OCR
+
+`rapidocr`, `ppocrv6`, and `paddleocr` resolve to the built-in `ocr` skill.
+The default binary exposes the native OCR manifest and probe path without
+linking Python or NPM. To build the optional ONNX Runtime adapter, enable cgo
+and the `ocr_onnxruntime` tag:
+
+```sh
+CGO_ENABLED=1 go build -tags ocr_onnxruntime -o dist/agtx-ocr ./cmd/agtx
+```
+
+Configure the native runtime and PP-OCR model files with environment variables
+or skill args:
+
+```sh
+set AGTX_OCR_ONNXRUNTIME_LIBRARY=C:\path\to\onnxruntime.dll
+set AGTX_OCR_MODEL_DIR=C:\path\to\ppocr-models
+agtx run rapidocr --json -- --probe
+agtx run rapidocr --json -- --download-runtime --dry-run
+agtx run rapidocr --json -- --download-runtime
+agtx run rapidocr --json -- --download-models --dry-run --model-size tiny
+agtx run rapidocr --json -- --download-models --model-size tiny
+agtx run rapidocr --json -- --det-model ppocrv6-det.onnx --rec-model ppocrv6-rec.onnx --keys keys.txt sample.png
+agtx run rapidocr --json -- --det-limit-side-len 736 --det-threshold 0.3 --box-threshold 0.5 --unclip-ratio 1.6 --text-score 0.5 sample.png
+```
+
+By default agtx looks for the ONNX Runtime shared library under
+`AGTX_OCR_RUNTIME_DIR`, beside the executable, or in the model directory's
+`runtime` subdirectory. `--download-runtime` downloads the Microsoft ONNX
+Runtime CPU archive for the current platform and extracts only the shared
+library into that runtime directory. Microsoft no longer publishes macOS Intel
+CPU archives for ONNX Runtime 1.26.0, so Intel Mac users should provide
+`AGTX_OCR_ONNXRUNTIME_LIBRARY` or explicitly select a compatible older runtime.
+agtx looks for `ppocrv6-det.onnx`, `ppocrv6-rec.onnx`, and `keys.txt` under
+`AGTX_OCR_MODEL_DIR` or the local agtx built-in OCR directory.
+For PaddlePaddle PP-OCRv6 Hugging Face exports, agtx can download `tiny`,
+`small`, or `medium` ONNX assets directly with Go's HTTP client. It also
+recognizes directories such as `PP-OCRv6_tiny_det_onnx/inference.onnx` and
+`PP-OCRv6_tiny_rec_onnx/inference.onnx`; the recognizer `inference.yml` can be
+used directly as the character dictionary source when it contains
+`PostProcess.character_dict`.
+The probe reports whether the adapter is linked, which native library is used,
+which files are missing, and the detector/recognizer ONNX input/output metadata
+when the models load. Runtime tuning follows the RapidOCR/PaddleOCR defaults:
+`det_limit_side_len=736`, `det_threshold=0.3`, `box_threshold=0.5`,
+`unclip_ratio=1.6`, `max_candidates=1000`, and `text_score=0.5`; each can be
+overridden with the matching `--kebab-case` skill argument or `AGTX_OCR_*`
+environment variable. OCR never falls back to Python, Node, or npm wrappers.
 
 ## Agent Integration
 
@@ -191,7 +243,8 @@ Website first-wave packs:
 - `web_search`: web discovery and ranked source candidates.
 - `web_fetch`: known-URL reading, article extraction, metadata, and relay fallback.
 - `deep_research` (alias: `research`): multi-step evidence gathering, synthesis, analysis, and UI review.
-- `ocr`: screenshots, scans, PDF pages, UI images, and photo text extraction.
+- `ocr` (aliases: `rapidocr`, `ppocrv6`): RapidOCR-compatible screenshots,
+  scans, PDF pages, UI images, and photo text extraction with PP-OCRv6-ready metadata.
 - `audio`: ASR, TTS, meeting notes, and batch audio jobs.
 - `imagen` (alias: `mediagen`): text-to-image, image-to-video, and media generation.
 - `docx`, `xlsx`, `pptx`, and `pdf`: native document-family packs.

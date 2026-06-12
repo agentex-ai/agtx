@@ -6,12 +6,20 @@
 
 - No Python, NPM, Homebrew, dynamic plugin host, or external service is required to run the CLI.
 - Skills are installed as native executable packages described by a manifest.
-- v1 built-in registry entries are stubs until real native skill packages are published.
+- RapidOCR/PP-OCRv6 support is exposed through the built-in `ocr` manifest and
+  aliases (`rapidocr`, `ppocrv6`). The OCR runtime path is native-only: Python
+  and NPM wrappers are not used. The default binary provides the built-in OCR
+  manifest and native probe path; optional adapter builds load ONNX Runtime or
+  ncnn model files from the configured built-in OCR model directory.
 
 ## Go Code
 
 - Standard library first.
-- No third-party Go modules in v1.
+- The default CLI build stays standard-library first; optional native OCR
+  adapter builds may use a small Go binding to a native inference runtime.
+- The `ocr_onnxruntime` build tag uses `github.com/yalue/onnxruntime_go` to
+  load `onnxruntime.dll`, `libonnxruntime.so`, or `libonnxruntime.dylib`
+  directly. This is a native runtime bridge, not a Python or NPM wrapper.
 - CLI parsing, JSON, HTTP, archive extraction, checksums, process execution, and MCP stdio are implemented with the Go standard library.
 - Registry configuration is JSON file based; no embedded database is used.
 - Config files are strictly decoded: unknown keys, `null` values, trailing JSON values, unsupported schema versions, invalid registry URLs, and non-positive numeric limits fail fast with structured `invalid_argument` errors.
@@ -40,6 +48,44 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o d
 ```
 
 `CGO_ENABLED=0` does not mean a macOS binary has no system runtime linkage. The target is no third-party dynamic libraries and no third-party runtime.
+
+Native OCR adapter builds are intentionally separate from the default release
+profile:
+
+```sh
+CGO_ENABLED=1 go build -tags ocr_onnxruntime -trimpath -ldflags "-s -w" -o dist/agtx-ocr ./cmd/agtx
+```
+
+At runtime, set `AGTX_OCR_ONNXRUNTIME_LIBRARY` or place the ONNX Runtime shared
+library next to the executable, under `AGTX_OCR_RUNTIME_DIR`, or under the OCR
+model directory's `runtime` subdirectory. `agtx run rapidocr --
+--download-runtime` downloads the Microsoft ONNX Runtime CPU archive for the
+current platform and extracts only the native shared library; add `--dry-run`
+to inspect the URL and destination first. The default runtime version is
+`1.26.0` to match the Go binding headers. Microsoft does not publish a macOS
+Intel CPU archive for ONNX Runtime 1.26.0, so Intel Mac users should point
+`AGTX_OCR_ONNXRUNTIME_LIBRARY` at a locally installed compatible library or
+explicitly select a compatible older runtime. Model files default to
+`ppocrv6-det.onnx`, `ppocrv6-rec.onnx`, and `keys.txt`, and can be overridden
+with `AGTX_OCR_DET_MODEL`, `AGTX_OCR_REC_MODEL`, and `AGTX_OCR_KEYS` or the
+matching `agtx run rapidocr --` arguments.
+For PP-OCRv6 ONNX exports from PaddlePaddle Hugging Face repositories, agtx
+recognizes `PP-OCRv6_tiny_det_onnx/inference.onnx`,
+`PP-OCRv6_tiny_rec_onnx/inference.onnx`, and the corresponding `small` and
+`medium` directories. A recognizer `inference.yml` with
+`PostProcess.character_dict` is accepted as the key dictionary, so no Python YAML
+loader is required.
+`agtx run rapidocr -- --download-models --model-size tiny|small|medium` downloads
+those ONNX assets directly with the Go standard library HTTP client; add
+`--dry-run` to inspect the asset plan without writing files.
+
+The native OCR pipeline exposes RapidOCR/PaddleOCR-style tuning without adding
+a Python runtime: `AGTX_OCR_DET_LIMIT_SIDE_LEN` (default `736`),
+`AGTX_OCR_DET_THRESHOLD` (`0.3`), `AGTX_OCR_BOX_THRESHOLD` (`0.5`),
+`AGTX_OCR_UNCLIP_RATIO` (`1.6`), `AGTX_OCR_MAX_CANDIDATES` (`1000`), and
+`AGTX_OCR_TEXT_SCORE` (`0.5`). Recognition crop dimensions can be overridden
+with `AGTX_OCR_REC_WIDTH` and `AGTX_OCR_REC_HEIGHT` when a model reports
+dynamic input dimensions.
 
 ## Release Audit
 

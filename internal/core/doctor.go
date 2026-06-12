@@ -327,6 +327,10 @@ func (s *Service) checkSkillVersionInDir(name, version string, currentOnly bool,
 		checks = append(checks, DoctorCheck{Name: "entrypoint", OK: true, Severity: "info", Message: "stub skill does not require an entrypoint", Path: versionDir})
 		return manifest, versionDir, checks, nil
 	}
+	if manifest.Builtin != nil {
+		checks = append(checks, DoctorCheck{Name: "builtin_runtime", OK: true, Severity: "info", Message: "built-in skill is provided by agtx", Path: versionDir, Details: manifest.Builtin})
+		return manifest, versionDir, checks, nil
+	}
 
 	bundle, ok := manifest.BundleFor(runtime.GOOS, runtime.GOARCH)
 	if !ok {

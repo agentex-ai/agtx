@@ -92,6 +92,38 @@ func TestDeepResearchReadsLegacyResearchInstallDirectory(t *testing.T) {
 	}
 }
 
+func TestRapidOCRAliasInstallsCanonicalOCRSkill(t *testing.T) {
+	service := NewService(PathsForRoot(t.TempDir()))
+	results, err := service.InstallSkills(context.Background(), []string{"rapidocr"})
+	if err != nil {
+		t.Fatalf("install rapidocr alias failed: %v", err)
+	}
+	if len(results) != 1 || results[0].Name != "ocr" || results[0].Version != "0.6.0" || results[0].Stub {
+		t.Fatalf("unexpected install result: %#v", results)
+	}
+	if !strings.Contains(results[0].Path, filepath.Join("skills", "ocr", "0.6.0")) {
+		t.Fatalf("expected canonical ocr install path, got %q", results[0].Path)
+	}
+	if _, err := os.Stat(filepath.Join(service.Paths.SkillsDir, "rapidocr")); !os.IsNotExist(err) {
+		t.Fatalf("rapidocr alias should not create its own install dir, err=%v", err)
+	}
+
+	installed, err := service.ListInstalled()
+	if err != nil {
+		t.Fatalf("list installed: %v", err)
+	}
+	if len(installed) != 1 || installed[0].Name != "ocr" || installed[0].Manifest.Version != "0.6.0" {
+		t.Fatalf("expected installed OCR skill, got %#v", installed)
+	}
+	plan, err := service.PlanInstall([]string{"ppocrv6"})
+	if err != nil {
+		t.Fatalf("plan ppocrv6 alias: %v", err)
+	}
+	if len(plan.Changes) != 1 || plan.Changes[0].Name != "ocr" || plan.Changes[0].Status != "already_installed" {
+		t.Fatalf("expected ppocrv6 alias to see current OCR install: %#v", plan)
+	}
+}
+
 func TestRollbackToInstalledVersion(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
 	if _, err := service.InstallSkills(context.Background(), []string{"pdf"}); err != nil {
@@ -217,13 +249,13 @@ func TestRegistryImplementationStatusReportsDefaultStubs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build status: %v", err)
 	}
-	if status.Total != 10 || status.Implemented != 0 || status.Partial != 0 || status.Stub != 10 || status.Incomplete != 0 {
+	if status.Total != 10 || status.Implemented != 1 || status.Partial != 0 || status.Stub != 9 || status.Incomplete != 0 {
 		t.Fatalf("unexpected implementation totals: %#v", status)
 	}
-	if len(status.Missing) != 10 || !containsString(status.Missing, "pdf") || !containsString(status.Missing, "ocr") {
+	if len(status.Missing) != 9 || !containsString(status.Missing, "pdf") || containsString(status.Missing, "ocr") {
 		t.Fatalf("expected default skills to be missing native packages: %#v", status.Missing)
 	}
-	if len(status.PlatformCoverage) != 2 || status.PlatformCoverage[0].Stub != 10 || status.PlatformCoverage[1].Stub != 10 {
+	if len(status.PlatformCoverage) != 2 || status.PlatformCoverage[0].Implemented != 1 || status.PlatformCoverage[0].Stub != 9 || status.PlatformCoverage[1].Implemented != 1 || status.PlatformCoverage[1].Stub != 9 {
 		t.Fatalf("unexpected platform coverage: %#v", status.PlatformCoverage)
 	}
 }

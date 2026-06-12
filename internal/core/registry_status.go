@@ -178,6 +178,11 @@ func registryBundleImplementationStatus(skill SkillManifest, bundle PlatformBund
 		status.Reason = "stub"
 		return status
 	}
+	if skill.Builtin != nil {
+		status.Runnable = true
+		status.Reason = "builtin"
+		return status
+	}
 	if strings.TrimSpace(bundle.URL) == "" {
 		status.Reason = "missing_url"
 		return status
