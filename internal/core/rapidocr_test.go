@@ -1,8 +1,10 @@
 package core
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -265,6 +267,49 @@ func TestONNXRuntimeArchiveInfoUsesPublishedCPUAssetNames(t *testing.T) {
 	}
 	if archive, member, err := onnxRuntimeArchiveInfoFor("darwin", "amd64", "1.23.2"); err != nil || archive != "onnxruntime-osx-x86_64-1.23.2.tgz" || member != "onnxruntime-osx-x86_64-1.23.2/lib/libonnxruntime.1.23.2.dylib" {
 		t.Fatalf("unexpected macOS Intel v1.23.2 archive info: archive=%q member=%q err=%v", archive, member, err)
+	}
+}
+
+func TestExtractONNXRuntimeLibraryFromZip(t *testing.T) {
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "onnxruntime-test.zip")
+	archive, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := zip.NewWriter(archive)
+	member, err := writer.Create("onnxruntime-win-x64-1.26.0/lib/onnxruntime.dll")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(member, "runtime"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, nativeLibraryFilename("onnxruntime"))
+	if err := extractONNXRuntimeLibrary(archivePath, "onnxruntime-win-x64-1.26.0/lib/onnxruntime.dll", dst); err != nil {
+		t.Fatalf("extract runtime library: %v", err)
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "runtime" {
+		t.Fatalf("unexpected extracted data: %q", data)
+	}
+}
+
+func TestRapidOCRKeepArchiveArg(t *testing.T) {
+	if !hasBuiltinOCRKeepArchiveArg([]string{"--keep-archive"}) || !hasBuiltinOCRKeepArchiveArg([]string{"keep_archive"}) {
+		t.Fatal("expected keep archive aliases to be recognized")
+	}
+	if hasBuiltinOCRKeepArchiveArg([]string{"--download-runtime"}) {
+		t.Fatal("download runtime alone should not keep archive")
 	}
 }
 

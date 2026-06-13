@@ -103,6 +103,7 @@ set AGTX_OCR_MODEL_DIR=C:\path\to\ppocr-models
 agtx run rapidocr --json -- --probe
 agtx run rapidocr --json -- --download-runtime --dry-run
 agtx run rapidocr --json -- --download-runtime
+agtx run rapidocr --json -- --download-runtime --keep-archive
 agtx run rapidocr --json -- --download-models --dry-run --model-size tiny
 agtx run rapidocr --json -- --download-models --model-size tiny
 agtx run rapidocr --json -- --det-model ppocrv6-det.onnx --rec-model ppocrv6-rec.onnx --keys keys.txt sample.png
@@ -112,10 +113,11 @@ agtx run rapidocr --json -- --det-limit-side-len 736 --det-threshold 0.3 --box-t
 By default agtx looks for the ONNX Runtime shared library under
 `AGTX_OCR_RUNTIME_DIR`, beside the executable, or in the model directory's
 `runtime` subdirectory. `--download-runtime` downloads the Microsoft ONNX
-Runtime CPU archive for the current platform and extracts only the shared
-library into that runtime directory. Microsoft no longer publishes macOS Intel
-CPU archives for ONNX Runtime 1.26.0, so Intel Mac users should provide
-`AGTX_OCR_ONNXRUNTIME_LIBRARY` or explicitly select a compatible older runtime.
+Runtime CPU archive for the current platform, extracts only the shared library
+into that runtime directory, and removes the archive unless `--keep-archive` is
+set. Microsoft no longer publishes macOS Intel CPU archives for ONNX Runtime
+1.26.0, so Intel Mac users should provide `AGTX_OCR_ONNXRUNTIME_LIBRARY` or
+explicitly select a compatible older runtime.
 agtx looks for `ppocrv6-det.onnx`, `ppocrv6-rec.onnx`, and `keys.txt` under
 `AGTX_OCR_MODEL_DIR` or the local agtx built-in OCR directory.
 For PaddlePaddle PP-OCRv6 Hugging Face exports, agtx can download `tiny`,
@@ -128,9 +130,12 @@ The probe reports whether the adapter is linked, which native library is used,
 which files are missing, and the detector/recognizer ONNX input/output metadata
 when the models load. Runtime tuning follows the RapidOCR/PaddleOCR defaults:
 `det_limit_side_len=736`, `det_threshold=0.3`, `box_threshold=0.5`,
-`unclip_ratio=1.6`, `max_candidates=1000`, and `text_score=0.5`; each can be
-overridden with the matching `--kebab-case` skill argument or `AGTX_OCR_*`
-environment variable. OCR never falls back to Python, Node, or npm wrappers.
+`unclip_ratio=1.6`, `max_candidates=1000`, `text_score=0.5`, and
+`rec_max_width=1600`; each can be overridden with the matching `--kebab-case`
+skill argument or `AGTX_OCR_*` environment variable. Dynamic-width recognizer
+models scale the crop width per detected text box up to `rec_max_width`, while
+`--rec-width` forces a fixed recognizer width. OCR never falls back to Python,
+Node, or npm wrappers.
 
 ## Agent Integration
 

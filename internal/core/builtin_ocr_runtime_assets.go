@@ -25,6 +25,7 @@ type builtinOCRRuntimeDownloadResult struct {
 	RuntimeLibrary string `json:"runtime_library"`
 	URL            string `json:"url"`
 	ArchivePath    string `json:"archive_path,omitempty"`
+	ArchiveKept    bool   `json:"archive_kept,omitempty"`
 	Status         string `json:"status"`
 	Bytes          int64  `json:"bytes,omitempty"`
 	SHA256         string `json:"sha256,omitempty"`
@@ -90,8 +91,26 @@ func (s *Service) downloadBuiltinOCRRuntime(ctx context.Context, options RunOpti
 	if err := extractONNXRuntimeLibrary(archivePath, libraryInArchive, libraryPath); err != nil {
 		return result, err
 	}
+	if hasBuiltinOCRKeepArchiveArg(options.Args) {
+		result.ArchiveKept = true
+	} else {
+		if err := os.Remove(archivePath); err != nil && !os.IsNotExist(err) {
+			return result, err
+		}
+		result.ArchivePath = ""
+	}
 	result.Status = "downloaded"
 	return result, nil
+}
+
+func hasBuiltinOCRKeepArchiveArg(args []string) bool {
+	for _, arg := range args {
+		switch strings.ToLower(strings.TrimSpace(arg)) {
+		case "--keep-archive", "keep-archive", "--keep_archive", "keep_archive":
+			return true
+		}
+	}
+	return false
 }
 
 func onnxRuntimeArchiveInfo(version string) (string, string, error) {

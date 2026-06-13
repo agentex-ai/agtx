@@ -60,6 +60,26 @@ func defaultOCRSkill() SkillManifest {
 				"enum":        []string{"auto", "onnxruntime", "ncnn"},
 				"default":     "auto",
 			},
+			"model_dir": map[string]any{
+				"type":        "string",
+				"description": "Local OCR model directory used by the built-in native runtime.",
+			},
+			"runtime_dir": map[string]any{
+				"type":        "string",
+				"description": "Local native inference runtime directory used for ONNX Runtime or ncnn shared libraries.",
+			},
+			"download_runtime": map[string]any{
+				"type":        "boolean",
+				"description": "Download the native ONNX Runtime CPU shared library for the current platform.",
+			},
+			"download_models": map[string]any{
+				"type":        "boolean",
+				"description": "Download PP-OCRv6 ONNX detector and recognizer assets for the selected model size.",
+			},
+			"keep_archive": map[string]any{
+				"type":        "boolean",
+				"description": "Keep the downloaded ONNX Runtime archive after extracting the shared library.",
+			},
 			"det_model": map[string]any{
 				"type":        "string",
 				"description": "Optional local detector model override, absolute or relative to the OCR model directory.",
@@ -101,6 +121,19 @@ func defaultOCRSkill() SkillManifest {
 				"type":        "number",
 				"description": "Minimum recognizer confidence for returned text lines.",
 				"default":     0.5,
+			},
+			"rec_width": map[string]any{
+				"type":        "integer",
+				"description": "Optional fixed recognizer crop width. Overrides dynamic-width recognizer sizing.",
+			},
+			"rec_height": map[string]any{
+				"type":        "integer",
+				"description": "Optional recognizer crop height override.",
+			},
+			"rec_max_width": map[string]any{
+				"type":        "integer",
+				"description": "Maximum crop width for dynamic-width recognizer models.",
+				"default":     1600,
 			},
 			"language_hints": map[string]any{
 				"type":        "array",
@@ -185,12 +218,55 @@ func defaultOCRSkill() SkillManifest {
 	return skill
 }
 
+func builtInWebFetchSkill(skill SkillManifest) SkillManifest {
+	skill.Version = "0.2.0"
+	skill.Summary = "Web fetch"
+	skill.Description = "Fetch HTTP(S) pages, extract readable text, links, title, and metadata for agents that already know the URL."
+	skill.Tags = appendUniqueStrings(skill.Tags, "builtin")
+	skill.InputSchema = map[string]any{
+		"type":                 "object",
+		"description":          "Known-URL web page fetch input.",
+		"additionalProperties": true,
+		"required":             []string{"url"},
+		"properties": map[string]any{
+			"url":        map[string]any{"type": "string", "description": "HTTP or HTTPS URL to fetch."},
+			"timeout_ms": map[string]any{"type": "integer", "description": "Optional per-request timeout in milliseconds."},
+			"max_bytes":  map[string]any{"type": "integer", "description": "Maximum response body bytes to read before extraction."},
+			"user_agent": map[string]any{"type": "string", "description": "Optional user agent override."},
+			"text_only":  map[string]any{"type": "boolean", "description": "Prefer readable text extraction for compatible clients."},
+		},
+	}
+	skill.OutputSchema = map[string]any{
+		"type":        "object",
+		"description": "Fetched page metadata and readable text.",
+		"properties": map[string]any{
+			"url":          map[string]any{"type": "string"},
+			"final_url":    map[string]any{"type": "string"},
+			"status_code":  map[string]any{"type": "integer"},
+			"content_type": map[string]any{"type": "string"},
+			"title":        map[string]any{"type": "string"},
+			"text":         map[string]any{"type": "string"},
+			"metadata":     map[string]any{"type": "object"},
+			"links":        map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"bytes":        map[string]any{"type": "integer"},
+		},
+	}
+	skill.Builtin = &BuiltinInfo{
+		Runtime:       "agtx-web-fetch-v1",
+		Backends:      []string{"net_http"},
+		ModelProfiles: []string{"readability_v1"},
+		NoPython:      true,
+	}
+	skill.Stub = false
+	return skill
+}
+
 func defaultSkill(name, version, summary, description string, tags, keywords, meters []string) SkillManifest {
 	capabilityClass := "tool"
 	if canonicalSkillName(name) == deepResearchSkillName {
 		capabilityClass = "workflow"
 	}
-	return SkillManifest{
+	skill := SkillManifest{
 		SchemaVersion: 1,
 		Name:          name,
 		Version:       version,
@@ -222,6 +298,23 @@ func defaultSkill(name, version, summary, description string, tags, keywords, me
 		Signature: &SignatureInfo{Algorithm: "reserved"},
 		Stub:      true,
 	}
+	if canonicalSkillName(name) == "web_fetch" {
+		return builtInWebFetchSkill(skill)
+	}
+	return skill
+}
+
+func appendUniqueStrings(values []string, more ...string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values)+len(more))
+	for _, value := range append(append([]string{}, values...), more...) {
+		if strings.TrimSpace(value) == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func defaultBilling(meters []string) *BillingInfo {

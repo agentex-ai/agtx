@@ -60,10 +60,11 @@ At runtime, set `AGTX_OCR_ONNXRUNTIME_LIBRARY` or place the ONNX Runtime shared
 library next to the executable, under `AGTX_OCR_RUNTIME_DIR`, or under the OCR
 model directory's `runtime` subdirectory. `agtx run rapidocr --
 --download-runtime` downloads the Microsoft ONNX Runtime CPU archive for the
-current platform and extracts only the native shared library; add `--dry-run`
-to inspect the URL and destination first. The default runtime version is
-`1.26.0` to match the Go binding headers. Microsoft does not publish a macOS
-Intel CPU archive for ONNX Runtime 1.26.0, so Intel Mac users should point
+current platform, extracts only the native shared library, and removes the
+archive unless `--keep-archive` is set; add `--dry-run` to inspect the URL and
+destination first. The default runtime version is `1.26.0` to match the Go
+binding headers. Microsoft does not publish a macOS Intel CPU archive for ONNX
+Runtime 1.26.0, so Intel Mac users should point
 `AGTX_OCR_ONNXRUNTIME_LIBRARY` at a locally installed compatible library or
 explicitly select a compatible older runtime. Model files default to
 `ppocrv6-det.onnx`, `ppocrv6-rec.onnx`, and `keys.txt`, and can be overridden
@@ -84,8 +85,9 @@ a Python runtime: `AGTX_OCR_DET_LIMIT_SIDE_LEN` (default `736`),
 `AGTX_OCR_DET_THRESHOLD` (`0.3`), `AGTX_OCR_BOX_THRESHOLD` (`0.5`),
 `AGTX_OCR_UNCLIP_RATIO` (`1.6`), `AGTX_OCR_MAX_CANDIDATES` (`1000`), and
 `AGTX_OCR_TEXT_SCORE` (`0.5`). Recognition crop dimensions can be overridden
-with `AGTX_OCR_REC_WIDTH` and `AGTX_OCR_REC_HEIGHT` when a model reports
-dynamic input dimensions.
+with `AGTX_OCR_REC_WIDTH` and `AGTX_OCR_REC_HEIGHT`; dynamic-width recognizer
+models scale each crop up to `AGTX_OCR_REC_MAX_WIDTH` (`1600`) unless
+`AGTX_OCR_REC_WIDTH` forces a fixed width.
 
 ## Release Audit
 

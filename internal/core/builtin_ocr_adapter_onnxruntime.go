@@ -154,7 +154,7 @@ func (a onnxRuntimeOCRAdapter) Run(ctx context.Context, config builtinOCRConfig,
 		return RunResult{ExitCode: -1}, NewError(CodeInvalidArgument, "recognizer ONNX session cannot be created", map[string]any{"path": config.ModelFiles.Recognizer, "error": err.Error()})
 	}
 	defer recSession.Destroy()
-	recH, recW := onnxOCRRecognitionSize(probe.RecognitionModel, config.Settings)
+	recH, baseRecW, recDynamicWidth := onnxOCRRecognitionSize(probe.RecognitionModel, config.Settings)
 
 	output := onnxOCRRunOutput{ModelProfile: config.ModelProfile, Engine: "onnxruntime", Warnings: probe.Warnings}
 	output.DetectedBoxes = len(boxes)
@@ -168,6 +168,7 @@ func (a onnxRuntimeOCRAdapter) Run(ctx context.Context, config builtinOCRConfig,
 		default:
 		}
 		output.ProcessedBoxes++
+		recW := onnxOCRRecognitionWidthForBox(box, recH, baseRecW, recDynamicWidth, config.Settings)
 		data := onnxOCRImageToRecognizerTensor(img, box, recW, recH)
 		recTensor, err := ort.NewTensor(ort.NewShape(1, 3, int64(recH), int64(recW)), data)
 		if err != nil {
@@ -556,19 +557,25 @@ func onnxOCRDetectBoxes(scores []float32, width, height, origW, origH int, setti
 	return boxes
 }
 
-func onnxOCRRecognitionSize(info *builtinOCRModelInfo, settings builtinOCRSettings) (int, int) {
+func onnxOCRRecognitionSize(info *builtinOCRModelInfo, settings builtinOCRSettings) (int, int, bool) {
 	height, width := 48, 320
 	if info == nil || len(info.Inputs) == 0 || len(info.Inputs[0].Dimensions) < 4 {
-		return overrideOCRRecognitionSize(height, width, settings)
+		height, width = overrideOCRRecognitionSize(height, width, settings)
+		return height, width, false
 	}
 	dims := info.Inputs[0].Dimensions
 	if dims[2] > 0 {
 		height = int(dims[2])
 	}
+	dynamicWidth := dims[3] <= 0
 	if dims[3] > 0 {
 		width = int(dims[3])
 	}
-	return overrideOCRRecognitionSize(height, width, settings)
+	if settings.RecWidth > 0 {
+		dynamicWidth = false
+	}
+	height, width = overrideOCRRecognitionSize(height, width, settings)
+	return height, width, dynamicWidth
 }
 
 func overrideOCRRecognitionSize(height, width int, settings builtinOCRSettings) (int, int) {
@@ -579,6 +586,24 @@ func overrideOCRRecognitionSize(height, width int, settings builtinOCRSettings) 
 		width = settings.RecWidth
 	}
 	return height, width
+}
+
+func onnxOCRRecognitionWidthForBox(box onnxOCRBox, height, baseWidth int, dynamic bool, settings builtinOCRSettings) int {
+	if settings.RecWidth > 0 {
+		return settings.RecWidth
+	}
+	if !dynamic {
+		return baseWidth
+	}
+	cropW := math.Max(1, box.X2-box.X1)
+	cropH := math.Max(1, box.Y2-box.Y1)
+	width := makeOCRDivisible(int(math.Ceil(float64(height)*cropW/cropH)), 8)
+	width = maxInt(baseWidth, width)
+	maxWidth := settings.RecMaxWidth
+	if maxWidth <= 0 {
+		maxWidth = 1600
+	}
+	return minInt(width, maxWidth)
 }
 
 func onnxOCRDecodeRecognition(value ort.Value, keys []string) (string, float64, error) {

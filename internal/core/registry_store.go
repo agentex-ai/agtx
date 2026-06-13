@@ -221,9 +221,9 @@ func validateBuiltinInfo(skill SkillManifest) error {
 	}
 	for _, backend := range skill.Builtin.Backends {
 		switch strings.TrimSpace(backend) {
-		case "onnxruntime", "ncnn":
+		case "onnxruntime", "ncnn", "net_http":
 		default:
-			return NewError(CodeInvalidArgument, "unsupported built-in OCR backend", map[string]any{"skill": skill.Name, "backend": backend})
+			return NewError(CodeInvalidArgument, "unsupported built-in backend", map[string]any{"skill": skill.Name, "backend": backend})
 		}
 		if strings.TrimSpace(backend) != backend {
 			return NewError(CodeInvalidArgument, "built-in backend must not contain leading or trailing whitespace", map[string]any{"skill": skill.Name, "backend": backend})
@@ -231,9 +231,9 @@ func validateBuiltinInfo(skill SkillManifest) error {
 	}
 	for _, profile := range skill.Builtin.ModelProfiles {
 		switch strings.TrimSpace(profile) {
-		case "ppocrv6", "ppocrv5", "ppocrv4":
+		case "ppocrv6", "ppocrv5", "ppocrv4", "readability_v1":
 		default:
-			return NewError(CodeInvalidArgument, "unsupported built-in OCR model profile", map[string]any{"skill": skill.Name, "model_profile": profile})
+			return NewError(CodeInvalidArgument, "unsupported built-in model profile", map[string]any{"skill": skill.Name, "model_profile": profile})
 		}
 		if strings.TrimSpace(profile) != profile {
 			return NewError(CodeInvalidArgument, "built-in model profile must not contain leading or trailing whitespace", map[string]any{"skill": skill.Name, "model_profile": profile})
