@@ -1898,10 +1898,10 @@ func TestMCPCapabilityScenarios(t *testing.T) {
 
 func TestMCPRunSkillAcceptsScenarioID(t *testing.T) {
 	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	if _, err := service.InstallSkills(context.Background(), []string{"pdf"}); err != nil {
+	if _, err := service.InstallSkills(context.Background(), []string{"web_search"}); err != nil {
 		t.Fatalf("install fixture: %v", err)
 	}
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_skill","arguments":{"skill":"pdf","scenario_id":"invoice"}}}` + "\n")
+	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_skill","arguments":{"skill":"web_search","scenario_id":"invoice"}}}` + "\n")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run(service, input, &stdout, &stderr)
@@ -1929,7 +1929,7 @@ func TestMCPRunSkillAcceptsScenarioID(t *testing.T) {
 	if !response.Result.IsError || response.Result.StructuredContent.OK || response.Result.StructuredContent.Error.Code != "not_implemented" {
 		t.Fatalf("expected structured run error for stub skill: %s", stdout.String())
 	}
-	if response.Result.StructuredContent.Data.Name != "pdf" || response.Result.StructuredContent.Data.ScenarioID != "invoice_processing" {
+	if response.Result.StructuredContent.Data.Name != "web_search" || response.Result.StructuredContent.Data.ScenarioID != "invoice_processing" {
 		t.Fatalf("expected canonical scenario id in partial run data: %s", stdout.String())
 	}
 }
@@ -1977,7 +1977,7 @@ func TestMCPVerifyErrorPreservesPartialResult(t *testing.T) {
 	if _, err := service.InstallSkills(context.Background(), []string{"pdf"}); err != nil {
 		t.Fatalf("install fixture: %v", err)
 	}
-	manifestPath := filepath.Join(service.Paths.SkillsDir, "pdf", "0.1.0", "manifest.json")
+	manifestPath := filepath.Join(service.Paths.SkillsDir, "pdf", "0.2.0", "manifest.json")
 	if err := os.WriteFile(manifestPath, []byte("{"), 0o644); err != nil {
 		t.Fatalf("corrupt manifest: %v", err)
 	}

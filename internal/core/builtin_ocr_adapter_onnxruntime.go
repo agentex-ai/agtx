@@ -424,7 +424,7 @@ func onnxOCRImageToRecognizerTensor(img image.Image, box onnxOCRBox, width, heig
 	data := make([]float32, 3*width*height)
 	cropW := math.Max(1, box.X2-box.X1)
 	cropH := math.Max(1, box.Y2-box.Y1)
-	resizedW := minInt(width, maxInt(1, int(math.Ceil(float64(height)*cropW/cropH))))
+	resizedW := onnxMinInt(width, maxInt(1, int(math.Ceil(float64(height)*cropW/cropH))))
 	for y := 0; y < height; y++ {
 		for x := 0; x < resizedW; x++ {
 			srcX := box.X1 + (float64(x)+0.5)*cropW/float64(resizedW)
@@ -516,8 +516,8 @@ func onnxOCRDetectBoxes(scores []float32, width, height, origW, origH int, setti
 				cx, cy := idx%width, idx/width
 				sum += float64(scores[idx])
 				count++
-				minX, maxX = minInt(minX, cx), maxInt(maxX, cx)
-				minY, maxY = minInt(minY, cy), maxInt(maxY, cy)
+				minX, maxX = onnxMinInt(minX, cx), maxInt(maxX, cx)
+				minY, maxY = onnxMinInt(minY, cy), maxInt(maxY, cy)
 				for _, n := range []int{idx - 1, idx + 1, idx - width, idx + width} {
 					if n < 0 || n >= len(scores) || visited[n] || float64(scores[n]) < binThreshold {
 						continue
@@ -535,7 +535,7 @@ func onnxOCRDetectBoxes(scores []float32, width, height, origW, origH int, setti
 			}
 			pad := maxInt(2, int(math.Ceil(float64(maxInt(maxX-minX, maxY-minY))*(unclipRatio-1.0)/2.0)))
 			minX, minY = maxInt(0, minX-pad), maxInt(0, minY-pad)
-			maxX, maxY = minInt(width-1, maxX+pad), minInt(height-1, maxY+pad)
+			maxX, maxY = onnxMinInt(width-1, maxX+pad), onnxMinInt(height-1, maxY+pad)
 			boxes = append(boxes, onnxOCRBox{
 				X1:    float64(minX) * float64(origW) / float64(width),
 				Y1:    float64(minY) * float64(origH) / float64(height),
@@ -603,7 +603,7 @@ func onnxOCRRecognitionWidthForBox(box onnxOCRBox, height, baseWidth int, dynami
 	if maxWidth <= 0 {
 		maxWidth = 1600
 	}
-	return minInt(width, maxWidth)
+	return onnxMinInt(width, maxWidth)
 }
 
 func onnxOCRDecodeRecognition(value ort.Value, keys []string) (string, float64, error) {
@@ -657,7 +657,7 @@ func destroyONNXValues(values []ort.Value) {
 	}
 }
 
-func minInt(a, b int) int {
+func onnxMinInt(a, b int) int {
 	if a < b {
 		return a
 	}
@@ -679,5 +679,5 @@ func absInt(value int) int {
 }
 
 func clampInt(value, minValue, maxValue int) int {
-	return maxInt(minValue, minInt(maxValue, value))
+	return maxInt(minValue, onnxMinInt(maxValue, value))
 }

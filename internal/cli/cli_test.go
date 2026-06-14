@@ -395,7 +395,7 @@ func TestRunTreatsDoubleDashAsSkillArgSeparator(t *testing.T) {
 	t.Setenv("AGTX_HOME", t.TempDir())
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Main([]string{"run", "pdf", "--", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	code := Main([]string{"run", "web_search", "--", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("expected not installed failure")
 	}

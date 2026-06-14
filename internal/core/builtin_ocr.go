@@ -148,6 +148,8 @@ func (s *Service) runBuiltinSkill(ctx context.Context, manifest SkillManifest, o
 	switch canonicalSkillName(manifest.Name) {
 	case "docx", "xlsx", "pptx":
 		return s.runBuiltinOffice(ctx, manifest, options)
+	case "pdf":
+		return s.runBuiltinPDF(ctx, manifest, options)
 	case "web_fetch":
 		return s.runBuiltinWebFetch(ctx, manifest, options)
 	case "ocr":

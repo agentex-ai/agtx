@@ -18,7 +18,7 @@ func DefaultRegistry() Registry {
 			defaultSkill("docx", "0.2.0", "Word document", "Read, summarize, and extract structured content from Word documents.", []string{"document", "docx", "word"}, []string{"docx", "word", "document", "summary", "summarize", "contract", "文档", "Word", "摘要", "总结", "合同"}, []string{"task"}),
 			defaultSkill("xlsx", "0.2.0", "Excel spreadsheet", "Read sheets, ranges, and cells from Excel workbooks for structured extraction.", []string{"document", "xlsx", "spreadsheet"}, []string{"xlsx", "excel", "sheet", "spreadsheet", "table", "invoice", "表格", "Excel", "发票", "账单", "数据"}, []string{"task"}),
 			defaultSkill("pptx", "0.2.0", "PowerPoint deck", "Extract slide text, notes, placeholders, and structure from presentation decks.", []string{"document", "pptx", "powerpoint", "slides"}, []string{"pptx", "powerpoint", "slides", "deck", "presentation", "演示", "幻灯片", "课件", "备注"}, []string{"task"}),
-			defaultSkill("pdf", "0.1.0", "PDF", "Extract text, split pages, prepare OCR fallback, and index PDF documents.", []string{"document", "pdf"}, []string{"pdf", "paper", "ebook", "bill", "invoice", "summary", "summarize", "PDF", "论文", "账单", "发票", "摘要"}, []string{"page"}),
+			defaultSkill("pdf", "0.2.0", "PDF", "Extract text, split pages, prepare OCR fallback, and index PDF documents.", []string{"document", "pdf"}, []string{"pdf", "paper", "ebook", "bill", "invoice", "summary", "summarize", "PDF", "论文", "账单", "发票", "摘要"}, []string{"page"}),
 		},
 	}
 }
@@ -303,6 +303,46 @@ func builtInOfficeSkill(skill SkillManifest) SkillManifest {
 	return skill
 }
 
+func builtInPDFSkill(skill SkillManifest) SkillManifest {
+	skill.Description = "Read text-oriented PDF files, extract text streams, estimate page count, and return OCR hints for scanned documents with the Go standard library."
+	skill.Tags = appendUniqueRegistryStrings(skill.Tags, "builtin", "pdf_text")
+	skill.InputSchema = map[string]any{
+		"type":                 "object",
+		"description":          "PDF text extraction input.",
+		"additionalProperties": true,
+		"properties": map[string]any{
+			"path":        map[string]any{"type": "string", "description": "Local PDF file path."},
+			"input":       map[string]any{"type": "string", "description": "Alias for path when JSON input is used."},
+			"file":        map[string]any{"type": "string", "description": "Alias for path when JSON input is used."},
+			"action":      map[string]any{"type": "string", "description": "Read action. The built-in runtime currently supports extract/read."},
+			"max_streams": map[string]any{"type": "integer", "description": "Maximum number of PDF streams to inspect."},
+		},
+	}
+	skill.OutputSchema = map[string]any{
+		"type":        "object",
+		"description": "Extracted PDF text and diagnostics.",
+		"properties": map[string]any{
+			"kind":       map[string]any{"type": "string"},
+			"source":     map[string]any{"type": "string"},
+			"action":     map[string]any{"type": "string"},
+			"text":       map[string]any{"type": "string"},
+			"page_count": map[string]any{"type": "integer"},
+			"streams":    map[string]any{"type": "integer"},
+			"bytes":      map[string]any{"type": "integer"},
+			"metadata":   map[string]any{"type": "object"},
+			"warnings":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		},
+	}
+	skill.Builtin = &BuiltinInfo{
+		Runtime:       "agtx-pdf-text-v1",
+		Backends:      []string{"pdf_text"},
+		ModelProfiles: []string{"pdf_text_v1"},
+		NoPython:      true,
+	}
+	skill.Stub = false
+	return skill
+}
+
 func defaultSkill(name, version, summary, description string, tags, keywords, meters []string) SkillManifest {
 	capabilityClass := "tool"
 	if canonicalSkillName(name) == deepResearchSkillName {
@@ -345,6 +385,9 @@ func defaultSkill(name, version, summary, description string, tags, keywords, me
 	}
 	if canonicalSkillName(name) == "docx" || canonicalSkillName(name) == "xlsx" || canonicalSkillName(name) == "pptx" {
 		return builtInOfficeSkill(skill)
+	}
+	if canonicalSkillName(name) == "pdf" {
+		return builtInPDFSkill(skill)
 	}
 	return skill
 }

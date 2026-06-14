@@ -151,15 +151,18 @@ agtx run web_fetch --json -- --url https://example.com --text-only
 
 ### Built-In OpenXML Documents
 
-`docx`, `xlsx`, and `pptx` are built-in OpenXML readers for local Office files.
-They run inside the agtx binary with Go's standard library, so normal and Pro
-accounts do not need an extra package download for basic text, metadata, sheet,
-row, slide, and speaker-note extraction on Windows or macOS.
+`docx`, `xlsx`, `pptx`, and text-oriented `pdf` extraction are built in for
+local document files. They run inside the agtx binary with Go's standard
+library, so normal and Pro accounts do not need an extra package download for
+basic text, metadata, sheet, row, slide, speaker-note, and PDF text-stream
+extraction on Windows or macOS. Scanned or image-only PDFs should be sent to
+`ocr`.
 
 ```sh
 agtx run docx --json -- ./contract.docx
 agtx run xlsx --json -- --path ./invoice.xlsx --max-rows 500
 agtx run pptx --json -- --file ./deck.pptx
+agtx run pdf --json -- ./paper.pdf
 ```
 
 ## Agent Integration

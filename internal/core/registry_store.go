@@ -221,7 +221,7 @@ func validateBuiltinInfo(skill SkillManifest) error {
 	}
 	for _, backend := range skill.Builtin.Backends {
 		switch strings.TrimSpace(backend) {
-		case "onnxruntime", "ncnn", "net_http", "openxml":
+		case "onnxruntime", "ncnn", "net_http", "openxml", "pdf_text":
 		default:
 			return NewError(CodeInvalidArgument, "unsupported built-in backend", map[string]any{"skill": skill.Name, "backend": backend})
 		}
@@ -231,7 +231,7 @@ func validateBuiltinInfo(skill SkillManifest) error {
 	}
 	for _, profile := range skill.Builtin.ModelProfiles {
 		switch strings.TrimSpace(profile) {
-		case "ppocrv6", "ppocrv5", "ppocrv4", "readability_v1", "docx_v1", "xlsx_v1", "pptx_v1":
+		case "ppocrv6", "ppocrv5", "ppocrv4", "readability_v1", "docx_v1", "xlsx_v1", "pptx_v1", "pdf_text_v1":
 		default:
 			return NewError(CodeInvalidArgument, "unsupported built-in model profile", map[string]any{"skill": skill.Name, "model_profile": profile})
 		}

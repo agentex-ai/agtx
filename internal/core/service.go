@@ -627,7 +627,7 @@ func (s *Service) Status() (Status, error) {
 		RegistrySkills:  len(s.Registry.Skills),
 		RegistrySources: s.RegistrySources,
 		Installed:       len(installed),
-		DependencyMode:  "go-stdlib-first,builtin-native-ocr,builtin-openxml,no-python-no-npm",
+		DependencyMode:  "go-stdlib-first,builtin-native-ocr,builtin-openxml,builtin-pdf-text,no-python-no-npm",
 		Channel:         s.Config.Channel,
 		Telemetry:       s.Config.Telemetry,
 	}, nil

@@ -23,11 +23,11 @@ import (
 
 func TestInstallListAndRunStub(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
-	results, err := service.InstallSkills(context.Background(), []string{"pdf"})
+	results, err := service.InstallSkills(context.Background(), []string{"web_search"})
 	if err != nil {
 		t.Fatalf("install failed: %v", err)
 	}
-	if len(results) != 1 || results[0].Name != "pdf" || !results[0].Stub {
+	if len(results) != 1 || results[0].Name != "web_search" || !results[0].Stub {
 		t.Fatalf("unexpected install result: %#v", results)
 	}
 	if _, err := os.Stat(filepath.Join(results[0].Path, "manifest.json")); err != nil {
@@ -38,11 +38,11 @@ func TestInstallListAndRunStub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list installed failed: %v", err)
 	}
-	if len(installed) != 1 || installed[0].Name != "pdf" {
+	if len(installed) != 1 || installed[0].Name != "web_search" {
 		t.Fatalf("unexpected installed skills: %#v", installed)
 	}
 
-	_, err = service.RunSkill(context.Background(), "pdf", nil, nil)
+	_, err = service.RunSkill(context.Background(), "web_search", nil, nil)
 	if !IsErrorCode(err, CodeNotImplemented) {
 		t.Fatalf("expected not_implemented, got %v", err)
 	}
@@ -138,11 +138,11 @@ func TestRollbackToInstalledVersion(t *testing.T) {
 	if _, err := service.InstallSkills(context.Background(), []string{"pdf"}); err != nil {
 		t.Fatalf("install old version failed: %v", err)
 	}
-	result, err := service.RollbackSkill("pdf", "0.1.0")
+	result, err := service.RollbackSkill("pdf", "0.2.0")
 	if err != nil {
 		t.Fatalf("rollback failed: %v", err)
 	}
-	if result.Version != "0.1.0" || result.PreviousVersion != "0.0.9" {
+	if result.Version != "0.2.0" || result.PreviousVersion != "0.0.9" {
 		t.Fatalf("unexpected rollback result: %#v", result)
 	}
 }
@@ -249,13 +249,13 @@ func TestRegistryImplementationStatusReportsDefaultStubs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build status: %v", err)
 	}
-	if status.Total != 10 || status.Implemented != 5 || status.Partial != 0 || status.Stub != 5 || status.Incomplete != 0 {
+	if status.Total != 10 || status.Implemented != 6 || status.Partial != 0 || status.Stub != 4 || status.Incomplete != 0 {
 		t.Fatalf("unexpected implementation totals: %#v", status)
 	}
-	if len(status.Missing) != 5 || !containsString(status.Missing, "pdf") || containsString(status.Missing, "ocr") || containsString(status.Missing, "web_fetch") || containsString(status.Missing, "docx") || containsString(status.Missing, "xlsx") || containsString(status.Missing, "pptx") {
+	if len(status.Missing) != 4 || containsString(status.Missing, "pdf") || containsString(status.Missing, "ocr") || containsString(status.Missing, "web_fetch") || containsString(status.Missing, "docx") || containsString(status.Missing, "xlsx") || containsString(status.Missing, "pptx") {
 		t.Fatalf("expected default skills to be missing native packages: %#v", status.Missing)
 	}
-	if len(status.PlatformCoverage) != 2 || status.PlatformCoverage[0].Implemented != 5 || status.PlatformCoverage[0].Stub != 5 || status.PlatformCoverage[1].Implemented != 5 || status.PlatformCoverage[1].Stub != 5 {
+	if len(status.PlatformCoverage) != 2 || status.PlatformCoverage[0].Implemented != 6 || status.PlatformCoverage[0].Stub != 4 || status.PlatformCoverage[1].Implemented != 6 || status.PlatformCoverage[1].Stub != 4 {
 		t.Fatalf("unexpected platform coverage: %#v", status.PlatformCoverage)
 	}
 }
@@ -1387,24 +1387,24 @@ func TestInstallRejectsTruncatedTarEntry(t *testing.T) {
 
 func TestUninstallSkill(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
-	if _, err := service.InstallSkills(context.Background(), []string{"pdf"}); err != nil {
+	if _, err := service.InstallSkills(context.Background(), []string{"web_search"}); err != nil {
 		t.Fatalf("install failed: %v", err)
 	}
-	plan, err := service.PlanUninstall("pdf", true)
+	plan, err := service.PlanUninstall("web_search", true)
 	if err != nil {
 		t.Fatalf("plan uninstall failed: %v", err)
 	}
 	if plan.Action != "uninstall" {
 		t.Fatalf("unexpected plan: %#v", plan)
 	}
-	result, err := service.UninstallSkill("pdf", true)
+	result, err := service.UninstallSkill("web_search", true)
 	if err != nil {
 		t.Fatalf("uninstall failed: %v", err)
 	}
 	if len(result.RemovedVersions) != 1 {
 		t.Fatalf("unexpected uninstall result: %#v", result)
 	}
-	if _, err := service.RunSkill(context.Background(), "pdf", nil, nil); !IsErrorCode(err, CodeNotInstalled) {
+	if _, err := service.RunSkill(context.Background(), "web_search", nil, nil); !IsErrorCode(err, CodeNotInstalled) {
 		t.Fatalf("expected not installed after uninstall, got %v", err)
 	}
 }
@@ -1426,10 +1426,10 @@ func TestDoctorOnEmptyHomeIsNonMutating(t *testing.T) {
 
 func TestVerifyInstalledStubSkill(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
-	if _, err := service.InstallSkills(context.Background(), []string{"pdf"}); err != nil {
+	if _, err := service.InstallSkills(context.Background(), []string{"web_search"}); err != nil {
 		t.Fatalf("install failed: %v", err)
 	}
-	result, err := service.VerifySkill("pdf")
+	result, err := service.VerifySkill("web_search")
 	if err != nil {
 		t.Fatalf("verify failed: %v result=%#v", err, result)
 	}
@@ -1443,7 +1443,7 @@ func TestVerifyDetectsCorruptManifest(t *testing.T) {
 	if _, err := service.InstallSkills(context.Background(), []string{"pdf"}); err != nil {
 		t.Fatalf("install failed: %v", err)
 	}
-	manifestPath := filepath.Join(service.versionDir("pdf", "0.1.0"), "manifest.json")
+	manifestPath := filepath.Join(service.versionDir("pdf", "0.2.0"), "manifest.json")
 	if err := os.WriteFile(manifestPath, []byte("{"), 0o644); err != nil {
 		t.Fatalf("corrupt manifest: %v", err)
 	}
@@ -1487,7 +1487,7 @@ func TestVerifyRejectsOversizedInstalledManifest(t *testing.T) {
 	if _, err := service.InstallSkills(context.Background(), []string{"pdf"}); err != nil {
 		t.Fatalf("install failed: %v", err)
 	}
-	manifestPath := filepath.Join(service.versionDir("pdf", "0.1.0"), "manifest.json")
+	manifestPath := filepath.Join(service.versionDir("pdf", "0.2.0"), "manifest.json")
 	if err := os.WriteFile(manifestPath, bytes.Repeat([]byte("x"), defaultManifestMaxBytes+1), 0o644); err != nil {
 		t.Fatalf("write oversized manifest: %v", err)
 	}
