@@ -370,6 +370,59 @@ func builtInAudioSkill(skill SkillManifest) SkillManifest {
 	return skill
 }
 
+func builtInImagenSkill(skill SkillManifest) SkillManifest {
+	skill.Version = "0.2.0"
+	skill.Summary = "Local media generation"
+	skill.Description = "Generate deterministic local PNG visual assets and media-generation manifests from prompts with the Go standard library. Model-backed image and video providers can extend the same pack contract later."
+	skill.Tags = appendUniqueRegistryStrings(skill.Tags, "builtin", "procedural_png", "media_manifest")
+	skill.InputSchema = map[string]any{
+		"type":                 "object",
+		"description":          "Media generation prompt input.",
+		"additionalProperties": true,
+		"required":             []string{"prompt"},
+		"properties": map[string]any{
+			"prompt":          map[string]any{"type": "string", "description": "Text prompt for the generated asset."},
+			"text":            map[string]any{"type": "string", "description": "Alias for prompt."},
+			"action":          map[string]any{"type": "string", "description": "text_to_image, image_to_video, storyboard, or media_plan."},
+			"mode":            map[string]any{"type": "string", "description": "Alias for action."},
+			"style":           map[string]any{"type": "string", "description": "Optional style hint."},
+			"negative_prompt": map[string]any{"type": "string", "description": "Optional negative prompt recorded in the manifest."},
+			"output_dir":      map[string]any{"type": "string", "description": "Directory for generated PNG assets and manifest."},
+			"output":          map[string]any{"type": "string", "description": "Single output PNG path when count is 1."},
+			"width":           map[string]any{"type": "integer", "description": "Output width in pixels.", "default": 1024},
+			"height":          map[string]any{"type": "integer", "description": "Output height in pixels.", "default": 1024},
+			"count":           map[string]any{"type": "integer", "description": "Number of PNG variants to generate.", "default": 1},
+			"seed":            map[string]any{"type": "integer", "description": "Deterministic generation seed."},
+			"format":          map[string]any{"type": "string", "description": "Output format. Built-in runtime supports png."},
+			"palette":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		},
+	}
+	skill.OutputSchema = map[string]any{
+		"type":        "object",
+		"description": "Generated local media assets and manifest metadata.",
+		"properties": map[string]any{
+			"kind":     map[string]any{"type": "string"},
+			"action":   map[string]any{"type": "string"},
+			"prompt":   map[string]any{"type": "string"},
+			"style":    map[string]any{"type": "string"},
+			"seed":     map[string]any{"type": "integer"},
+			"assets":   map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"count":    map[string]any{"type": "integer"},
+			"warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"metadata": map[string]any{"type": "object"},
+			"request":  map[string]any{"type": "object"},
+		},
+	}
+	skill.Builtin = &BuiltinInfo{
+		Runtime:       "agtx-imagen-v1",
+		Backends:      []string{"procedural_png", "prompt_manifest"},
+		ModelProfiles: []string{"procedural_image_v1", "media_plan_v1"},
+		NoPython:      true,
+	}
+	skill.Stub = false
+	return skill
+}
+
 func builtInWebFetchSkill(skill SkillManifest) SkillManifest {
 	skill.Version = "0.2.0"
 	skill.Summary = "Web fetch"
@@ -531,6 +584,9 @@ func defaultSkill(name, version, summary, description string, tags, keywords, me
 		Billing:   defaultBilling(meters),
 		Signature: &SignatureInfo{Algorithm: "reserved"},
 		Stub:      true,
+	}
+	if canonicalSkillName(name) == "imagen" {
+		return builtInImagenSkill(skill)
 	}
 	if canonicalSkillName(name) == "audio" {
 		return builtInAudioSkill(skill)
@@ -726,6 +782,8 @@ func canonicalSkillName(value string) string {
 	switch normalized {
 	case "research":
 		return deepResearchSkillName
+	case "mediagen", "media", "imagegen", "image_generation", "image_generate", "t2i", "text_to_image", "t2v", "text_to_video":
+		return "imagen"
 	case "rapidocr", "rapid_ocr", "rapidocr_v6", "rapid_ocr_v6", "paddleocr", "paddle_ocr", "ppocr", "pp_ocr", "ppocrv6", "pp_ocrv6", "pp_ocr_v6", "ocr_v6":
 		return "ocr"
 	default:
@@ -737,6 +795,8 @@ func skillAliases(skill SkillManifest) []string {
 	switch normalizeName(skill.Name) {
 	case deepResearchSkillName:
 		return []string{"research"}
+	case "imagen":
+		return []string{"mediagen", "media", "imagegen", "image_generation", "image_generate", "t2i", "text_to_image", "t2v", "text_to_video"}
 	case "ocr":
 		return []string{"rapidocr", "rapid_ocr", "rapidocr_v6", "paddleocr", "paddle_ocr", "ppocr", "pp_ocr", "ppocrv6", "pp_ocrv6", "pp_ocr_v6", "ocr_v6"}
 	default:

@@ -146,6 +146,8 @@ func (s *Service) runBuiltinManifest(ctx context.Context, manifest SkillManifest
 
 func (s *Service) runBuiltinSkill(ctx context.Context, manifest SkillManifest, options RunOptions) (RunResult, error) {
 	switch canonicalSkillName(manifest.Name) {
+	case "imagen":
+		return s.runBuiltinImagen(ctx, manifest, options)
 	case "audio":
 		return s.runBuiltinAudio(ctx, manifest, options)
 	case deepResearchSkillName:
