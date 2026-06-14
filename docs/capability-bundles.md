@@ -129,17 +129,17 @@ path fails.
 
 ## Relationship to commerce packs
 
-Commerce packs such as `web_search`, `pdf`, `documents`, `standard`, and
-`advanced` are installable products. Capability bundles are task-level
-orchestration bundles. They may reference skills from one or more commerce
-packs, but they do not define billing by themselves.
+Commerce packs such as `web_search`, `security_audit`, `pdf`, `documents`,
+`standard`, and `advanced` are installable products. Capability bundles are
+task-level orchestration bundles. They may reference skills from one or more
+commerce packs, but they do not define billing by themselves.
 
 The built-in pack catalog mirrors the first-wave packs shown on `agentex.cc`:
-`web_search`, `web_fetch`, `deep_research`, `ocr` (aliases: `rapidocr`,
-`ppocrv6`), `audio`, `imagen`, `docx`, `xlsx`, `pptx`, and `pdf`. The
-registry-compatible `documents` pack groups the four native document packs. The
-`standard` and `advanced` packs remain ordinary and advanced bundles for users
-who want one install action to provision a whole working set.
+`web_search`, `web_fetch`, `deep_research`, `security_audit`, `ocr` (aliases:
+`rapidocr`, `ppocrv6`), `audio`, `imagen`, `docx`, `xlsx`, `pptx`, and `pdf`.
+The registry-compatible `documents` pack groups the four native document packs.
+The `standard` and `advanced` packs remain ordinary and advanced bundles for
+users who want one install action to provision a whole working set.
 
 Billing, revenue share, and CPA/CPS attribution stay in the Capability Commerce
 Standard under `docs/standards/`. A task-level capability bundle should carry
@@ -150,9 +150,10 @@ explainability.
 
 agtx ships a small set of first-party scenario views for website and MCP
 integrations. They are not separate billable products; they are task templates
-that map realistic workflows to the installable `standard` or `advanced`
-commerce pack. Websites can still filter scenarios by a first-wave pack such as
-`pdf`, `xlsx`, or `deep_research` to show which real workflows use that capability.
+that map realistic workflows to installable first-wave, `standard`, or
+`advanced` commerce packs. Websites can still filter scenarios by a first-wave
+pack such as `pdf`, `xlsx`, `security_audit`, or `deep_research` to show which
+real workflows use that capability.
 
 Current built-in scenarios include:
 
@@ -168,6 +169,9 @@ Current built-in scenarios include:
   recommended for `advanced`.
 - `marketing_asset_generation`: research-backed campaign assets, generated
   visuals, and presentation handoff, recommended for `advanced`.
+- `skill_store_security_audit`: capability pack and skill-store submission
+  scanning with permission, dependency, hash, and human-review checks,
+  recommended for `security_audit`.
 
 Each scenario view includes the recommended pack, install readiness, missing
 skills, required scenario skills, expected inputs, deliverables, workflow steps,

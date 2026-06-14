@@ -108,6 +108,50 @@ func DefaultCapabilityScenarios() []CapabilityScenario {
 		},
 		{
 			SchemaVersion:     1,
+			ID:                "skill_store_security_audit",
+			Name:              "Skill Store Security Audit",
+			Summary:           "Scan capability packs, manifests, dependency changes, and package artifacts into a reviewable risk report.",
+			Description:       "Use this when a skill store submission, third-party capability pack, or package upgrade needs security review before install, approval, or publication.",
+			Industry:          "security_operations",
+			RecommendedPackID: "security_audit",
+			TaskProfile: CapabilityTaskProfile{
+				Intent:            "audit_skill_store_submission",
+				Domains:           []string{"security", "skills", "supply_chain", "store_review"},
+				Needs:             []string{"read_manifest", "scan_permissions", "check_dependencies", "verify_hashes", "prepare_human_review"},
+				RiskLevel:         "high",
+				RequiresUserInput: true,
+			},
+			Inputs: []CapabilityScenarioIO{
+				{ID: "skill_manifest", Label: "Skill manifest", Description: "Capability registry entry, manifest JSON, or plugin metadata.", Formats: []string{"json"}, Required: true},
+				{ID: "package_artifact", Label: "Package artifact", Description: "Local zip, tar.gz, directory, or immutable download URL.", Formats: []string{"zip", "tar.gz", "url"}, Required: false},
+				{ID: "review_policy", Label: "Review policy", Description: "Allowed permissions, store policy profile, or release checklist.", Formats: []string{"json", "txt"}, Required: false},
+			},
+			Deliverables: []CapabilityScenarioIO{
+				{ID: "risk_report", Label: "Risk report", Description: "Findings grouped by severity with evidence and recommended handling.", Formats: []string{"json", "markdown"}, Required: true},
+				{ID: "permission_summary", Label: "Permission summary", Description: "Declared and inferred permission surface for human review.", Formats: []string{"json"}, Required: true},
+				{ID: "approval_items", Label: "Approval items", Description: "Blocking or review-needed items before install or publication.", Formats: []string{"json", "markdown"}, Required: true},
+			},
+			Workflow: []CapabilityScenarioStep{
+				{ID: "read_submission", Title: "Read submission", Stage: "task_profile", Description: "Load manifest, registry entry, release notes, and package metadata.", Skills: []string{"security_audit"}},
+				{ID: "scan_package", Title: "Scan package", Stage: "verification", Description: "Inspect permissions, dependency files, archive paths, scripts, URLs, and hashes without executing package content.", Skills: []string{"security_audit"}},
+				{ID: "prepare_review", Title: "Prepare review", Stage: "handoff", Description: "Return risk levels, evidence, and human confirmation items for store approval or install decisions.", Skills: []string{"security_audit"}},
+			},
+			Skills: []CapabilityScenarioSkill{
+				{Name: "security_audit", Role: "validation", Priority: "required", Stage: "verification", Reason: "Runs static manifest, permission, dependency, archive, URL, and hash checks before trust decisions."},
+			},
+			AcceptanceCriteria: []string{
+				"High-risk permissions, unknown binaries, insecure URLs, missing hashes, and install-time scripts are surfaced with evidence.",
+				"The scanner does not execute submitted package content during review.",
+				"Blocking findings require explicit human approval before install or store publication.",
+			},
+			ExecutionNotes: []string{
+				"Prefer immutable HTTPS package URLs and declared SHA-256 values.",
+				"Treat local_process, filesystem_write, secrets, browser sessions, and credential permissions as high-review areas.",
+				"Use --policy strict for store publication checks.",
+			},
+		},
+		{
+			SchemaVersion:     1,
 			ID:                "contract_review",
 			Name:              "Contract Review",
 			Summary:           "Read contracts, extract clauses, compare evidence, and prepare review notes.",
@@ -499,6 +543,8 @@ func capabilityScenarioAliases(id string) []string {
 		return []string{"invoice", "invoices", "fapiao", "baoxiao", "\u53d1\u7968", "\u62a5\u9500"}
 	case "due_diligence_research":
 		return []string{"research", "diligence", "vendor_research", "diaoyan", "\u8c03\u7814", "\u5c3d\u8c03"}
+	case "skill_store_security_audit":
+		return []string{"security", "security_audit", "audit", "skill_store", "store_review", "supply_chain", "anquan", "shenji", "saomiao", "\u5b89\u5168", "\u5ba1\u8ba1", "\u626b\u63cf", "\u6280\u80fd\u5546\u5e97"}
 	case "contract_review":
 		return []string{"contract", "legal_review", "hetong", "\u5408\u540c", "\u5408\u540c\u5ba1\u67e5"}
 	case "meeting_to_presentation":

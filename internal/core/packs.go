@@ -86,6 +86,27 @@ func DefaultCapabilityPacks() []CapabilityPack {
 		},
 		{
 			SchemaVersion:   1,
+			ID:              "security_audit",
+			Name:            "security_audit",
+			Tier:            "first_wave",
+			CapabilityClass: "tool",
+			UseWhen:         "Audit or scan a capability pack, skill package, manifest, dependency change, or store submission for risky permissions, supply-chain issues, or sensitive behaviors.",
+			Summary:         "Security audit and scanning for skill stores and capability packs before install, upgrade, or publication.",
+			Description:     "Use when a package, manifest, registry entry, or skill-store submission needs a reviewable risk report with evidence and human confirmation items.",
+			Inputs:          []string{"registry entry or manifest", "package archive or download URL", "optional policy profile", "optional release notes"},
+			Outputs:         []string{"risk report", "findings with evidence", "permission and dependency summary", "recommended human review actions"},
+			Tags:            []string{"security", "audit", "scan", "skills", "supply-chain"},
+			SkillNames:      []string{"security_audit"},
+			Billing: &BillingInfo{
+				Meters: []BillingMeter{
+					{Meter: "scan", Currency: "AGTX_CREDIT", HardLimitSupported: true, RefundPolicy: "Scans that fail before a risk report is produced are not billed."},
+				},
+				RevenueShare: &RevenueShare{ISV: 70, Platform: 30, Basis: "net_revenue_after_payment_processor_tax_and_refunds"},
+			},
+			Support: firstPartySupport(),
+		},
+		{
+			SchemaVersion:   1,
 			ID:              "ocr",
 			Name:            "ocr",
 			Tier:            "first_wave",
@@ -288,7 +309,7 @@ func DefaultCapabilityPacks() []CapabilityPack {
 			Inputs:          []string{"advanced productivity task", "media or audio sources", "documents", "presentations"},
 			Outputs:         []string{"installed first-wave skills", "local install records", "billing records"},
 			Tags:            []string{"bundle", "advanced", "audio", "media", "documents"},
-			SkillNames:      []string{"web_search", "web_fetch", deepResearchSkillName, "ocr", "audio", "imagen", "docx", "xlsx", "pptx", "pdf"},
+			SkillNames:      []string{"web_search", "web_fetch", deepResearchSkillName, "security_audit", "ocr", "audio", "imagen", "docx", "xlsx", "pptx", "pdf"},
 			Billing: &BillingInfo{
 				Meters: []BillingMeter{
 					{Meter: "seat", UnitPrice: 2990, Currency: "USD", HardLimitSupported: true, RefundPolicy: "Seat charges are reversed when provisioning fails."},
@@ -752,6 +773,8 @@ func capabilityPackAliases(pack CapabilityPack) []string {
 		return []string{"web-fetch", "web_read", "web-query-read", "fetch", "read_url", "wangye_duqu", "\u7f51\u9875\u8bfb\u53d6", "\u6293\u53d6"}
 	case deepResearchSkillName:
 		return []string{"research", "analyze", "advisor", "ui_review", "diaoyan", "\u8c03\u7814", "\u7814\u7a76"}
+	case "security_audit":
+		return []string{"security", "security_scan", "security-audit", "audit", "skill_audit", "skill_scan", "store_audit", "supply_chain", "anquan", "shenji", "saomiao", "\u5b89\u5168", "\u5ba1\u8ba1", "\u626b\u63cf", "\u6280\u80fd\u5546\u5e97"}
 	case "ocr":
 		return []string{"vision", "screen_ocr", "image_text", "rapidocr", "rapid_ocr", "rapidocr_v6", "paddleocr", "paddle_ocr", "ppocr", "ppocrv6", "pp_ocrv6", "shibie", "\u8bc6\u522b", "\u6587\u5b57\u8bc6\u522b"}
 	case "audio":
@@ -808,6 +831,8 @@ func packSortRank(pack CapabilityPack) int {
 		return 20
 	case deepResearchSkillName:
 		return 30
+	case "security_audit":
+		return 35
 	case "ocr":
 		return 40
 	case "audio":

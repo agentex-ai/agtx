@@ -821,7 +821,7 @@ func TestCommercePacksJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid commerce packs json: %v\n%s", err, stdout.String())
 	}
-	if !response.OK || len(response.Data) != 13 || response.Data[0].Pack.ID != "web_search" || response.Data[9].Pack.ID != "pdf" || response.Data[11].Pack.ID != "standard" || response.Data[12].Pack.ID != "advanced" {
+	if !response.OK || len(response.Data) != 14 || response.Data[0].Pack.ID != "web_search" || response.Data[3].Pack.ID != "security_audit" || response.Data[10].Pack.ID != "pdf" || response.Data[12].Pack.ID != "standard" || response.Data[13].Pack.ID != "advanced" {
 		t.Fatalf("unexpected packs response: %s", stdout.String())
 	}
 	if response.Data[0].Installed || len(response.Data[0].Skills) == 0 || response.Data[0].Pack.UseWhen == "" || len(response.Data[0].Pack.Inputs) == 0 || len(response.Data[0].Pack.Outputs) == 0 {

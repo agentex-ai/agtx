@@ -160,6 +160,8 @@ func (s *Service) runBuiltinSkill(ctx context.Context, manifest SkillManifest, o
 		return s.runBuiltinPDF(ctx, manifest, options)
 	case "web_fetch":
 		return s.runBuiltinWebFetch(ctx, manifest, options)
+	case "security_audit":
+		return s.runBuiltinSecurityAudit(ctx, manifest, options)
 	case "ocr":
 		return s.runBuiltinOCR(ctx, manifest, options)
 	default:

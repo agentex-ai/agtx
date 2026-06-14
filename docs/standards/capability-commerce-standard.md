@@ -56,6 +56,8 @@ Supported billing meters:
 - `seat`: named user or workspace member.
 - `storage_gb_day`: persisted storage capacity over time.
 - `success`: verified completion of a declared business outcome.
+- `scan`: one static audit or security scan of a manifest, package, URL, or
+  submission artifact.
 
 Required billing fields:
 

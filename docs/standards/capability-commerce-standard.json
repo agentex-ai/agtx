@@ -45,7 +45,8 @@
       "credit",
       "seat",
       "storage_gb_day",
-      "success"
+      "success",
+      "scan"
     ],
     "required_fields": [
       "meter",

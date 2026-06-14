@@ -12,6 +12,7 @@ func DefaultRegistry() Registry {
 			defaultSkill("web_search", "0.1.0", "Web search", "Discover pages and return ranked candidate results for agents and human workflows.", []string{"web", "search", "internet"}, []string{"search", "web", "web_query", "internet", "browser", "discover", "query", "搜索", "网页", "互联网", "查找"}, []string{"call"}),
 			defaultSkill("web_fetch", "0.1.0", "Web fetch", "Fetch web pages, extract readable text, and return metadata when a page is accessible.", []string{"web", "fetch", "reader"}, []string{"fetch", "read", "web_query", "article", "url", "html", "page", "webpage", "读取", "网页", "正文", "链接", "抓取"}, []string{"page", "call"}),
 			defaultSkill(deepResearchSkillName, "0.1.0", "Deep research workflow", "Collect evidence, synthesize findings, and produce structured research notes.", []string{"research", "analysis", "report"}, []string{"deep_research", "research", "report", "analysis", "evidence", "compare", "调研", "研究", "报告", "分析", "证据"}, []string{"task"}),
+			defaultSkill("security_audit", "0.1.0", "Security audit", "Audit capability packs, skill manifests, package archives, permissions, dependencies, and download sources before install, upgrade, or store publication.", []string{"security", "audit", "scan", "supply-chain"}, []string{"security", "audit", "scan", "risk", "manifest", "permission", "permissions", "dependency", "dependencies", "supply_chain", "skill_store", "安全", "审计", "扫描", "风险", "权限", "依赖", "技能商店"}, []string{"scan"}),
 			defaultOCRSkill(),
 			defaultSkill("audio", "0.1.0", "Audio ASR/TTS", "Handle speech recognition, speech synthesis, and batch audio processing tasks.", []string{"audio", "asr", "tts"}, []string{"audio", "speech", "transcribe", "voice", "meeting", "notes", "录音", "语音", "转写", "会议", "纪要"}, []string{"minute"}),
 			defaultSkill("imagen", "0.1.0", "Media generation", "Expose image and media generation workflows through a lightweight skill entry.", []string{"image", "media", "generation"}, []string{"image", "generate", "media", "picture", "video", "creator", "图片", "生成", "绘图", "视频", "创作"}, []string{"task", "credit"}),
@@ -600,6 +601,9 @@ func defaultSkill(name, version, summary, description string, tags, keywords, me
 	if canonicalSkillName(name) == "web_fetch" {
 		return builtInWebFetchSkill(skill)
 	}
+	if canonicalSkillName(name) == "security_audit" {
+		return builtInSecurityAuditSkill(skill)
+	}
 	if canonicalSkillName(name) == "docx" || canonicalSkillName(name) == "xlsx" || canonicalSkillName(name) == "pptx" {
 		return builtInOfficeSkill(skill)
 	}
@@ -786,6 +790,8 @@ func canonicalSkillName(value string) string {
 		return "imagen"
 	case "rapidocr", "rapid_ocr", "rapidocr_v6", "rapid_ocr_v6", "paddleocr", "paddle_ocr", "ppocr", "pp_ocr", "ppocrv6", "pp_ocrv6", "pp_ocr_v6", "ocr_v6":
 		return "ocr"
+	case "security", "audit", "security_scan", "security-audit", "security-scan", "skill_audit", "skill_scan", "store_audit", "supply_chain", "supply-chain":
+		return "security_audit"
 	default:
 		return normalized
 	}
@@ -799,6 +805,8 @@ func skillAliases(skill SkillManifest) []string {
 		return []string{"media", "imagegen", "image_generation", "image_generate", "t2i", "text_to_image", "t2v", "text_to_video"}
 	case "ocr":
 		return []string{"rapidocr", "rapid_ocr", "rapidocr_v6", "paddleocr", "paddle_ocr", "ppocr", "pp_ocr", "ppocrv6", "pp_ocrv6", "pp_ocr_v6", "ocr_v6"}
+	case "security_audit":
+		return []string{"security", "audit", "security_scan", "security-audit", "security-scan", "skill_audit", "skill_scan", "store_audit", "supply_chain", "supply-chain"}
 	default:
 		return nil
 	}

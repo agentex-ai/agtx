@@ -165,7 +165,7 @@ func usageReportingConfigured(config Config) bool {
 
 func defaultRunUsageQuantity(meter string) float64 {
 	switch meter {
-	case "call", "task", "page", "minute", "token", "credit", "seat", "storage_gb_day", "success":
+	case "call", "task", "page", "minute", "token", "credit", "seat", "storage_gb_day", "success", "scan":
 		return 1
 	default:
 		return 1

@@ -250,13 +250,13 @@ func TestRegistryImplementationStatusReportsDefaultStubs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build status: %v", err)
 	}
-	if status.Total != 10 || status.Implemented != 10 || status.Partial != 0 || status.Stub != 0 || status.Incomplete != 0 {
+	if status.Total != 11 || status.Implemented != 11 || status.Partial != 0 || status.Stub != 0 || status.Incomplete != 0 {
 		t.Fatalf("unexpected implementation totals: %#v", status)
 	}
 	if len(status.Missing) != 0 {
 		t.Fatalf("expected all default skills to be implemented: %#v", status.Missing)
 	}
-	if len(status.PlatformCoverage) != 2 || status.PlatformCoverage[0].Implemented != 10 || status.PlatformCoverage[0].Stub != 0 || status.PlatformCoverage[1].Implemented != 10 || status.PlatformCoverage[1].Stub != 0 {
+	if len(status.PlatformCoverage) != 2 || status.PlatformCoverage[0].Implemented != 11 || status.PlatformCoverage[0].Stub != 0 || status.PlatformCoverage[1].Implemented != 11 || status.PlatformCoverage[1].Stub != 0 {
 		t.Fatalf("unexpected platform coverage: %#v", status.PlatformCoverage)
 	}
 }

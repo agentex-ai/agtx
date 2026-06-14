@@ -20,6 +20,7 @@ agtx install pdf --plan --json
 agtx install pdf docx --yes
 agtx run pdf --timeout-ms 30000 --output-limit-bytes 1048576 --json
 agtx run docx --json -- ./sample.docx
+agtx run security_audit --json -- --manifest ./manifest.json --policy strict
 agtx uninstall pdf --plan --json
 agtx list --json
 agtx status
@@ -175,6 +176,20 @@ ground truth and review it for high-stakes work.
 ```sh
 agtx run deep_research --json -- --question "How should capability packs be reused?" --max-sources 5
 agtx run deep_research --json --input task.json
+```
+
+### Built-In Security Audit
+
+`security_audit` is available as a built-in no-Python static scanner for skill
+store submissions, capability pack manifests, local archives or directories,
+permissions, dependency declarations, download URLs, hashes, and release notes.
+It does not execute package content and does not automatically download remote
+packages; URL inputs are inspected as declared metadata.
+
+```sh
+agtx run security_audit --json -- --manifest ./manifest.json --policy strict
+agtx run security_audit --json -- --path ./skill-package.zip --expected-sha256 <sha256>
+agtx run security_audit --json --input security-audit-task.json
 ```
 
 ### Built-In Audio

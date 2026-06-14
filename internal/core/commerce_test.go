@@ -145,7 +145,7 @@ func TestDefaultCapabilityPacksExposeWebsiteFirstWaveAndBundles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list capability packs: %v", err)
 	}
-	expected := []string{"web_search", "web_fetch", "deep_research", "ocr", "audio", "imagen", "docx", "xlsx", "pptx", "pdf", "documents", "standard", "advanced"}
+	expected := []string{"web_search", "web_fetch", "deep_research", "security_audit", "ocr", "audio", "imagen", "docx", "xlsx", "pptx", "pdf", "documents", "standard", "advanced"}
 	if len(packs) != len(expected) {
 		t.Fatalf("expected website first-wave packs and bundles, got %#v", packs)
 	}
@@ -180,6 +180,13 @@ func TestDefaultCapabilityPacksExposeWebsiteFirstWaveAndBundles(t *testing.T) {
 	}
 	if ocr.Pack.ID != "ocr" || !containsString(ocr.Pack.Tags, "ppocrv6") || !containsString(ocr.Pack.Inputs, "optional model profile such as ppocrv6") {
 		t.Fatalf("expected rapidocr alias and ppocrv6 pack metadata, got %#v", ocr.Pack)
+	}
+	security, err := service.GetCapabilityPack("security")
+	if err != nil {
+		t.Fatalf("get security alias: %v", err)
+	}
+	if security.Pack.ID != "security_audit" || !hasBillingMeter(security.Pack.Billing.Meters, "scan") || !containsString(security.Pack.Tags, "supply-chain") {
+		t.Fatalf("expected security audit pack metadata, got %#v", security.Pack)
 	}
 	standard, err := service.GetCapabilityPack("standard")
 	if err != nil {
@@ -235,6 +242,13 @@ func TestCapabilityScenariosMapRealTasksToPacksAndPlans(t *testing.T) {
 	}
 	if meeting.Scenario.ID != "meeting_to_presentation" || meeting.RecommendedPack.Pack.ID != "advanced" || !scenarioHasRequiredSkill(meeting, "audio") || !scenarioHasRequiredSkill(meeting, "pptx") {
 		t.Fatalf("unexpected meeting scenario mapping: %#v", meeting)
+	}
+	security, err := service.GetCapabilityScenario("skill_store")
+	if err != nil {
+		t.Fatalf("get security scenario alias: %v", err)
+	}
+	if security.Scenario.ID != "skill_store_security_audit" || security.RecommendedPack.Pack.ID != "security_audit" || !scenarioHasRequiredSkill(security, "security_audit") {
+		t.Fatalf("unexpected security scenario mapping: %#v", security)
 	}
 }
 
