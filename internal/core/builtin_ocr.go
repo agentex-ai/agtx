@@ -146,6 +146,8 @@ func (s *Service) runBuiltinManifest(ctx context.Context, manifest SkillManifest
 
 func (s *Service) runBuiltinSkill(ctx context.Context, manifest SkillManifest, options RunOptions) (RunResult, error) {
 	switch canonicalSkillName(manifest.Name) {
+	case "web_search":
+		return s.runBuiltinWebSearch(ctx, manifest, options)
 	case "docx", "xlsx", "pptx":
 		return s.runBuiltinOffice(ctx, manifest, options)
 	case "pdf":

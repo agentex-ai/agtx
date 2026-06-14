@@ -218,6 +218,57 @@ func defaultOCRSkill() SkillManifest {
 	return skill
 }
 
+func builtInWebSearchSkill(skill SkillManifest) SkillManifest {
+	skill.Version = "0.2.0"
+	skill.Summary = "Web search"
+	skill.Description = "Search the web through a lightweight HTTP search endpoint and return ranked result candidates for agents before known-URL fetching."
+	skill.Tags = appendUniqueRegistryStrings(skill.Tags, "builtin", "search")
+	skill.Permissions = []Permission{{Name: "network", Description: "Sends HTTPS requests to a search endpoint, or localhost HTTP for local fixtures and private proxies."}}
+	skill.InputSchema = map[string]any{
+		"type":                 "object",
+		"description":          "Web search query input.",
+		"additionalProperties": true,
+		"required":             []string{"query"},
+		"properties": map[string]any{
+			"query":       map[string]any{"type": "string", "description": "Search query text."},
+			"q":           map[string]any{"type": "string", "description": "Alias for query."},
+			"provider":    map[string]any{"type": "string", "description": "Provider label for the result source."},
+			"base_url":    map[string]any{"type": "string", "description": "Optional HTTPS search endpoint or localhost HTTP endpoint. The runtime appends q and count query parameters."},
+			"max_results": map[string]any{"type": "integer", "description": "Maximum ranked results to return.", "default": 10},
+			"timeout_ms":  map[string]any{"type": "integer", "description": "Optional per-request timeout in milliseconds."},
+			"max_bytes":   map[string]any{"type": "integer", "description": "Maximum response body bytes to read before parsing."},
+			"user_agent":  map[string]any{"type": "string", "description": "Optional user agent override."},
+			"region":      map[string]any{"type": "string", "description": "Optional region hint for compatible providers."},
+			"language":    map[string]any{"type": "string", "description": "Optional language hint for compatible providers."},
+			"safe_search": map[string]any{"type": "string", "description": "Optional safe-search hint for compatible providers."},
+		},
+	}
+	skill.OutputSchema = map[string]any{
+		"type":        "object",
+		"description": "Ranked search result candidates.",
+		"properties": map[string]any{
+			"query":        map[string]any{"type": "string"},
+			"provider":     map[string]any{"type": "string"},
+			"url":          map[string]any{"type": "string"},
+			"final_url":    map[string]any{"type": "string"},
+			"status_code":  map[string]any{"type": "integer"},
+			"content_type": map[string]any{"type": "string"},
+			"results":      map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"count":        map[string]any{"type": "integer"},
+			"bytes":        map[string]any{"type": "integer"},
+			"warnings":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		},
+	}
+	skill.Builtin = &BuiltinInfo{
+		Runtime:       "agtx-web-search-v1",
+		Backends:      []string{"search_http"},
+		ModelProfiles: []string{"search_results_v1"},
+		NoPython:      true,
+	}
+	skill.Stub = false
+	return skill
+}
+
 func builtInWebFetchSkill(skill SkillManifest) SkillManifest {
 	skill.Version = "0.2.0"
 	skill.Summary = "Web fetch"
@@ -379,6 +430,9 @@ func defaultSkill(name, version, summary, description string, tags, keywords, me
 		Billing:   defaultBilling(meters),
 		Signature: &SignatureInfo{Algorithm: "reserved"},
 		Stub:      true,
+	}
+	if canonicalSkillName(name) == "web_search" {
+		return builtInWebSearchSkill(skill)
 	}
 	if canonicalSkillName(name) == "web_fetch" {
 		return builtInWebFetchSkill(skill)

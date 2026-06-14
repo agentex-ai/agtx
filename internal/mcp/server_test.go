@@ -1926,8 +1926,8 @@ func TestMCPRunSkillAcceptsScenarioID(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
 		t.Fatalf("invalid run response json: %v\n%s", err, stdout.String())
 	}
-	if !response.Result.IsError || response.Result.StructuredContent.OK || response.Result.StructuredContent.Error.Code != "not_implemented" {
-		t.Fatalf("expected structured run error for stub skill: %s", stdout.String())
+	if !response.Result.IsError || response.Result.StructuredContent.OK || response.Result.StructuredContent.Error.Code != "invalid_argument" {
+		t.Fatalf("expected structured run error for missing search query: %s", stdout.String())
 	}
 	if response.Result.StructuredContent.Data.Name != "web_search" || response.Result.StructuredContent.Data.ScenarioID != "invoice_processing" {
 		t.Fatalf("expected canonical scenario id in partial run data: %s", stdout.String())

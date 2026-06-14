@@ -138,6 +138,20 @@ models scale the crop width per detected text box up to `rec_max_width`, while
 `--rec-width` forces a fixed recognizer width. OCR never falls back to Python,
 Node, or npm wrappers.
 
+### Built-In Web Search
+
+`web_search` is available as a built-in no-Python runtime for lightweight web
+discovery. It sends HTTPS requests to a search endpoint, parses JSON search
+proxy responses or HTML result pages, and returns ranked title, URL, snippet,
+and source candidates. Localhost HTTP endpoints are allowed for tests and
+private search proxies.
+
+```sh
+agtx run web_search --json -- "agentex capability packs"
+agtx run web_search --json -- --query "agentex capability packs" --max-results 5
+agtx run web_search --json -- --base-url http://127.0.0.1:8080/search --query "private index"
+```
+
 ### Built-In Web Fetch
 
 `web_fetch` is available as a built-in no-Python runtime for known URLs. It uses
