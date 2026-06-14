@@ -249,13 +249,13 @@ func TestRegistryImplementationStatusReportsDefaultStubs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build status: %v", err)
 	}
-	if status.Total != 10 || status.Implemented != 2 || status.Partial != 0 || status.Stub != 8 || status.Incomplete != 0 {
+	if status.Total != 10 || status.Implemented != 5 || status.Partial != 0 || status.Stub != 5 || status.Incomplete != 0 {
 		t.Fatalf("unexpected implementation totals: %#v", status)
 	}
-	if len(status.Missing) != 8 || !containsString(status.Missing, "pdf") || containsString(status.Missing, "ocr") || containsString(status.Missing, "web_fetch") {
+	if len(status.Missing) != 5 || !containsString(status.Missing, "pdf") || containsString(status.Missing, "ocr") || containsString(status.Missing, "web_fetch") || containsString(status.Missing, "docx") || containsString(status.Missing, "xlsx") || containsString(status.Missing, "pptx") {
 		t.Fatalf("expected default skills to be missing native packages: %#v", status.Missing)
 	}
-	if len(status.PlatformCoverage) != 2 || status.PlatformCoverage[0].Implemented != 2 || status.PlatformCoverage[0].Stub != 8 || status.PlatformCoverage[1].Implemented != 2 || status.PlatformCoverage[1].Stub != 8 {
+	if len(status.PlatformCoverage) != 2 || status.PlatformCoverage[0].Implemented != 5 || status.PlatformCoverage[0].Stub != 5 || status.PlatformCoverage[1].Implemented != 5 || status.PlatformCoverage[1].Stub != 5 {
 		t.Fatalf("unexpected platform coverage: %#v", status.PlatformCoverage)
 	}
 }

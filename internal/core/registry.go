@@ -15,9 +15,9 @@ func DefaultRegistry() Registry {
 			defaultOCRSkill(),
 			defaultSkill("audio", "0.1.0", "Audio ASR/TTS", "Handle speech recognition, speech synthesis, and batch audio processing tasks.", []string{"audio", "asr", "tts"}, []string{"audio", "speech", "transcribe", "voice", "meeting", "notes", "录音", "语音", "转写", "会议", "纪要"}, []string{"minute"}),
 			defaultSkill("imagen", "0.1.0", "Media generation", "Expose image and media generation workflows through a lightweight skill entry.", []string{"image", "media", "generation"}, []string{"image", "generate", "mediagen", "media", "picture", "video", "creator", "图片", "生成", "绘图", "视频", "创作"}, []string{"task", "credit"}),
-			defaultSkill("docx", "0.1.0", "Word document", "Read, summarize, and extract structured content from Word documents.", []string{"document", "docx", "word"}, []string{"docx", "word", "document", "summary", "summarize", "contract", "文档", "Word", "摘要", "总结", "合同"}, []string{"task"}),
-			defaultSkill("xlsx", "0.1.0", "Excel spreadsheet", "Read sheets, ranges, and cells from Excel workbooks for structured extraction.", []string{"document", "xlsx", "spreadsheet"}, []string{"xlsx", "excel", "sheet", "spreadsheet", "table", "invoice", "表格", "Excel", "发票", "账单", "数据"}, []string{"task"}),
-			defaultSkill("pptx", "0.1.0", "PowerPoint deck", "Extract slide text, notes, placeholders, and structure from presentation decks.", []string{"document", "pptx", "powerpoint", "slides"}, []string{"pptx", "powerpoint", "slides", "deck", "presentation", "演示", "幻灯片", "课件", "备注"}, []string{"task"}),
+			defaultSkill("docx", "0.2.0", "Word document", "Read, summarize, and extract structured content from Word documents.", []string{"document", "docx", "word"}, []string{"docx", "word", "document", "summary", "summarize", "contract", "文档", "Word", "摘要", "总结", "合同"}, []string{"task"}),
+			defaultSkill("xlsx", "0.2.0", "Excel spreadsheet", "Read sheets, ranges, and cells from Excel workbooks for structured extraction.", []string{"document", "xlsx", "spreadsheet"}, []string{"xlsx", "excel", "sheet", "spreadsheet", "table", "invoice", "表格", "Excel", "发票", "账单", "数据"}, []string{"task"}),
+			defaultSkill("pptx", "0.2.0", "PowerPoint deck", "Extract slide text, notes, placeholders, and structure from presentation decks.", []string{"document", "pptx", "powerpoint", "slides"}, []string{"pptx", "powerpoint", "slides", "deck", "presentation", "演示", "幻灯片", "课件", "备注"}, []string{"task"}),
 			defaultSkill("pdf", "0.1.0", "PDF", "Extract text, split pages, prepare OCR fallback, and index PDF documents.", []string{"document", "pdf"}, []string{"pdf", "paper", "ebook", "bill", "invoice", "summary", "summarize", "PDF", "论文", "账单", "发票", "摘要"}, []string{"page"}),
 		},
 	}
@@ -261,6 +261,48 @@ func builtInWebFetchSkill(skill SkillManifest) SkillManifest {
 	return skill
 }
 
+func builtInOfficeSkill(skill SkillManifest) SkillManifest {
+	kind := canonicalSkillName(skill.Name)
+	skill.Summary = strings.TrimSpace(skill.Summary)
+	skill.Description = "Read OpenXML " + strings.ToUpper(kind) + " files, extract text, metadata, and lightweight structure with the Go standard library."
+	skill.Tags = appendUniqueRegistryStrings(skill.Tags, "builtin", "openxml")
+	skill.InputSchema = map[string]any{
+		"type":                 "object",
+		"description":          "OpenXML document extraction input.",
+		"additionalProperties": true,
+		"properties": map[string]any{
+			"path":     map[string]any{"type": "string", "description": "Local DOCX/XLSX/PPTX file path."},
+			"input":    map[string]any{"type": "string", "description": "Alias for path when JSON input is used."},
+			"file":     map[string]any{"type": "string", "description": "Alias for path when JSON input is used."},
+			"action":   map[string]any{"type": "string", "description": "Read action. The built-in runtime currently supports extract/read."},
+			"max_rows": map[string]any{"type": "integer", "description": "Maximum rows to return per XLSX sheet."},
+		},
+	}
+	skill.OutputSchema = map[string]any{
+		"type":        "object",
+		"description": "Extracted OpenXML text and structure.",
+		"properties": map[string]any{
+			"kind":       map[string]any{"type": "string"},
+			"source":     map[string]any{"type": "string"},
+			"action":     map[string]any{"type": "string"},
+			"text":       map[string]any{"type": "string"},
+			"properties": map[string]any{"type": "object"},
+			"parts":      map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"sheets":     map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"slides":     map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"warnings":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		},
+	}
+	skill.Builtin = &BuiltinInfo{
+		Runtime:       "agtx-openxml-read-v1",
+		Backends:      []string{"openxml"},
+		ModelProfiles: []string{kind + "_v1"},
+		NoPython:      true,
+	}
+	skill.Stub = false
+	return skill
+}
+
 func defaultSkill(name, version, summary, description string, tags, keywords, meters []string) SkillManifest {
 	capabilityClass := "tool"
 	if canonicalSkillName(name) == deepResearchSkillName {
@@ -300,6 +342,9 @@ func defaultSkill(name, version, summary, description string, tags, keywords, me
 	}
 	if canonicalSkillName(name) == "web_fetch" {
 		return builtInWebFetchSkill(skill)
+	}
+	if canonicalSkillName(name) == "docx" || canonicalSkillName(name) == "xlsx" || canonicalSkillName(name) == "pptx" {
+		return builtInOfficeSkill(skill)
 	}
 	return skill
 }

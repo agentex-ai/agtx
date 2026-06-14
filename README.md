@@ -9,7 +9,8 @@
 The v1 implementation is intentionally small: one Go binary, standard library
 first, and no Python/NPM/Homebrew runtime dependency. The built-in OCR path is
 native-only and uses explicit ONNX Runtime or ncnn adapter builds instead of
-Python wrappers.
+Python wrappers. DOCX, XLSX, and PPTX text extraction is built in through the Go
+standard library OpenXML reader.
 
 ## Commands
 
@@ -18,7 +19,7 @@ agtx search "summarize PDFs and Word files"
 agtx install pdf --plan --json
 agtx install pdf docx --yes
 agtx run pdf --timeout-ms 30000 --output-limit-bytes 1048576 --json
-agtx run docx --agent-name Codex --json -- action=create path=sample.docx title=Extracted content="hello from Agentex"
+agtx run docx --json -- ./sample.docx
 agtx uninstall pdf --plan --json
 agtx list --json
 agtx status
@@ -146,6 +147,19 @@ rejects remote plaintext HTTP except for localhost fixtures.
 ```sh
 agtx run web_fetch --json -- https://example.com
 agtx run web_fetch --json -- --url https://example.com --text-only
+```
+
+### Built-In OpenXML Documents
+
+`docx`, `xlsx`, and `pptx` are built-in OpenXML readers for local Office files.
+They run inside the agtx binary with Go's standard library, so normal and Pro
+accounts do not need an extra package download for basic text, metadata, sheet,
+row, slide, and speaker-note extraction on Windows or macOS.
+
+```sh
+agtx run docx --json -- ./contract.docx
+agtx run xlsx --json -- --path ./invoice.xlsx --max-rows 500
+agtx run pptx --json -- --file ./deck.pptx
 ```
 
 ## Agent Integration
