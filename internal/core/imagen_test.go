@@ -69,15 +69,15 @@ func TestRunImagenWithoutInstallGeneratesPNGAssets(t *testing.T) {
 	}
 }
 
-func TestRunImagenAliasWritesSingleOutput(t *testing.T) {
+func TestRunImagenWritesSingleOutputFromFlags(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "single.png")
 	service := NewService(PathsForRoot(t.TempDir()))
-	result, err := service.RunSkill(context.Background(), "mediagen", []string{"--prompt", "small launch badge", "--output", path, "--width", "80", "--height", "80"}, nil)
+	result, err := service.RunSkill(context.Background(), "imagen", []string{"--prompt", "small launch badge", "--output", path, "--width", "80", "--height", "80"}, nil)
 	if err != nil {
-		t.Fatalf("run mediagen alias: %v result=%#v", err, result)
+		t.Fatalf("run imagen flags: %v result=%#v", err, result)
 	}
 	if result.Name != "imagen" || result.Version != "0.2.0" || result.Stub {
-		t.Fatalf("unexpected alias run result: %#v", result)
+		t.Fatalf("unexpected imagen run result: %#v", result)
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("expected single output path: %v", err)

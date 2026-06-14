@@ -757,7 +757,7 @@ func capabilityPackAliases(pack CapabilityPack) []string {
 	case "audio":
 		return []string{"asr", "tts", "transcribe", "speech", "yuyin", "\u97f3\u9891", "\u8bed\u97f3", "\u8f6c\u5199"}
 	case "imagen":
-		return []string{"mediagen", "media", "image", "image_generation", "imagegen", "t2i", "t2v", "shengcheng", "\u5a92\u4f53", "\u56fe\u7247\u751f\u6210", "\u751f\u6210"}
+		return []string{"media", "image", "image_generation", "imagegen", "t2i", "t2v", "shengcheng", "\u5a92\u4f53", "\u56fe\u7247\u751f\u6210", "\u751f\u6210"}
 	case "docx":
 		return []string{"word", "document", "word_document", "wendang", "\u6587\u6863", "\u6587\u6863\u80fd\u529b\u5305"}
 	case "xlsx":

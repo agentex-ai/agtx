@@ -1580,7 +1580,7 @@ func TestMCPWebsiteCapabilityPackPlan(t *testing.T) {
 	service := core.NewService(core.PathsForRoot(t.TempDir()))
 	input := strings.NewReader(
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"plan_capability_pack_install","arguments":{"pack":"pdf"}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"plan_capability_pack_install","arguments":{"pack":"mediagen"}}}` + "\n",
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"plan_capability_pack_install","arguments":{"pack":"imagen"}}}` + "\n",
 	)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -1635,7 +1635,7 @@ func TestMCPWebsiteCapabilityPackPlan(t *testing.T) {
 		t.Fatalf("invalid media plan json: %v\n%s", err, lines[1])
 	}
 	if media.Result.IsError || media.Result.StructuredContent.Pack.Pack.ID != "imagen" {
-		t.Fatalf("expected mediagen alias to resolve to imagen: %s", lines[1])
+		t.Fatalf("expected imagen pack plan: %s", lines[1])
 	}
 }
 

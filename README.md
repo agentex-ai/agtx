@@ -194,7 +194,7 @@ agtx run audio --json --input meeting-audio-task.json
 
 ### Built-In Imagen
 
-`imagen` (alias: `mediagen`) is available as a built-in no-Python local media
+`imagen` is available as a built-in no-Python local media
 workflow. It creates deterministic procedural PNG assets from prompts, writes a
 generation manifest, and returns file paths, sizes, hashes, seeds, palette, and
 request metadata for other agent frameworks to consume. Photorealistic diffusion
@@ -203,7 +203,7 @@ backends behind the same pack contract.
 
 ```sh
 agtx run imagen --json -- --prompt "launch badge for capability packs" --width 1024 --height 1024
-agtx run mediagen --json --input media-task.json
+agtx run imagen --json --input media-task.json
 ```
 
 ### Built-In OpenXML Documents
@@ -336,7 +336,7 @@ Website first-wave packs:
 - `ocr` (aliases: `rapidocr`, `ppocrv6`): RapidOCR-compatible screenshots,
   scans, PDF pages, UI images, and photo text extraction with PP-OCRv6-ready metadata.
 - `audio`: ASR, TTS, meeting notes, and batch audio jobs.
-- `imagen` (alias: `mediagen`): text-to-image, image-to-video, and media generation.
+- `imagen`: text-to-image, image-to-video, and media generation.
 - `docx`, `xlsx`, `pptx`, and `pdf`: native document-family packs.
 
 Compatibility and bundle packs:

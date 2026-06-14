@@ -14,7 +14,7 @@ func DefaultRegistry() Registry {
 			defaultSkill(deepResearchSkillName, "0.1.0", "Deep research workflow", "Collect evidence, synthesize findings, and produce structured research notes.", []string{"research", "analysis", "report"}, []string{"deep_research", "research", "report", "analysis", "evidence", "compare", "调研", "研究", "报告", "分析", "证据"}, []string{"task"}),
 			defaultOCRSkill(),
 			defaultSkill("audio", "0.1.0", "Audio ASR/TTS", "Handle speech recognition, speech synthesis, and batch audio processing tasks.", []string{"audio", "asr", "tts"}, []string{"audio", "speech", "transcribe", "voice", "meeting", "notes", "录音", "语音", "转写", "会议", "纪要"}, []string{"minute"}),
-			defaultSkill("imagen", "0.1.0", "Media generation", "Expose image and media generation workflows through a lightweight skill entry.", []string{"image", "media", "generation"}, []string{"image", "generate", "mediagen", "media", "picture", "video", "creator", "图片", "生成", "绘图", "视频", "创作"}, []string{"task", "credit"}),
+			defaultSkill("imagen", "0.1.0", "Media generation", "Expose image and media generation workflows through a lightweight skill entry.", []string{"image", "media", "generation"}, []string{"image", "generate", "media", "picture", "video", "creator", "图片", "生成", "绘图", "视频", "创作"}, []string{"task", "credit"}),
 			defaultSkill("docx", "0.2.0", "Word document", "Read, summarize, and extract structured content from Word documents.", []string{"document", "docx", "word"}, []string{"docx", "word", "document", "summary", "summarize", "contract", "文档", "Word", "摘要", "总结", "合同"}, []string{"task"}),
 			defaultSkill("xlsx", "0.2.0", "Excel spreadsheet", "Read sheets, ranges, and cells from Excel workbooks for structured extraction.", []string{"document", "xlsx", "spreadsheet"}, []string{"xlsx", "excel", "sheet", "spreadsheet", "table", "invoice", "表格", "Excel", "发票", "账单", "数据"}, []string{"task"}),
 			defaultSkill("pptx", "0.2.0", "PowerPoint deck", "Extract slide text, notes, placeholders, and structure from presentation decks.", []string{"document", "pptx", "powerpoint", "slides"}, []string{"pptx", "powerpoint", "slides", "deck", "presentation", "演示", "幻灯片", "课件", "备注"}, []string{"task"}),
@@ -782,7 +782,7 @@ func canonicalSkillName(value string) string {
 	switch normalized {
 	case "research":
 		return deepResearchSkillName
-	case "mediagen", "media", "imagegen", "image_generation", "image_generate", "t2i", "text_to_image", "t2v", "text_to_video":
+	case "media", "imagegen", "image_generation", "image_generate", "t2i", "text_to_image", "t2v", "text_to_video":
 		return "imagen"
 	case "rapidocr", "rapid_ocr", "rapidocr_v6", "rapid_ocr_v6", "paddleocr", "paddle_ocr", "ppocr", "pp_ocr", "ppocrv6", "pp_ocrv6", "pp_ocr_v6", "ocr_v6":
 		return "ocr"
@@ -796,7 +796,7 @@ func skillAliases(skill SkillManifest) []string {
 	case deepResearchSkillName:
 		return []string{"research"}
 	case "imagen":
-		return []string{"mediagen", "media", "imagegen", "image_generation", "image_generate", "t2i", "text_to_image", "t2v", "text_to_video"}
+		return []string{"media", "imagegen", "image_generation", "image_generate", "t2i", "text_to_image", "t2v", "text_to_video"}
 	case "ocr":
 		return []string{"rapidocr", "rapid_ocr", "rapidocr_v6", "paddleocr", "paddle_ocr", "ppocr", "pp_ocr", "ppocrv6", "pp_ocrv6", "pp_ocr_v6", "ocr_v6"}
 	default:

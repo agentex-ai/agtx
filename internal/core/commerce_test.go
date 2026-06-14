@@ -167,12 +167,12 @@ func TestDefaultCapabilityPacksExposeWebsiteFirstWaveAndBundles(t *testing.T) {
 	if pdf.Pack.CapabilityClass != "tool" || len(pdf.Pack.SkillNames) != 1 || pdf.Pack.SkillNames[0] != "pdf" || !hasBillingMeter(pdf.Pack.Billing.Meters, "page") {
 		t.Fatalf("expected single pdf capability pack metadata: %#v", pdf.Pack)
 	}
-	media, err := service.GetCapabilityPack("mediagen")
+	media, err := service.GetCapabilityPack("imagen")
 	if err != nil {
-		t.Fatalf("get mediagen alias: %v", err)
+		t.Fatalf("get imagen pack: %v", err)
 	}
 	if media.Pack.ID != "imagen" {
-		t.Fatalf("expected mediagen alias to resolve to imagen, got %#v", media.Pack)
+		t.Fatalf("expected imagen pack, got %#v", media.Pack)
 	}
 	ocr, err := service.GetCapabilityPack("rapidocr")
 	if err != nil {
@@ -895,9 +895,9 @@ func TestCommerceHTTPHandlerExposesWebsiteQueries(t *testing.T) {
 		t.Fatalf("unexpected pdf pack response: %#v", packsResponse)
 	}
 
-	response, err = http.Get(server.URL + "/v1/commerce/packs?pack_id=mediagen")
+	response, err = http.Get(server.URL + "/v1/commerce/packs?pack_id=imagen")
 	if err != nil {
-		t.Fatalf("get mediagen pack alias: %v", err)
+		t.Fatalf("get imagen pack: %v", err)
 	}
 	defer response.Body.Close()
 	var mediaPacksResponse struct {
@@ -908,7 +908,7 @@ func TestCommerceHTTPHandlerExposesWebsiteQueries(t *testing.T) {
 		t.Fatalf("decode media packs response: %v", err)
 	}
 	if !mediaPacksResponse.OK || len(mediaPacksResponse.Data) != 1 || mediaPacksResponse.Data[0].Pack.ID != "imagen" {
-		t.Fatalf("unexpected mediagen pack response: %#v", mediaPacksResponse)
+		t.Fatalf("unexpected imagen pack response: %#v", mediaPacksResponse)
 	}
 
 	response, err = http.Get(server.URL + "/v1/commerce/scenarios?pack_id=pdf")
