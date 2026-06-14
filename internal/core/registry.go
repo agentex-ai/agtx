@@ -222,7 +222,7 @@ func builtInWebFetchSkill(skill SkillManifest) SkillManifest {
 	skill.Version = "0.2.0"
 	skill.Summary = "Web fetch"
 	skill.Description = "Fetch HTTP(S) pages, extract readable text, links, title, and metadata for agents that already know the URL."
-	skill.Tags = appendUniqueStrings(skill.Tags, "builtin")
+	skill.Tags = appendUniqueRegistryStrings(skill.Tags, "builtin")
 	skill.InputSchema = map[string]any{
 		"type":                 "object",
 		"description":          "Known-URL web page fetch input.",
@@ -304,7 +304,7 @@ func defaultSkill(name, version, summary, description string, tags, keywords, me
 	return skill
 }
 
-func appendUniqueStrings(values []string, more ...string) []string {
+func appendUniqueRegistryStrings(values []string, more ...string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(values)+len(more))
 	for _, value := range append(append([]string{}, values...), more...) {

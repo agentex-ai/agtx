@@ -146,6 +146,8 @@ func (s *Service) runBuiltinManifest(ctx context.Context, manifest SkillManifest
 
 func (s *Service) runBuiltinSkill(ctx context.Context, manifest SkillManifest, options RunOptions) (RunResult, error) {
 	switch canonicalSkillName(manifest.Name) {
+	case "web_fetch":
+		return s.runBuiltinWebFetch(ctx, manifest, options)
 	case "ocr":
 		return s.runBuiltinOCR(ctx, manifest, options)
 	default:

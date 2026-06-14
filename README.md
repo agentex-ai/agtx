@@ -137,6 +137,17 @@ models scale the crop width per detected text box up to `rec_max_width`, while
 `--rec-width` forces a fixed recognizer width. OCR never falls back to Python,
 Node, or npm wrappers.
 
+### Built-In Web Fetch
+
+`web_fetch` is available as a built-in no-Python runtime for known URLs. It uses
+the Go HTTP stack, returns page title, metadata, links, and readable text, and
+rejects remote plaintext HTTP except for localhost fixtures.
+
+```sh
+agtx run web_fetch --json -- https://example.com
+agtx run web_fetch --json -- --url https://example.com --text-only
+```
+
 ## Agent Integration
 
 Prefer MCP stdio:
