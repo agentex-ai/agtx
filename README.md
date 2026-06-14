@@ -163,6 +163,20 @@ agtx run web_fetch --json -- https://example.com
 agtx run web_fetch --json -- --url https://example.com --text-only
 ```
 
+### Built-In Deep Research
+
+`deep_research` is available as a built-in no-Python workflow. It plans search
+queries, reads supplied sources or discovered URLs with the built-in web tools,
+extracts relevant evidence sentences, and returns structured `sources`,
+`findings`, `caveats`, `next_actions`, and a markdown `report`. It is an
+extractive workflow, so agents should treat the cited source trail as the
+ground truth and review it for high-stakes work.
+
+```sh
+agtx run deep_research --json -- --question "How should capability packs be reused?" --max-sources 5
+agtx run deep_research --json --input task.json
+```
+
 ### Built-In OpenXML Documents
 
 `docx`, `xlsx`, `pptx`, and text-oriented `pdf` extraction are built in for

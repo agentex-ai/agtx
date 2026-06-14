@@ -269,6 +269,60 @@ func builtInWebSearchSkill(skill SkillManifest) SkillManifest {
 	return skill
 }
 
+func builtInDeepResearchSkill(skill SkillManifest) SkillManifest {
+	skill.Version = "0.2.0"
+	skill.Summary = "Deep research workflow"
+	skill.Description = "Plan searches, gather candidate sources, fetch readable pages, and produce extractive evidence notes and a structured research brief without external runtimes."
+	skill.Tags = appendUniqueRegistryStrings(skill.Tags, "builtin", "research_workflow")
+	skill.Permissions = []Permission{{Name: "network", Description: "Optionally sends HTTPS requests to search and source URLs, or localhost HTTP for local fixtures and private proxies."}}
+	skill.InputSchema = map[string]any{
+		"type":                 "object",
+		"description":          "Research task input.",
+		"additionalProperties": true,
+		"required":             []string{"question"},
+		"properties": map[string]any{
+			"question":        map[string]any{"type": "string", "description": "Research question or task."},
+			"query":           map[string]any{"type": "string", "description": "Alias for question."},
+			"topic":           map[string]any{"type": "string", "description": "Alias for question."},
+			"scope":           map[string]any{"type": "string", "description": "Optional scope or constraints."},
+			"depth":           map[string]any{"type": "string", "description": "Optional depth hint such as quick, standard, or deep."},
+			"search_queries":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"urls":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"sources":         map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"max_sources":     map[string]any{"type": "integer", "description": "Maximum sources to retain.", "default": 5},
+			"max_results":     map[string]any{"type": "integer", "description": "Maximum search results per query."},
+			"search_base_url": map[string]any{"type": "string", "description": "Optional HTTPS search endpoint or localhost HTTP search proxy."},
+			"skip_search":     map[string]any{"type": "boolean", "description": "Use only supplied sources and URLs."},
+			"skip_fetch":      map[string]any{"type": "boolean", "description": "Do not fetch URLs; rely on supplied text and snippets."},
+		},
+	}
+	skill.OutputSchema = map[string]any{
+		"type":        "object",
+		"description": "Structured research brief with sources and extractive findings.",
+		"properties": map[string]any{
+			"kind":         map[string]any{"type": "string"},
+			"question":     map[string]any{"type": "string"},
+			"scope":        map[string]any{"type": "string"},
+			"depth":        map[string]any{"type": "string"},
+			"queries":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"sources":      map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"findings":     map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"caveats":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"next_actions": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"report":       map[string]any{"type": "string"},
+			"warnings":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		},
+	}
+	skill.Builtin = &BuiltinInfo{
+		Runtime:       "agtx-deep-research-v1",
+		Backends:      []string{"research_workflow", "search_http", "net_http"},
+		ModelProfiles: []string{"extractive_research_v1"},
+		NoPython:      true,
+	}
+	skill.Stub = false
+	return skill
+}
+
 func builtInWebFetchSkill(skill SkillManifest) SkillManifest {
 	skill.Version = "0.2.0"
 	skill.Summary = "Web fetch"
@@ -430,6 +484,9 @@ func defaultSkill(name, version, summary, description string, tags, keywords, me
 		Billing:   defaultBilling(meters),
 		Signature: &SignatureInfo{Algorithm: "reserved"},
 		Stub:      true,
+	}
+	if canonicalSkillName(name) == deepResearchSkillName {
+		return builtInDeepResearchSkill(skill)
 	}
 	if canonicalSkillName(name) == "web_search" {
 		return builtInWebSearchSkill(skill)

@@ -87,8 +87,8 @@ func TestDeepResearchReadsLegacyResearchInstallDirectory(t *testing.T) {
 	if !result.OK || result.Name != deepResearchSkillName || result.Version != manifest.Version {
 		t.Fatalf("unexpected verify result: %#v", result)
 	}
-	if _, err := service.RunSkill(context.Background(), deepResearchSkillName, nil, nil); !IsErrorCode(err, CodeNotImplemented) {
-		t.Fatalf("expected legacy install to run as stub through canonical name, got %v", err)
+	if _, err := service.RunSkill(context.Background(), deepResearchSkillName, nil, nil); !IsErrorCode(err, CodeInvalidArgument) {
+		t.Fatalf("expected legacy install to run built-in research validation through canonical name, got %v", err)
 	}
 }
 
@@ -249,13 +249,13 @@ func TestRegistryImplementationStatusReportsDefaultStubs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build status: %v", err)
 	}
-	if status.Total != 10 || status.Implemented != 7 || status.Partial != 0 || status.Stub != 3 || status.Incomplete != 0 {
+	if status.Total != 10 || status.Implemented != 8 || status.Partial != 0 || status.Stub != 2 || status.Incomplete != 0 {
 		t.Fatalf("unexpected implementation totals: %#v", status)
 	}
-	if len(status.Missing) != 3 || containsString(status.Missing, "web_search") || containsString(status.Missing, "pdf") || containsString(status.Missing, "ocr") || containsString(status.Missing, "web_fetch") || containsString(status.Missing, "docx") || containsString(status.Missing, "xlsx") || containsString(status.Missing, "pptx") {
+	if len(status.Missing) != 2 || containsString(status.Missing, "deep_research") || containsString(status.Missing, "web_search") || containsString(status.Missing, "pdf") || containsString(status.Missing, "ocr") || containsString(status.Missing, "web_fetch") || containsString(status.Missing, "docx") || containsString(status.Missing, "xlsx") || containsString(status.Missing, "pptx") {
 		t.Fatalf("expected default skills to be missing native packages: %#v", status.Missing)
 	}
-	if len(status.PlatformCoverage) != 2 || status.PlatformCoverage[0].Implemented != 7 || status.PlatformCoverage[0].Stub != 3 || status.PlatformCoverage[1].Implemented != 7 || status.PlatformCoverage[1].Stub != 3 {
+	if len(status.PlatformCoverage) != 2 || status.PlatformCoverage[0].Implemented != 8 || status.PlatformCoverage[0].Stub != 2 || status.PlatformCoverage[1].Implemented != 8 || status.PlatformCoverage[1].Stub != 2 {
 		t.Fatalf("unexpected platform coverage: %#v", status.PlatformCoverage)
 	}
 }
