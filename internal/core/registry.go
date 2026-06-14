@@ -323,6 +323,53 @@ func builtInDeepResearchSkill(skill SkillManifest) SkillManifest {
 	return skill
 }
 
+func builtInAudioSkill(skill SkillManifest) SkillManifest {
+	skill.Version = "0.2.0"
+	skill.Summary = "Audio analysis and meeting notes"
+	skill.Description = "Inspect WAV audio, normalize supplied transcripts or segments, and produce lightweight meeting notes with the Go standard library. Native ASR/TTS model backends can be added later without changing the pack contract."
+	skill.Tags = appendUniqueRegistryStrings(skill.Tags, "builtin", "wav", "meeting_notes")
+	skill.InputSchema = map[string]any{
+		"type":                 "object",
+		"description":          "Audio file or transcript input.",
+		"additionalProperties": true,
+		"properties": map[string]any{
+			"path":           map[string]any{"type": "string", "description": "Local WAV audio file path."},
+			"input":          map[string]any{"type": "string", "description": "Alias for path when JSON input is used."},
+			"file":           map[string]any{"type": "string", "description": "Alias for path when JSON input is used."},
+			"action":         map[string]any{"type": "string", "description": "inspect, analyze, transcribe, summarize, meeting_notes, or tts."},
+			"transcript":     map[string]any{"type": "string", "description": "Existing transcript text for notes and segmentation."},
+			"text":           map[string]any{"type": "string", "description": "Alias for transcript or text to hand to external TTS backends."},
+			"segments":       map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"language_hints": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"speaker_hints":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"max_bytes":      map[string]any{"type": "integer", "description": "Maximum audio bytes to inspect."},
+		},
+	}
+	skill.OutputSchema = map[string]any{
+		"type":        "object",
+		"description": "Audio metadata, transcript, and meeting notes.",
+		"properties": map[string]any{
+			"kind":       map[string]any{"type": "string"},
+			"source":     map[string]any{"type": "string"},
+			"action":     map[string]any{"type": "string"},
+			"audio":      map[string]any{"type": "object"},
+			"transcript": map[string]any{"type": "string"},
+			"segments":   map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"notes":      map[string]any{"type": "object"},
+			"warnings":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"metadata":   map[string]any{"type": "object"},
+		},
+	}
+	skill.Builtin = &BuiltinInfo{
+		Runtime:       "agtx-audio-v1",
+		Backends:      []string{"wav_audio", "transcript_notes"},
+		ModelProfiles: []string{"wav_inspect_v1", "meeting_notes_v1"},
+		NoPython:      true,
+	}
+	skill.Stub = false
+	return skill
+}
+
 func builtInWebFetchSkill(skill SkillManifest) SkillManifest {
 	skill.Version = "0.2.0"
 	skill.Summary = "Web fetch"
@@ -484,6 +531,9 @@ func defaultSkill(name, version, summary, description string, tags, keywords, me
 		Billing:   defaultBilling(meters),
 		Signature: &SignatureInfo{Algorithm: "reserved"},
 		Stub:      true,
+	}
+	if canonicalSkillName(name) == "audio" {
+		return builtInAudioSkill(skill)
 	}
 	if canonicalSkillName(name) == deepResearchSkillName {
 		return builtInDeepResearchSkill(skill)

@@ -23,11 +23,11 @@ import (
 
 func TestInstallListAndRunStub(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
-	results, err := service.InstallSkills(context.Background(), []string{"audio"})
+	results, err := service.InstallSkills(context.Background(), []string{"imagen"})
 	if err != nil {
 		t.Fatalf("install failed: %v", err)
 	}
-	if len(results) != 1 || results[0].Name != "audio" || !results[0].Stub {
+	if len(results) != 1 || results[0].Name != "imagen" || !results[0].Stub {
 		t.Fatalf("unexpected install result: %#v", results)
 	}
 	if _, err := os.Stat(filepath.Join(results[0].Path, "manifest.json")); err != nil {
@@ -38,11 +38,11 @@ func TestInstallListAndRunStub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list installed failed: %v", err)
 	}
-	if len(installed) != 1 || installed[0].Name != "audio" {
+	if len(installed) != 1 || installed[0].Name != "imagen" {
 		t.Fatalf("unexpected installed skills: %#v", installed)
 	}
 
-	_, err = service.RunSkill(context.Background(), "audio", nil, nil)
+	_, err = service.RunSkill(context.Background(), "imagen", nil, nil)
 	if !IsErrorCode(err, CodeNotImplemented) {
 		t.Fatalf("expected not_implemented, got %v", err)
 	}
@@ -249,13 +249,13 @@ func TestRegistryImplementationStatusReportsDefaultStubs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build status: %v", err)
 	}
-	if status.Total != 10 || status.Implemented != 8 || status.Partial != 0 || status.Stub != 2 || status.Incomplete != 0 {
+	if status.Total != 10 || status.Implemented != 9 || status.Partial != 0 || status.Stub != 1 || status.Incomplete != 0 {
 		t.Fatalf("unexpected implementation totals: %#v", status)
 	}
-	if len(status.Missing) != 2 || containsString(status.Missing, "deep_research") || containsString(status.Missing, "web_search") || containsString(status.Missing, "pdf") || containsString(status.Missing, "ocr") || containsString(status.Missing, "web_fetch") || containsString(status.Missing, "docx") || containsString(status.Missing, "xlsx") || containsString(status.Missing, "pptx") {
+	if len(status.Missing) != 1 || containsString(status.Missing, "audio") || containsString(status.Missing, "deep_research") || containsString(status.Missing, "web_search") || containsString(status.Missing, "pdf") || containsString(status.Missing, "ocr") || containsString(status.Missing, "web_fetch") || containsString(status.Missing, "docx") || containsString(status.Missing, "xlsx") || containsString(status.Missing, "pptx") {
 		t.Fatalf("expected default skills to be missing native packages: %#v", status.Missing)
 	}
-	if len(status.PlatformCoverage) != 2 || status.PlatformCoverage[0].Implemented != 8 || status.PlatformCoverage[0].Stub != 2 || status.PlatformCoverage[1].Implemented != 8 || status.PlatformCoverage[1].Stub != 2 {
+	if len(status.PlatformCoverage) != 2 || status.PlatformCoverage[0].Implemented != 9 || status.PlatformCoverage[0].Stub != 1 || status.PlatformCoverage[1].Implemented != 9 || status.PlatformCoverage[1].Stub != 1 {
 		t.Fatalf("unexpected platform coverage: %#v", status.PlatformCoverage)
 	}
 }
@@ -1387,24 +1387,24 @@ func TestInstallRejectsTruncatedTarEntry(t *testing.T) {
 
 func TestUninstallSkill(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
-	if _, err := service.InstallSkills(context.Background(), []string{"audio"}); err != nil {
+	if _, err := service.InstallSkills(context.Background(), []string{"imagen"}); err != nil {
 		t.Fatalf("install failed: %v", err)
 	}
-	plan, err := service.PlanUninstall("audio", true)
+	plan, err := service.PlanUninstall("imagen", true)
 	if err != nil {
 		t.Fatalf("plan uninstall failed: %v", err)
 	}
 	if plan.Action != "uninstall" {
 		t.Fatalf("unexpected plan: %#v", plan)
 	}
-	result, err := service.UninstallSkill("audio", true)
+	result, err := service.UninstallSkill("imagen", true)
 	if err != nil {
 		t.Fatalf("uninstall failed: %v", err)
 	}
 	if len(result.RemovedVersions) != 1 {
 		t.Fatalf("unexpected uninstall result: %#v", result)
 	}
-	if _, err := service.RunSkill(context.Background(), "audio", nil, nil); !IsErrorCode(err, CodeNotInstalled) {
+	if _, err := service.RunSkill(context.Background(), "imagen", nil, nil); !IsErrorCode(err, CodeNotInstalled) {
 		t.Fatalf("expected not installed after uninstall, got %v", err)
 	}
 }
@@ -1426,10 +1426,10 @@ func TestDoctorOnEmptyHomeIsNonMutating(t *testing.T) {
 
 func TestVerifyInstalledStubSkill(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
-	if _, err := service.InstallSkills(context.Background(), []string{"audio"}); err != nil {
+	if _, err := service.InstallSkills(context.Background(), []string{"imagen"}); err != nil {
 		t.Fatalf("install failed: %v", err)
 	}
-	result, err := service.VerifySkill("audio")
+	result, err := service.VerifySkill("imagen")
 	if err != nil {
 		t.Fatalf("verify failed: %v result=%#v", err, result)
 	}

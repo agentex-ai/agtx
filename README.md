@@ -177,6 +177,21 @@ agtx run deep_research --json -- --question "How should capability packs be reus
 agtx run deep_research --json --input task.json
 ```
 
+### Built-In Audio
+
+`audio` is available as a built-in no-Python workflow for WAV inspection,
+transcript normalization, and meeting notes. It reads RIFF/WAVE PCM files,
+returns duration, sample rate, channels, peak/RMS, and silence ratio, and can
+turn supplied transcript text or segments into summaries, decisions, action
+items, questions, and keywords. Native ASR/TTS models are not bundled in this
+minimal runtime; those can be added later as downloadable backends while keeping
+the same capability-pack contract.
+
+```sh
+agtx run audio --json -- ./meeting.wav
+agtx run audio --json --input meeting-audio-task.json
+```
+
 ### Built-In OpenXML Documents
 
 `docx`, `xlsx`, `pptx`, and text-oriented `pdf` extraction are built in for
