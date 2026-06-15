@@ -1,4 +1,4 @@
-package core
+﻿package core
 
 import "time"
 
@@ -671,15 +671,17 @@ type ProCallbackResult struct {
 }
 
 type ProStatusResult struct {
-	Authenticated bool        `json:"authenticated"`
-	Subscription  string      `json:"subscription,omitempty"`
-	Plan          string      `json:"plan,omitempty"`
-	DeviceID      string      `json:"device_id,omitempty"`
-	DeviceName    string      `json:"device_name,omitempty"`
-	ExpiresAt     string      `json:"expires_at,omitempty"`
-	DeviceLimit   int         `json:"device_limit,omitempty"`
-	AuthPath      string      `json:"auth_path,omitempty"`
-	Devices       []ProDevice `json:"devices,omitempty"`
+	Authenticated      bool             `json:"authenticated"`
+	Subscription       string           `json:"subscription,omitempty"`
+	Plan               string           `json:"plan,omitempty"`
+	DeviceID           string           `json:"device_id,omitempty"`
+	DeviceName         string           `json:"device_name,omitempty"`
+	ExpiresAt          string           `json:"expires_at,omitempty"`
+	DeviceLimit        int              `json:"device_limit,omitempty"`
+	AuthPath           string           `json:"auth_path,omitempty"`
+	Devices            []ProDevice      `json:"devices,omitempty"`
+	RecommendedActions []ProSetupAction `json:"recommended_actions,omitempty"`
+	CurrentStatus      []string         `json:"current_status,omitempty"`
 }
 
 type ProDevice struct {
@@ -722,3 +724,4 @@ type ProSetupAction struct {
 	Arguments   map[string]any `json:"arguments,omitempty"`
 	AppliesWhen []string       `json:"applies_when,omitempty"`
 }
+

@@ -269,6 +269,20 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	if _, ok := properties["agent_name"].(map[string]any); !ok {
 		t.Fatalf("expected run_skill agent_name input schema: %#v", properties)
 	}
+	if _, ok := properties["input_base64"].(map[string]any); !ok {
+		t.Fatalf("expected run_skill input_base64 input schema: %#v", properties)
+	}
+	if _, ok := properties["input_path"].(map[string]any); !ok {
+		t.Fatalf("expected run_skill input_path input schema: %#v", properties)
+	}
+	ocrSchema, ok := properties["ocr"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected run_skill ocr input schema: %#v", properties)
+	}
+	ocrProps, ok := ocrSchema["properties"].(map[string]any)
+	if !ok || ocrSchema["additionalProperties"] != false || ocrProps["download_models"] == nil || ocrProps["dry_run"] == nil || ocrProps["model_size"] == nil || ocrProps["backend"] == nil || ocrProps["det_limit_side_len"] == nil {
+		t.Fatalf("expected strict run_skill ocr option schema: %#v", ocrSchema)
+	}
 	anyOf, ok := planSchema["anyOf"].([]any)
 	if !ok || len(anyOf) != 2 {
 		t.Fatalf("expected plan_install anyOf requirements: %#v", planSchema["anyOf"])
@@ -433,6 +447,9 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 	}
 	if _, ok := proStatusProps["device_limit"].(map[string]any); !ok {
 		t.Fatalf("expected get_pro_status device_limit schema: %#v", proStatusProps)
+	}
+	if _, ok := proStatusProps["recommended_actions"].(map[string]any); !ok {
+		t.Fatalf("expected get_pro_status recommended_actions schema: %#v", proStatusProps)
 	}
 	proSetupProps, ok := proSetupSchema["properties"].(map[string]any)
 	if !ok {
@@ -968,6 +985,87 @@ func TestMCPGetProSetupTool(t *testing.T) {
 	}
 	if !containsActionID(response.Result.StructuredContent.RecommendedActions, "start_login") {
 		t.Fatalf("expected start_login action: %s", stdout.String())
+	}
+}
+
+func TestMCPGetProSetupToolInvalidAuthPreview(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service.Config.ProAPIURL = "https://pro.example.com"
+	if err := os.MkdirAll(filepath.Dir(service.Paths.AuthFile), 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(service.Paths.AuthFile, []byte(`{"schema_version":1,"access_token":"secret","extra":true}`), 0o600); err != nil {
+		t.Fatalf("write invalid auth: %v", err)
+	}
+
+	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pro_setup","arguments":{}}}` + "\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	var response struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				CurrentStatus      []string `json:"current_status"`
+				RecommendedActions []struct {
+					ID      string `json:"id"`
+					Command string `json:"command"`
+					MCPTool string `json:"mcp_tool"`
+				} `json:"recommended_actions"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+	if response.Result.IsError || !containsString(response.Result.StructuredContent.CurrentStatus, "auth_invalid") {
+		t.Fatalf("expected auth_invalid preview: %s", stdout.String())
+	}
+	if !containsActionID(response.Result.StructuredContent.RecommendedActions, "reset_local_auth") {
+		t.Fatalf("expected reset_local_auth action: %s", stdout.String())
+	}
+}
+
+func TestMCPGetProStatusPendingLoginPreview(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service.Config.ProAPIURL = "https://pro.example.com"
+	if _, err := service.ProLoginStart(context.Background()); err != nil {
+		t.Fatalf("pro login start: %v", err)
+	}
+
+	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pro_status","arguments":{}}}` + "\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"pending_login"`)) {
+		t.Fatalf("expected pending_login status preview: %s", stdout.String())
+	}
+}
+
+func TestMCPGetProStatusInvalidAuthPreview(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	if err := os.MkdirAll(filepath.Dir(service.Paths.AuthFile), 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(service.Paths.AuthFile, []byte(`{"schema_version":1,"access_token":"secret","extra":true}`), 0o600); err != nil {
+		t.Fatalf("write invalid auth: %v", err)
+	}
+
+	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pro_status","arguments":{}}}` + "\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(service, input, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"auth_invalid"`)) {
+		t.Fatalf("expected auth_invalid status preview: %s", stdout.String())
 	}
 }
 
@@ -1931,6 +2029,113 @@ func TestMCPRunSkillAcceptsScenarioID(t *testing.T) {
 	}
 	if response.Result.StructuredContent.Data.Name != "web_search" || response.Result.StructuredContent.Data.ScenarioID != "invoice_processing" {
 		t.Fatalf("expected canonical scenario id in partial run data: %s", stdout.String())
+	}
+}
+
+func TestMCPRunSkillAcceptsStructuredRapidOCROptions(t *testing.T) {
+	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	request := map[string]any{
+		"name": "run_skill",
+		"arguments": map[string]any{
+			"skill": "rapidocr",
+			"ocr": map[string]any{
+				"download_models": true,
+				"dry_run":         true,
+				"model_size":      "small",
+				"model_dir":       t.TempDir(),
+			},
+		},
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	s := &server{service: service}
+	response, err := s.callTool(data)
+	if err != nil {
+		t.Fatalf("run structured ocr request: %v", err)
+	}
+	if isError, _ := response["isError"].(bool); isError {
+		t.Fatalf("expected successful OCR dry-run response: %#v", response)
+	}
+	result, ok := response["structuredContent"].(core.RunResult)
+	if !ok {
+		t.Fatalf("expected run result structured content: %#v", response["structuredContent"])
+	}
+	if result.Name != "ocr" || result.Version != "0.6.0" || result.Stub || len(result.UsageEvents) != 0 {
+		t.Fatalf("unexpected OCR run result: %#v", result)
+	}
+	var download struct {
+		ModelProfile string `json:"model_profile"`
+		ModelSize    string `json:"model_size"`
+		NoPython     bool   `json:"no_python"`
+		DryRun       bool   `json:"dry_run"`
+		Assets       []struct {
+			Status string `json:"status"`
+		} `json:"assets"`
+	}
+	if err := json.Unmarshal([]byte(result.Stdout), &download); err != nil {
+		t.Fatalf("decode OCR download result: %v stdout=%s", err, result.Stdout)
+	}
+	if download.ModelProfile != "ppocrv6" || download.ModelSize != "small" || !download.NoPython || !download.DryRun || len(download.Assets) != 4 {
+		t.Fatalf("unexpected OCR dry-run payload: %#v", download)
+	}
+	for _, asset := range download.Assets {
+		if asset.Status != "planned" {
+			t.Fatalf("expected planned OCR asset: %#v", asset)
+		}
+	}
+}
+
+func TestMCPRejectsOCROptionsForNonOCRSkill(t *testing.T) {
+	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	_, err := s.callTool(json.RawMessage(`{"name":"run_skill","arguments":{"skill":"pdf","ocr":{"probe":true}}}`))
+	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
+		t.Fatalf("expected invalid argument, got %v", err)
+	}
+	coreErr := core.ErrorFrom(err)
+	if coreErr.Message != "ocr options are only supported for the built-in OCR skill and its aliases" {
+		t.Fatalf("unexpected error: %#v", coreErr)
+	}
+	details, ok := coreErr.Details.(map[string]any)
+	if !ok || details["tool"] != "run_skill" || details["argument"] != "ocr" {
+		t.Fatalf("unexpected details: %#v", coreErr.Details)
+	}
+	skills, ok := details["supported_skills"].([]string)
+	if !ok || !containsString(skills, "rapidocr") || !containsString(skills, "ppocrv6") {
+		t.Fatalf("expected supported OCR aliases: %#v", details["supported_skills"])
+	}
+}
+
+func TestMCPRejectsMutuallyExclusiveSkillInputs(t *testing.T) {
+	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	_, err := s.callTool(json.RawMessage(`{"name":"run_skill","arguments":{"skill":"rapidocr","input":"text","input_base64":"dGV4dA=="}}`))
+	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
+		t.Fatalf("expected invalid argument, got %v", err)
+	}
+	coreErr := core.ErrorFrom(err)
+	if coreErr.Message != "input and input_base64 cannot both be set" {
+		t.Fatalf("unexpected error: %#v", coreErr)
+	}
+	details, ok := coreErr.Details.(map[string]any)
+	if !ok || details["tool"] != "run_skill" || details["expected"] != "only_one_argument" {
+		t.Fatalf("unexpected details: %#v", coreErr.Details)
+	}
+}
+
+func TestMCPRejectsInvalidBase64SkillInput(t *testing.T) {
+	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	_, err := s.callTool(json.RawMessage(`{"name":"run_skill","arguments":{"skill":"rapidocr","input_base64":"not base64"}}`))
+	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
+		t.Fatalf("expected invalid argument, got %v", err)
+	}
+	coreErr := core.ErrorFrom(err)
+	if coreErr.Message != "input_base64 must be valid base64" {
+		t.Fatalf("unexpected error: %#v", coreErr)
+	}
+	details, ok := coreErr.Details.(map[string]any)
+	if !ok || details["tool"] != "run_skill" || details["argument"] != "input_base64" || details["expected"] != "base64_string" {
+		t.Fatalf("unexpected details: %#v", coreErr.Details)
 	}
 }
 

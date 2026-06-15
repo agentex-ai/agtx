@@ -2,7 +2,10 @@
 
 package core
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseONNXOCRCharacterDictFromInferenceYAML(t *testing.T) {
 	keys, err := parseONNXOCRCharacterDict(`
@@ -60,5 +63,14 @@ func TestONNXOCRRecognitionFixedWidth(t *testing.T) {
 	got := onnxOCRRecognitionWidthForBox(onnxOCRBox{X1: 0, Y1: 0, X2: 1800, Y2: 48}, height, width, dynamic, builtinOCRSettings{})
 	if got != 320 {
 		t.Fatalf("fixed width model should keep model width, got %d", got)
+	}
+}
+
+func TestDecodeONNXOCRImageRejectsPDFInputs(t *testing.T) {
+	if _, err := decodeONNXOCRImage(builtinOCRRequest{Input: []byte("%PDF-1.7\n")}); err == nil || !strings.Contains(err.Error(), "PDF") {
+		t.Fatalf("expected PDF byte guard, got %v", err)
+	}
+	if _, err := decodeONNXOCRImage(builtinOCRRequest{InputPath: "invoice.pdf"}); err == nil || !strings.Contains(err.Error(), "PDF") {
+		t.Fatalf("expected PDF path guard, got %v", err)
 	}
 }

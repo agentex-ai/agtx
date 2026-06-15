@@ -219,7 +219,7 @@ func (s *Service) runBuiltinOCR(ctx context.Context, manifest SkillManifest, opt
 		return RunResult{ExitCode: 0, Stdout: string(append(data, '\n'))}, nil
 	}
 	if strings.TrimSpace(ocrInputArg(options.Args)) == "" && len(options.Input) == 0 {
-		return RunResult{ExitCode: -1}, NewError(CodeInvalidArgument, "OCR input is required", map[string]any{"skill": manifest.Name, "expected": "image_or_pdf_page_path_or_input_bytes"})
+		return RunResult{ExitCode: -1}, NewError(CodeInvalidArgument, "OCR input is required", map[string]any{"skill": manifest.Name, "expected": "image_path_or_image_bytes"})
 	}
 	if !status.Available {
 		return RunResult{ExitCode: -1}, NewError(CodeInvalidArgument, "native OCR backend is not configured", status)
@@ -351,7 +351,7 @@ func builtinOCRNextActions(status builtinOCRStatus) []string {
 	if len(status.MissingFiles) > 0 {
 		actions = append(actions, "place PP-OCR model files under AGTX_OCR_MODEL_DIR or set AGTX_OCR_DET_MODEL, AGTX_OCR_REC_MODEL, and AGTX_OCR_KEYS")
 	}
-	actions = append(actions, "set AGTX_OCR_BACKEND to onnxruntime or ncnn; Python and NPM runtimes are not used")
+	actions = append(actions, "set AGTX_OCR_BACKEND to onnxruntime, or use a build with a native ncnn adapter; Python and NPM runtimes are not used")
 	return actions
 }
 

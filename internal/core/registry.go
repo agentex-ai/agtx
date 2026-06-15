@@ -29,7 +29,7 @@ func defaultOCRSkill() SkillManifest {
 		"ocr",
 		"0.6.0",
 		"RapidOCR OCR",
-		"Extract text, layout, coordinates, and confidence from screenshots, scans, images, and PDF pages with RapidOCR-compatible PP-OCRv6 profiles.",
+		"Extract text, layout, coordinates, and confidence from screenshots, scans, images, and rendered PDF page images with RapidOCR-compatible PP-OCRv6 profiles.",
 		[]string{"vision", "ocr", "image", "rapidocr", "ppocrv6", "documents"},
 		[]string{"ocr", "rapidocr", "rapid_ocr", "ppocr", "ppocrv6", "pp-ocrv6", "paddleocr", "paddle_ocr", "image", "screenshot", "scan", "text", "vision", "layout", "coordinates", "confidence", "图片", "截图", "扫描", "文字", "识别"},
 		[]string{"page"},
@@ -41,7 +41,7 @@ func defaultOCRSkill() SkillManifest {
 		"properties": map[string]any{
 			"input": map[string]any{
 				"type":        "string",
-				"description": "Image, PDF page, local path, or URL accepted by the installed OCR package.",
+				"description": "Image path or rendered page image accepted by the built-in native OCR runtime.",
 			},
 			"model_profile": map[string]any{
 				"type":        "string",
@@ -80,6 +80,10 @@ func defaultOCRSkill() SkillManifest {
 			"keep_archive": map[string]any{
 				"type":        "boolean",
 				"description": "Keep the downloaded ONNX Runtime archive after extracting the shared library.",
+			},
+			"dry_run": map[string]any{
+				"type":        "boolean",
+				"description": "Plan OCR runtime or model downloads without writing files.",
 			},
 			"det_model": map[string]any{
 				"type":        "string",

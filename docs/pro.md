@@ -19,6 +19,8 @@ agtx pro logout
 Auth is stored in `auth.json` next to `config.json`. It contains a random `device_id`, device name, access token, refresh token, expiry, and a temporary PKCE login state. `config show` never prints token values.
 
 `agtx pro setup` is the recommended first step for both humans and agents. It is a local-only preflight: it reads config/auth state, does not refresh tokens, and does not call the network. It reports whether login is already complete or pending, whether `pro_api_url` is configured, whether callback-scheme registration can be attempted automatically, and which next actions are recommended.
+If `auth.json` is corrupt, `agtx pro setup` still succeeds with `current_status` including `auth_invalid`, plus a `reset_local_auth` action that maps to `agtx pro logout` / MCP `logout_pro`.
+`agtx pro status --json` now echoes the same local markers, including `pending_login` before callback completion and `auth_invalid` for corrupt auth files.
 
 `agtx pro register-scheme` is automated on macOS and Windows. On macOS it creates a small local app bundle in the agtx config directory, registers `agtx://` through LaunchServices, and forwards the callback URI back into `agtx pro callback`.
 
@@ -26,7 +28,7 @@ Auth is stored in `auth.json` next to `config.json`. It contains a random `devic
 
 When a Pro-gated request fails with `unauthorized`, `subscription_required`, or `device_limit_exceeded`, agtx now enriches the structured error details with a local `pro_setup` preview and ordered `next_actions`. That keeps both CLI JSON callers and MCP wrappers aligned on the same retry flow instead of re-deriving login/device/subscription recovery logic independently.
 
-`agtx doctor` validates `auth.json` without blocking ordinary non-Pro commands. If the auth file is corrupt, run `agtx pro logout` and then `agtx pro login --open`.
+`agtx doctor` validates `auth.json` without blocking ordinary non-Pro commands. If the auth file is corrupt, follow the `reset_local_auth` action or run `agtx pro logout` and then `agtx pro login --open`.
 
 ## Pro Backend
 

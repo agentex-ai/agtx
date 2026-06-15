@@ -170,11 +170,33 @@ func (s *Service) ProCallback(ctx context.Context, rawCallback string) (ProCallb
 }
 
 func (s *Service) ProStatus(ctx context.Context) (ProStatusResult, error) {
+	authState, authErr := LoadAuth(s.Paths.AuthFile)
+	if authErr != nil {
+		if IsErrorCode(authErr, CodeInvalidArgument) {
+			setup := buildProSetupResult(s.Paths, s.Config, AuthState{SchemaVersion: 1}, runtime.GOOS, runtime.GOARCH)
+			setup.CurrentStatus = appendUniqueStrings(setup.CurrentStatus, "auth_invalid")
+			setup.RecommendedActions = buildProSetupActions(setup)
+			return ProStatusResult{
+				Authenticated:      false,
+				AuthPath:           s.Paths.AuthFile,
+				RecommendedActions: filterProStatusActions(setup.RecommendedActions),
+				CurrentStatus:      append([]string{}, setup.CurrentStatus...),
+			}, nil
+		}
+		return ProStatusResult{}, authErr
+	}
+	authState = normalizeAuth(authState)
+	if authState.Pending != nil {
+		setup := buildProSetupResult(s.Paths, s.Config, authState, runtime.GOOS, runtime.GOARCH)
+		return proStatusFromSetup(s.Paths, authState, setup), nil
+	}
+
 	auth, err := s.currentAuth(ctx)
 	if err != nil {
 		return ProStatusResult{}, err
 	}
-	status := ProStatusResult{Authenticated: auth.AccessToken != "", DeviceID: auth.DeviceID, DeviceName: auth.DeviceName, ExpiresAt: auth.ExpiresAt, AuthPath: s.Paths.AuthFile}
+	setup := buildProSetupResult(s.Paths, s.Config, auth, runtime.GOOS, runtime.GOARCH)
+	status := proStatusFromSetup(s.Paths, auth, setup)
 	if auth.AccessToken == "" {
 		return status, nil
 	}
@@ -192,7 +214,50 @@ func (s *Service) ProStatus(ctx context.Context) (ProStatusResult, error) {
 	if remote.ExpiresAt == "" {
 		remote.ExpiresAt = auth.ExpiresAt
 	}
+	if remote.AuthPath == "" {
+		remote.AuthPath = s.Paths.AuthFile
+	}
+	if len(remote.RecommendedActions) == 0 {
+		remote.RecommendedActions = status.RecommendedActions
+	}
+	if len(remote.CurrentStatus) == 0 {
+		remote.CurrentStatus = append([]string{}, status.CurrentStatus...)
+	}
 	return remote, nil
+}
+
+func proStatusFromSetup(paths Paths, auth AuthState, setup ProSetupResult) ProStatusResult {
+	status := ProStatusResult{
+		Authenticated:      setup.Authenticated,
+		DeviceID:           auth.DeviceID,
+		DeviceName:         auth.DeviceName,
+		ExpiresAt:          auth.ExpiresAt,
+		AuthPath:           paths.AuthFile,
+		RecommendedActions: filterProStatusActions(setup.RecommendedActions),
+		CurrentStatus:      append([]string{}, setup.CurrentStatus...),
+	}
+	if len(status.CurrentStatus) == 0 {
+		if status.Authenticated {
+			status.CurrentStatus = []string{"authenticated"}
+		} else {
+			status.CurrentStatus = []string{"not_authenticated"}
+		}
+	}
+	return status
+}
+
+func filterProStatusActions(actions []ProSetupAction) []ProSetupAction {
+	if len(actions) == 0 {
+		return nil
+	}
+	filtered := make([]ProSetupAction, 0, len(actions))
+	for _, action := range actions {
+		if action.ID == "check_status" {
+			continue
+		}
+		filtered = append(filtered, action)
+	}
+	return uniqueProActions(filtered)
 }
 
 func (s *Service) ProDevices(ctx context.Context) ([]ProDevice, error) {
@@ -225,13 +290,10 @@ func (s *Service) ProLogout() (ProLogoutResult, error) {
 }
 
 func (s *Service) ProSetup(ctx context.Context) (ProSetupResult, error) {
-	auth, err := LoadAuth(s.Paths.AuthFile)
+	result, err := loadProSetupPreview(s.Paths, s.Config)
 	if err != nil {
 		return ProSetupResult{}, err
 	}
-	auth = normalizeAuth(auth)
-	s.Auth = auth
-	result := buildProSetupResult(s.Paths, s.Config, auth, runtime.GOOS, runtime.GOARCH)
 	_ = ctx
 	return result, nil
 }
@@ -539,6 +601,19 @@ func tokenExpiry(token proTokenResponse) string {
 
 func buildProSetupActions(result ProSetupResult) []ProSetupAction {
 	actions := []ProSetupAction{}
+	if hasSetupStatus(result.CurrentStatus, "auth_invalid") {
+		actions = append(actions, ProSetupAction{
+			ID:       "reset_local_auth",
+			Title:    "Reset local auth",
+			Summary:  "Remove the corrupt local auth file before starting a fresh Pro login flow.",
+			Blocking: true,
+			Command:  "agtx pro logout",
+			MCPTool:  "logout_pro",
+			AppliesWhen: []string{
+				"auth_invalid",
+			},
+		})
+	}
 	if result.ProAPIURL == "" {
 		actions = append(actions, ProSetupAction{
 			ID:       "configure_pro_api",
@@ -608,6 +683,15 @@ func buildProSetupActions(result ProSetupResult) []ProSetupAction {
 		})
 	}
 	return actions
+}
+
+func hasSetupStatus(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultDeviceName() string {

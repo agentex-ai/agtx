@@ -1271,11 +1271,41 @@ func runPro(ctx context.Context, service *core.Service, args []string, stdin io.
 		}
 		if !result.Authenticated {
 			fmt.Fprintln(stdout, "Pro: not logged in")
+			for _, status := range result.CurrentStatus {
+				fmt.Fprintf(stdout, "status: %s\n", status)
+			}
+			if len(result.RecommendedActions) > 0 {
+				fmt.Fprintln(stdout, "next:")
+				for _, action := range result.RecommendedActions {
+					fmt.Fprintf(stdout, "  - %s: %s\n", action.ID, action.Title)
+					if action.Command != "" {
+						fmt.Fprintf(stdout, "    command: %s\n", action.Command)
+					}
+					if action.MCPTool != "" {
+						fmt.Fprintf(stdout, "    mcp: %s\n", action.MCPTool)
+					}
+				}
+			}
 			return 0
 		}
 		fmt.Fprintf(stdout, "Pro: logged in\nsubscription: %s\nplan: %s\ndevice: %s (%s)\n", valueOrDash(result.Subscription), valueOrDash(result.Plan), result.DeviceName, result.DeviceID)
 		if result.DeviceLimit > 0 {
 			fmt.Fprintf(stdout, "device_limit: %d\n", result.DeviceLimit)
+		}
+		for _, status := range result.CurrentStatus {
+			fmt.Fprintf(stdout, "status: %s\n", status)
+		}
+		if len(result.RecommendedActions) > 0 {
+			fmt.Fprintln(stdout, "next:")
+			for _, action := range result.RecommendedActions {
+				fmt.Fprintf(stdout, "  - %s: %s\n", action.ID, action.Title)
+				if action.Command != "" {
+					fmt.Fprintf(stdout, "    command: %s\n", action.Command)
+				}
+				if action.MCPTool != "" {
+					fmt.Fprintf(stdout, "    mcp: %s\n", action.MCPTool)
+				}
+			}
 		}
 		return 0
 	case "setup":

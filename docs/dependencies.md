@@ -10,7 +10,9 @@
   aliases (`rapidocr`, `ppocrv6`). The OCR runtime path is native-only: Python
   and NPM wrappers are not used. The default binary provides the built-in OCR
   manifest and native probe path; optional adapter builds load ONNX Runtime or
-  ncnn model files from the configured built-in OCR model directory.
+  ncnn model files from the configured built-in OCR model directory. OCR
+  inference accepts raster image inputs or rendered PDF page images; raw PDFs
+  should be handled by the built-in `pdf` skill or rendered before OCR.
 
 ## Go Code
 

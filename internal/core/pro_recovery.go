@@ -59,6 +59,7 @@ func loadProSetupPreview(paths Paths, config Config) (ProSetupResult, error) {
 		if IsErrorCode(err, CodeInvalidArgument) {
 			result := buildProSetupResult(paths, config, AuthState{SchemaVersion: 1}, runtime.GOOS, runtime.GOARCH)
 			result.CurrentStatus = appendUniqueStrings(result.CurrentStatus, "auth_invalid")
+			result.RecommendedActions = buildProSetupActions(result)
 			return result, nil
 		}
 		return ProSetupResult{}, err

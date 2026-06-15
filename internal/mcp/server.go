@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -823,6 +824,32 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
+		inputBase64, err := args.String("input_base64")
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(input) != "" && strings.TrimSpace(inputBase64) != "" {
+			return nil, args.mutuallyExclusiveArguments("input and input_base64 cannot both be set", "input", "input_base64")
+		}
+		inputBytes := []byte(input)
+		if strings.TrimSpace(inputBase64) != "" {
+			inputBytes, err = base64.StdEncoding.DecodeString(inputBase64)
+			if err != nil {
+				return nil, args.invalidBase64Argument("input_base64", err)
+			}
+		}
+		inputPath, err := args.String("input_path")
+		if err != nil {
+			return nil, err
+		}
+		ocrArgs, err := args.OCRArgs(skill)
+		if err != nil {
+			return nil, err
+		}
+		skillArgs = append(skillArgs, ocrArgs...)
+		if strings.TrimSpace(inputPath) != "" {
+			skillArgs = append(skillArgs, inputPath)
+		}
 		timeoutMS, err := args.PositiveInt64("timeout_ms", int64(s.service.Config.RunTimeoutMS))
 		if err != nil {
 			return nil, err
@@ -841,7 +868,7 @@ func (s *server) callTool(params json.RawMessage) (map[string]any, error) {
 		}
 		result, err := s.service.RunSkillWithOptions(context.Background(), skill, core.RunOptions{
 			Args:             skillArgs,
-			Input:            []byte(input),
+			Input:            inputBytes,
 			Timeout:          time.Duration(timeoutMS) * time.Millisecond,
 			OutputLimitBytes: outputLimitBytes,
 			ScenarioID:       scenarioID,
@@ -1145,10 +1172,13 @@ func tools() []map[string]any {
 				"skill":              nonEmptyStringSchema("Installed skill name to execute."),
 				"args":               stringArraySchema("Positional and flag arguments passed directly to the skill entrypoint.", false),
 				"input":              stringSchema("UTF-8 input payload forwarded to the skill stdin."),
+				"input_base64":       stringSchema("Base64-encoded binary input forwarded to the skill stdin, useful for image bytes."),
+				"input_path":         stringSchema("Local input file path appended to the skill arguments, useful for built-in document and OCR skills."),
 				"timeout_ms":         positiveIntegerSchema("Execution timeout in milliseconds."),
 				"output_limit_bytes": positiveIntegerSchema("Maximum captured stdout and stderr bytes."),
 				"scenario_id":        stringSchema("Optional real task scenario id used to tag usage billing records."),
 				"agent_name":         stringSchema("Optional per-run agent display name used for generated artifact attribution. Overrides config agent_name for this invocation."),
+				"ocr":                ocrRunOptionsSchema(),
 			},
 			[]string{"skill"},
 			nil,
@@ -1254,6 +1284,14 @@ func stringSchema(description string) map[string]any {
 	return schemaWithDescription(map[string]any{"type": "string"}, description)
 }
 
+func stringEnumSchema(description string, values ...string) map[string]any {
+	schema := stringSchema(description)
+	enum := make([]string, 0, len(values))
+	enum = append(enum, values...)
+	schema["enum"] = enum
+	return schema
+}
+
 func nonEmptyStringSchema(description string) map[string]any {
 	schema := stringSchema(description)
 	schema["minLength"] = 1
@@ -1307,6 +1345,42 @@ func anySchema(description string) map[string]any {
 
 func nonNegativeIntegerSchema(description string) map[string]any {
 	return schemaWithDescription(map[string]any{"type": "integer", "minimum": 0}, description)
+}
+
+func ocrRunOptionsSchema() map[string]any {
+	return objectSchema(
+		map[string]any{
+			"probe":              booleanSchema("Return native OCR backend status without running inference."),
+			"download_runtime":   booleanSchema("Download and extract the native ONNX Runtime CPU shared library for this platform."),
+			"download_models":    booleanSchema("Download PP-OCRv6 ONNX detector and recognizer assets."),
+			"dry_run":            booleanSchema("Plan OCR runtime or model downloads without writing files."),
+			"keep_archive":       booleanSchema("Keep the downloaded ONNX Runtime archive after extracting the shared library."),
+			"backend":            stringEnumSchema("Native OCR backend.", "auto", "onnxruntime", "ncnn"),
+			"model_profile":      stringEnumSchema("OCR model family.", "auto", "ppocrv6", "ppocrv5", "ppocrv4"),
+			"model_size":         stringEnumSchema("PP-OCRv6 ONNX asset size used by the model downloader.", "auto", "tiny", "small", "medium"),
+			"model_dir":          stringSchema("Local OCR model directory."),
+			"runtime_dir":        stringSchema("Local native inference runtime directory."),
+			"runtime_version":    stringSchema("ONNX Runtime version used by the runtime downloader."),
+			"det_model":          stringSchema("Detector model path, absolute or relative to model_dir."),
+			"rec_model":          stringSchema("Recognizer model path, absolute or relative to model_dir."),
+			"keys":               stringSchema("Recognizer keys dictionary path, absolute or relative to model_dir."),
+			"det_input":          stringSchema("Optional detector ONNX input name override."),
+			"det_output":         stringSchema("Optional detector ONNX output name override."),
+			"rec_input":          stringSchema("Optional recognizer ONNX input name override."),
+			"rec_output":         stringSchema("Optional recognizer ONNX output name override."),
+			"det_limit_side_len": positiveIntegerSchema("Detector resize side limit."),
+			"det_threshold":      numberSchema("Detector binary map threshold."),
+			"box_threshold":      numberSchema("Minimum average score for a detected text box."),
+			"unclip_ratio":       numberSchema("Expansion ratio for detector boxes before recognition crops."),
+			"max_candidates":     positiveIntegerSchema("Maximum detector boxes to send to recognition."),
+			"text_score":         numberSchema("Minimum recognizer confidence for returned text lines."),
+			"rec_width":          positiveIntegerSchema("Fixed recognizer crop width."),
+			"rec_height":         positiveIntegerSchema("Recognizer crop height override."),
+			"rec_max_width":      positiveIntegerSchema("Maximum crop width for dynamic-width recognizer models."),
+		},
+		nil,
+		nil,
+	)
 }
 
 func agentTargetSchema() map[string]any {
@@ -1576,15 +1650,17 @@ func registryValidationSchema() map[string]any {
 func proStatusSchema() map[string]any {
 	return objectSchema(
 		map[string]any{
-			"authenticated": booleanSchema("Whether local Pro auth is available."),
-			"subscription":  stringSchema("Subscription status reported by the Pro service."),
-			"plan":          stringSchema("Plan name reported by the Pro service."),
-			"device_id":     stringSchema("Current local device identifier."),
-			"device_name":   stringSchema("Current local device name."),
-			"expires_at":    stringSchema("Access token expiry timestamp."),
-			"device_limit":  nonNegativeIntegerSchema("Maximum active devices allowed by the subscription."),
-			"auth_path":     stringSchema("Local auth.json path."),
-			"devices":       arraySchema(proDeviceSchema(), "Known devices for this subscription."),
+			"authenticated":        booleanSchema("Whether local Pro auth is available."),
+			"subscription":         stringSchema("Subscription status reported by the Pro service."),
+			"plan":                 stringSchema("Plan name reported by the Pro service."),
+			"device_id":            stringSchema("Current local device identifier."),
+			"device_name":          stringSchema("Current local device name."),
+			"expires_at":           stringSchema("Access token expiry timestamp."),
+			"device_limit":         nonNegativeIntegerSchema("Maximum active devices allowed by the subscription."),
+			"auth_path":            stringSchema("Local auth.json path."),
+			"devices":              arraySchema(proDeviceSchema(), "Known devices for this subscription."),
+			"recommended_actions": arraySchema(proSetupActionSchema(), "Ordered recommended next actions for incomplete local Pro state."),
+			"current_status":       stringArraySchema("Current local Pro status markers such as authenticated, not_authenticated, pending_login, or auth_invalid.", false),
 		},
 		nil,
 		nil,
@@ -2610,7 +2686,7 @@ func allowedToolArguments(name string) (map[string]struct{}, bool) {
 	case "uninstall_skill":
 		return toolArgumentSet("skill", "all_versions", "yes", "plan"), true
 	case "run_skill":
-		return toolArgumentSet("skill", "args", "input", "timeout_ms", "output_limit_bytes", "scenario_id", "agent_name"), true
+		return toolArgumentSet("skill", "args", "input", "input_base64", "input_path", "timeout_ms", "output_limit_bytes", "scenario_id", "agent_name", "ocr"), true
 	default:
 		return nil, false
 	}
@@ -2723,6 +2799,198 @@ func (a toolArguments) PositiveInt64(name string, fallback int64) (int64, error)
 		return 0, a.invalidPositiveInteger(name, value)
 	}
 	return value, nil
+}
+
+func (a toolArguments) OCRArgs(skill string) ([]string, error) {
+	raw, ok := a.values["ocr"]
+	if !ok || len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, nil
+	}
+	if !isOCRSkillName(skill) {
+		return nil, a.unsupportedValue("ocr options are only supported for the built-in OCR skill and its aliases", "ocr", "set", "supported_skills", []string{"ocr", "rapidocr", "ppocrv6", "paddleocr"})
+	}
+	var options ocrToolOptions
+	if err := decodeJSONStrict(raw, &options); err != nil {
+		return nil, a.invalidArgumentType("ocr", "object", err)
+	}
+	return options.args()
+}
+
+type ocrToolOptions struct {
+	Probe           bool     `json:"probe,omitempty"`
+	DownloadRuntime bool     `json:"download_runtime,omitempty"`
+	DownloadModels  bool     `json:"download_models,omitempty"`
+	DryRun          bool     `json:"dry_run,omitempty"`
+	KeepArchive     bool     `json:"keep_archive,omitempty"`
+	Backend         string   `json:"backend,omitempty"`
+	ModelProfile    string   `json:"model_profile,omitempty"`
+	ModelSize       string   `json:"model_size,omitempty"`
+	ModelDir        string   `json:"model_dir,omitempty"`
+	RuntimeDir      string   `json:"runtime_dir,omitempty"`
+	RuntimeVersion  string   `json:"runtime_version,omitempty"`
+	DetModel        string   `json:"det_model,omitempty"`
+	RecModel        string   `json:"rec_model,omitempty"`
+	Keys            string   `json:"keys,omitempty"`
+	DetInput        string   `json:"det_input,omitempty"`
+	DetOutput       string   `json:"det_output,omitempty"`
+	RecInput        string   `json:"rec_input,omitempty"`
+	RecOutput       string   `json:"rec_output,omitempty"`
+	DetLimitSideLen *int     `json:"det_limit_side_len,omitempty"`
+	DetThreshold    *float64 `json:"det_threshold,omitempty"`
+	BoxThreshold    *float64 `json:"box_threshold,omitempty"`
+	UnclipRatio     *float64 `json:"unclip_ratio,omitempty"`
+	MaxCandidates   *int     `json:"max_candidates,omitempty"`
+	TextScore       *float64 `json:"text_score,omitempty"`
+	RecWidth        *int     `json:"rec_width,omitempty"`
+	RecHeight       *int     `json:"rec_height,omitempty"`
+	RecMaxWidth     *int     `json:"rec_max_width,omitempty"`
+}
+
+func (o ocrToolOptions) args() ([]string, error) {
+	actionCount := 0
+	for _, enabled := range []bool{o.Probe, o.DownloadRuntime, o.DownloadModels} {
+		if enabled {
+			actionCount++
+		}
+	}
+	if actionCount > 1 {
+		return nil, core.NewError(core.CodeInvalidArgument, "only one OCR action can be requested at a time", map[string]any{"argument": "ocr", "actions": []string{"probe", "download_runtime", "download_models"}})
+	}
+	args := []string{}
+	if o.Probe {
+		args = append(args, "--probe")
+	}
+	if o.DownloadRuntime {
+		args = append(args, "--download-runtime")
+	}
+	if o.DownloadModels {
+		args = append(args, "--download-models")
+	}
+	if o.DryRun {
+		args = append(args, "--dry-run")
+	}
+	if o.KeepArchive {
+		args = append(args, "--keep-archive")
+	}
+	if err := appendOCREnumOption(&args, "backend", o.Backend, []string{"auto", "onnxruntime", "ncnn"}); err != nil {
+		return nil, err
+	}
+	if err := appendOCREnumOption(&args, "model-profile", o.ModelProfile, []string{"auto", "ppocrv6", "ppocrv5", "ppocrv4"}); err != nil {
+		return nil, err
+	}
+	if err := appendOCREnumOption(&args, "model-size", o.ModelSize, []string{"auto", "tiny", "small", "medium"}); err != nil {
+		return nil, err
+	}
+	appendOCRStringOption(&args, "model-dir", o.ModelDir)
+	appendOCRStringOption(&args, "runtime-dir", o.RuntimeDir)
+	appendOCRStringOption(&args, "runtime-version", o.RuntimeVersion)
+	appendOCRStringOption(&args, "det-model", o.DetModel)
+	appendOCRStringOption(&args, "rec-model", o.RecModel)
+	appendOCRStringOption(&args, "keys", o.Keys)
+	appendOCRStringOption(&args, "det-input", o.DetInput)
+	appendOCRStringOption(&args, "det-output", o.DetOutput)
+	appendOCRStringOption(&args, "rec-input", o.RecInput)
+	appendOCRStringOption(&args, "rec-output", o.RecOutput)
+	if err := appendOCRIntOption(&args, "det-limit-side-len", o.DetLimitSideLen); err != nil {
+		return nil, err
+	}
+	if err := appendOCRFloatOption(&args, "det-threshold", o.DetThreshold); err != nil {
+		return nil, err
+	}
+	if err := appendOCRFloatOption(&args, "box-threshold", o.BoxThreshold); err != nil {
+		return nil, err
+	}
+	if err := appendOCRFloatOption(&args, "unclip-ratio", o.UnclipRatio); err != nil {
+		return nil, err
+	}
+	if err := appendOCRIntOption(&args, "max-candidates", o.MaxCandidates); err != nil {
+		return nil, err
+	}
+	if err := appendOCRFloatOption(&args, "text-score", o.TextScore); err != nil {
+		return nil, err
+	}
+	if err := appendOCRIntOption(&args, "rec-width", o.RecWidth); err != nil {
+		return nil, err
+	}
+	if err := appendOCRIntOption(&args, "rec-height", o.RecHeight); err != nil {
+		return nil, err
+	}
+	if err := appendOCRIntOption(&args, "rec-max-width", o.RecMaxWidth); err != nil {
+		return nil, err
+	}
+	return args, nil
+}
+
+func appendOCRStringOption(args *[]string, name, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	*args = append(*args, "--"+name, value)
+}
+
+func appendOCREnumOption(args *[]string, name, value string, supported []string) error {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return nil
+	}
+	for _, supportedValue := range supported {
+		if value == supportedValue {
+			appendOCRStringOption(args, name, value)
+			return nil
+		}
+	}
+	return core.NewError(core.CodeInvalidArgument, "unsupported OCR option value", map[string]any{"argument": "ocr." + strings.ReplaceAll(name, "-", "_"), "value": value, "supported_values": supported})
+}
+
+func appendOCRIntOption(args *[]string, name string, value *int) error {
+	if value == nil {
+		return nil
+	}
+	if *value <= 0 {
+		return core.NewError(core.CodeInvalidArgument, "OCR option must be a positive integer", map[string]any{"argument": "ocr." + strings.ReplaceAll(name, "-", "_"), "value": *value, "expected": "positive_integer"})
+	}
+	*args = append(*args, "--"+name, strconv.Itoa(*value))
+	return nil
+}
+
+func appendOCRFloatOption(args *[]string, name string, value *float64) error {
+	if value == nil {
+		return nil
+	}
+	if *value <= 0 {
+		return core.NewError(core.CodeInvalidArgument, "OCR option must be a positive number", map[string]any{"argument": "ocr." + strings.ReplaceAll(name, "-", "_"), "value": *value, "expected": "positive_number"})
+	}
+	*args = append(*args, "--"+name, strconv.FormatFloat(*value, 'g', -1, 64))
+	return nil
+}
+
+func isOCRSkillName(skill string) bool {
+	switch strings.ToLower(strings.ReplaceAll(strings.TrimSpace(skill), "-", "_")) {
+	case "ocr", "rapidocr", "rapid_ocr", "rapidocr_v6", "rapid_ocr_v6", "paddleocr", "paddle_ocr", "ppocr", "pp_ocr", "ppocrv6", "pp_ocrv6", "pp_ocr_v6", "ocr_v6":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a toolArguments) invalidBase64Argument(name string, err error) error {
+	return core.NewError(core.CodeInvalidArgument, name+" must be valid base64", map[string]any{
+		"tool":                a.tool,
+		"argument":            name,
+		"expected":            "base64_string",
+		"error":               err.Error(),
+		"supported_arguments": toolArgumentNames(a.allowed),
+	})
+}
+
+func (a toolArguments) mutuallyExclusiveArguments(message string, names ...string) error {
+	return core.NewError(core.CodeInvalidArgument, message, map[string]any{
+		"tool":                a.tool,
+		"arguments":           append([]string{}, names...),
+		"expected":            "only_one_argument",
+		"supported_arguments": toolArgumentNames(a.allowed),
+	})
 }
 
 func (a toolArguments) invalidArgumentType(name, expected string, err error) error {

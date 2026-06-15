@@ -227,6 +227,46 @@ func TestProSetupPendingLogin(t *testing.T) {
 	}
 }
 
+func TestProStatusPendingLoginPreview(t *testing.T) {
+	service := NewService(PathsForRoot(t.TempDir()))
+	service.Config.ProAPIURL = "https://pro.example.com"
+	login, err := service.ProLoginStart(context.Background())
+	if err != nil {
+		t.Fatalf("pro login start: %v", err)
+	}
+	status, err := service.ProStatus(context.Background())
+	if err != nil {
+		t.Fatalf("pro status: %v", err)
+	}
+	if status.Authenticated {
+		t.Fatalf("expected unauthenticated pending login status: %#v", status)
+	}
+	if status.AuthPath == "" || status.DeviceID == "" || status.DeviceID != login.DeviceID {
+		t.Fatalf("expected pending login device/auth details: %#v", status)
+	}
+	if !containsSetupStatus(status.CurrentStatus, "pending_login") {
+		t.Fatalf("expected pending_login status marker: %#v", status.CurrentStatus)
+	}
+	if !containsSetupAction(status.RecommendedActions, "complete_login") {
+		t.Fatalf("expected complete_login action: %#v", status.RecommendedActions)
+	}
+}
+
+func TestProStatusConfiguredStartLoginPreview(t *testing.T) {
+	service := NewService(PathsForRoot(t.TempDir()))
+	service.Config.ProAPIURL = "https://pro.example.com"
+	status, err := service.ProStatus(context.Background())
+	if err != nil {
+		t.Fatalf("pro status: %v", err)
+	}
+	if status.Authenticated || !containsSetupStatus(status.CurrentStatus, "not_authenticated") {
+		t.Fatalf("expected unauthenticated status preview: %#v", status)
+	}
+	if !containsSetupAction(status.RecommendedActions, "start_login") {
+		t.Fatalf("expected start_login action: %#v", status.RecommendedActions)
+	}
+}
+
 func TestProSetupAuthenticated(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
 	service.Config.RegistryURL = "https://registry.example.com/v1/registry"
@@ -260,6 +300,58 @@ func TestProSetupAuthenticated(t *testing.T) {
 	}
 	if containsSetupAction(result.RecommendedActions, "start_login") || containsSetupAction(result.RecommendedActions, "complete_login") || containsSetupAction(result.RecommendedActions, "configure_pro_api") {
 		t.Fatalf("did not expect unauthenticated actions: %#v", result.RecommendedActions)
+	}
+}
+
+func TestProStatusInvalidAuthPreview(t *testing.T) {
+	root := t.TempDir()
+	paths := PathsForRoot(root)
+	if err := os.MkdirAll(filepath.Dir(paths.AuthFile), 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(paths.AuthFile, []byte(`{"schema_version":1,"access_token":"secret","extra":true}`), 0o600); err != nil {
+		t.Fatalf("write invalid auth: %v", err)
+	}
+	service := NewService(paths)
+	status, err := service.ProStatus(context.Background())
+	if err != nil {
+		t.Fatalf("pro status: %v", err)
+	}
+	if status.Authenticated || !containsSetupStatus(status.CurrentStatus, "auth_invalid") {
+		t.Fatalf("expected auth_invalid status preview: %#v", status)
+	}
+	if !containsSetupAction(status.RecommendedActions, "reset_local_auth") {
+		t.Fatalf("expected reset_local_auth action: %#v", status.RecommendedActions)
+	}
+}
+
+func TestProSetupInvalidAuthPreview(t *testing.T) {
+	root := t.TempDir()
+	paths := PathsForRoot(root)
+	if err := os.MkdirAll(filepath.Dir(paths.AuthFile), 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(paths.AuthFile, []byte(`{"schema_version":1,"access_token":"secret","extra":true}`), 0o600); err != nil {
+		t.Fatalf("write invalid auth: %v", err)
+	}
+
+	service := NewService(paths)
+	service.Config.ProAPIURL = "https://pro.example.com"
+	result, err := service.ProSetup(context.Background())
+	if err != nil {
+		t.Fatalf("pro setup: %v", err)
+	}
+	if result.Authenticated || result.HasPendingLogin {
+		t.Fatalf("expected invalid auth preview to remain unauthenticated: %#v", result)
+	}
+	if !containsSetupStatus(result.CurrentStatus, "auth_invalid") {
+		t.Fatalf("expected auth_invalid status: %#v", result.CurrentStatus)
+	}
+	if !containsSetupAction(result.RecommendedActions, "reset_local_auth") {
+		t.Fatalf("expected reset_local_auth action: %#v", result.RecommendedActions)
+	}
+	if !containsSetupAction(result.RecommendedActions, "start_login") {
+		t.Fatalf("expected start_login action after preview recovery: %#v", result.RecommendedActions)
 	}
 }
 

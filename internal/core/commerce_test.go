@@ -89,7 +89,7 @@ func TestDefaultOCRSkillDeclaresRapidOCRV6Contract(t *testing.T) {
 	if !ok || modelProfile["default"] != "ppocrv6" {
 		t.Fatalf("expected ppocrv6 default model profile: %#v", inputProperties["model_profile"])
 	}
-	for _, name := range []string{"model_dir", "runtime_dir", "download_runtime", "download_models", "keep_archive", "rec_width", "rec_height", "rec_max_width"} {
+	for _, name := range []string{"model_dir", "runtime_dir", "download_runtime", "download_models", "keep_archive", "dry_run", "rec_width", "rec_height", "rec_max_width"} {
 		if _, ok := inputProperties[name].(map[string]any); !ok {
 			t.Fatalf("expected OCR input schema to include %s: %#v", name, inputProperties[name])
 		}

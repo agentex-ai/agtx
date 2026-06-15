@@ -793,6 +793,47 @@ func TestProSetupPlainText(t *testing.T) {
 	}
 }
 
+func TestProSetupJSONWithInvalidAuthPreview(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	configDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(`{"schema_version":1,"pro_api_url":"https://pro.example.com"}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "auth.json"), []byte(`{"schema_version":1,"access_token":"secret","extra":true}`), 0o600); err != nil {
+		t.Fatalf("write invalid auth: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"pro", "setup", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("pro setup failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var response struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			CurrentStatus      []string `json:"current_status"`
+			RecommendedActions []struct {
+				ID      string `json:"id"`
+				MCPTool string `json:"mcp_tool"`
+			} `json:"recommended_actions"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid pro setup json: %v\n%s", err, stdout.String())
+	}
+	if !response.OK || !containsString(response.Data.CurrentStatus, "auth_invalid") {
+		t.Fatalf("expected auth_invalid preview: %s", stdout.String())
+	}
+	if !containsCLIAction(response.Data.RecommendedActions, "reset_local_auth") {
+		t.Fatalf("expected reset_local_auth recommendation: %s", stdout.String())
+	}
+}
+
 func TestCommercePacksJSON(t *testing.T) {
 	t.Setenv("AGTX_HOME", t.TempDir())
 	var stdout bytes.Buffer
@@ -1566,6 +1607,62 @@ func TestProStatusWithoutLogin(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte(`"authenticated": false`)) {
 		t.Fatalf("expected unauthenticated status: %s", stdout.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"current_status": [`)) || !bytes.Contains(stdout.Bytes(), []byte(`"not_authenticated"`)) {
+		t.Fatalf("expected unauthenticated status markers: %s", stdout.String())
+	}
+}
+
+func TestProStatusPendingLoginJSON(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"config", "set", "pro_api_url", "https://pro.example.com", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("config set failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"pro", "login", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("pro login failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Main([]string{"pro", "status", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("pro status failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"pending_login"`)) {
+		t.Fatalf("expected pending_login status: %s", stdout.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"complete_login"`)) {
+		t.Fatalf("expected complete_login recommendation: %s", stdout.String())
+	}
+}
+
+func TestProStatusInvalidAuthPreviewJSON(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", root)
+	configDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "auth.json"), []byte(`{"schema_version":1,"access_token":"secret","extra":true}`), 0o600); err != nil {
+		t.Fatalf("write invalid auth: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"pro", "status", "--json"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("pro status failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"auth_invalid"`)) {
+		t.Fatalf("expected auth_invalid status preview: %s", stdout.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"reset_local_auth"`)) {
+		t.Fatalf("expected reset_local_auth recommendation: %s", stdout.String())
 	}
 }
 

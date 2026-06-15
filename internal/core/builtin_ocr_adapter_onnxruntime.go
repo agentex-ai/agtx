@@ -13,6 +13,7 @@ import (
 	_ "image/png"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -282,11 +283,17 @@ func ocrTensorNameExists(values []builtinOCRTensorInfo, name string) bool {
 
 func decodeONNXOCRImage(request builtinOCRRequest) (image.Image, error) {
 	if len(request.Input) > 0 {
+		if bytes.HasPrefix(bytes.TrimSpace(request.Input), []byte("%PDF-")) {
+			return nil, fmt.Errorf("PDF bytes are not raster images; extract text with the pdf skill or render the target page to PNG/JPEG before OCR")
+		}
 		img, _, err := image.Decode(bytes.NewReader(request.Input))
 		return img, err
 	}
 	if strings.TrimSpace(request.InputPath) == "" {
 		return nil, fmt.Errorf("input path is required")
+	}
+	if strings.EqualFold(strings.TrimSpace(filepath.Ext(request.InputPath)), ".pdf") {
+		return nil, fmt.Errorf("PDF files are not decoded directly by native OCR; extract text with the pdf skill or render the target page to PNG/JPEG first")
 	}
 	file, err := os.Open(request.InputPath)
 	if err != nil {
