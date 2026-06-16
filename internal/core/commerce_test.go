@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -73,11 +74,11 @@ func TestDefaultOCRSkillDeclaresRapidOCRV6Contract(t *testing.T) {
 	if skill.Name != "ocr" || skill.Version != "0.6.0" {
 		t.Fatalf("expected RapidOCR v6-ready OCR skill, got %#v", skill)
 	}
-	if skill.Stub || skill.Builtin == nil || !skill.Builtin.NoPython || !containsString(skill.Builtin.Backends, "onnxruntime") || !containsString(skill.Builtin.Backends, "ncnn") {
+	if skill.Stub || skill.Builtin == nil || !skill.Builtin.NoPython || !slices.Contains(skill.Builtin.Backends, "onnxruntime") || !slices.Contains(skill.Builtin.Backends, "ncnn") {
 		t.Fatalf("expected built-in native OCR without Python runtime: %#v", skill)
 	}
 	for _, want := range []string{"rapidocr", "ppocrv6"} {
-		if !containsString(skill.Tags, want) || !containsString(skill.Keywords, want) {
+		if !slices.Contains(skill.Tags, want) || !slices.Contains(skill.Keywords, want) {
 			t.Fatalf("expected %s in OCR tags and keywords: tags=%#v keywords=%#v", want, skill.Tags, skill.Keywords)
 		}
 	}
@@ -178,14 +179,14 @@ func TestDefaultCapabilityPacksExposeWebsiteFirstWaveAndBundles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get rapidocr alias: %v", err)
 	}
-	if ocr.Pack.ID != "ocr" || !containsString(ocr.Pack.Tags, "ppocrv6") || !containsString(ocr.Pack.Inputs, "optional model profile such as ppocrv6") {
+	if ocr.Pack.ID != "ocr" || !slices.Contains(ocr.Pack.Tags, "ppocrv6") || !slices.Contains(ocr.Pack.Inputs, "optional model profile such as ppocrv6") {
 		t.Fatalf("expected rapidocr alias and ppocrv6 pack metadata, got %#v", ocr.Pack)
 	}
 	security, err := service.GetCapabilityPack("security")
 	if err != nil {
 		t.Fatalf("get security alias: %v", err)
 	}
-	if security.Pack.ID != "security_audit" || !hasBillingMeter(security.Pack.Billing.Meters, "scan") || !containsString(security.Pack.Tags, "supply-chain") {
+	if security.Pack.ID != "security_audit" || !hasBillingMeter(security.Pack.Billing.Meters, "scan") || !slices.Contains(security.Pack.Tags, "supply-chain") {
 		t.Fatalf("expected security audit pack metadata, got %#v", security.Pack)
 	}
 	standard, err := service.GetCapabilityPack("standard")

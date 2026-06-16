@@ -20,7 +20,7 @@ Auth is stored in `auth.json` next to `config.json`. It contains a random `devic
 
 `agtx pro setup` is the recommended first step for both humans and agents. It is a local-only preflight: it reads config/auth state, does not refresh tokens, and does not call the network. It reports whether login is already complete or pending, whether `pro_api_url` is configured, whether callback-scheme registration can be attempted automatically, and which next actions are recommended.
 If `auth.json` is corrupt, `agtx pro setup` still succeeds with `current_status` including `auth_invalid`, plus a `reset_local_auth` action that maps to `agtx pro logout` / MCP `logout_pro`.
-`agtx pro status --json` now echoes the same local markers, including `pending_login` before callback completion and `auth_invalid` for corrupt auth files.
+`agtx pro status --json` now echoes the same local markers and `recommended_actions`, including `pending_login` before callback completion and `auth_invalid` for corrupt auth files, so callers can branch from one status request.
 
 `agtx pro register-scheme` is automated on macOS and Windows. On macOS it creates a small local app bundle in the agtx config directory, registers `agtx://` through LaunchServices, and forwards the callback URI back into `agtx pro callback`.
 

@@ -1,4 +1,4 @@
-﻿package core
+package core
 
 import "time"
 
@@ -724,4 +724,3 @@ type ProSetupAction struct {
 	Arguments   map[string]any `json:"arguments,omitempty"`
 	AppliesWhen []string       `json:"applies_when,omitempty"`
 }
-

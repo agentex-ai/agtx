@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,15 +22,62 @@ import (
 	"github.com/agentex-ai/agtx/internal/core"
 )
 
-func TestMCPToolsList(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n")
+type mcpProPreviewResponse struct {
+	Result struct {
+		IsError           bool `json:"isError"`
+		StructuredContent struct {
+			CurrentStatus      []string              `json:"current_status"`
+			RecommendedActions []core.ProSetupAction `json:"recommended_actions"`
+		} `json:"structuredContent"`
+	} `json:"result"`
+}
+
+func runMCPToolNoArgs(t *testing.T, service *core.Service, name string, response any) string {
+	t.Helper()
+	return runMCPTool(t, service, name, `{}`, response)
+}
+
+func runMCPTool(t *testing.T, service *core.Service, name, arguments string, response any) string {
+	t.Helper()
+	return runMCP(t, service, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":`+strconv.Quote(name)+`,"arguments":`+arguments+`}}`+"\n", response)
+}
+
+func runMCP(t *testing.T, service *core.Service, input string, response any) string {
+	t.Helper()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
+	code := Run(service, strings.NewReader(input), &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
 	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("unexpected stderr: %s", stderr.String())
+	}
+	if response != nil {
+		if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), response); err != nil {
+			t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+		}
+	}
+	return stdout.String()
+}
+
+func runMCPLines(t *testing.T, service *core.Service, input string, want int) []string {
+	t.Helper()
+	output := runMCP(t, service, input, nil)
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) != want {
+		t.Fatalf("expected %d MCP responses, got %d: %s", want, len(lines), output)
+	}
+	return lines
+}
+
+func testMCPService(t *testing.T) *core.Service {
+	t.Helper()
+	return core.NewService(core.PathsForRoot(t.TempDir()))
+}
+
+func TestMCPToolsList(t *testing.T) {
+	service := testMCPService(t)
 	var response struct {
 		Result struct {
 			Tools []struct {
@@ -37,11 +85,9 @@ func TestMCPToolsList(t *testing.T) {
 			} `json:"tools"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCP(t, service, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`+"\n", &response)
 	if len(response.Result.Tools) == 0 {
-		t.Fatalf("expected tools in response: %s", stdout.String())
+		t.Fatalf("expected tools in response: %s", output)
 	}
 }
 
@@ -98,14 +144,7 @@ func propertyNames(properties map[string]any) []string {
 }
 
 func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
+	service := testMCPService(t)
 	var response struct {
 		Result struct {
 			Tools []struct {
@@ -116,138 +155,63 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 			} `json:"tools"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCP(t, service, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`+"\n", &response)
 
-	var runSchema map[string]any
-	var planSchema map[string]any
-	var agentSchema map[string]any
-	var doctorSchema map[string]any
-	var verifySchema map[string]any
-	var runOutputSchema map[string]any
-	var runErrorSchema map[string]any
-	var searchSchema map[string]any
-	var listSchema map[string]any
-	var packListSchema map[string]any
-	var scenarioListSchema map[string]any
-	var scenarioSchema map[string]any
-	var packPlanSchema map[string]any
-	var packInstallSchema map[string]any
-	var scenarioPlanSchema map[string]any
-	var scenarioInstallSchema map[string]any
-	var scenarioLedgerSchema map[string]any
-	var installRecordsSchema map[string]any
-	var billingRecordsSchema map[string]any
-	var commerceSnapshotSchema map[string]any
-	var commerceIntegritySchema map[string]any
-	var commerceProofSchema map[string]any
-	var configKeysSchema map[string]any
-	var registrySourcesSchema map[string]any
-	var statusSchema map[string]any
-	var proStatusSchema map[string]any
-	var proSetupSchema map[string]any
-	var proLoginStartSchema map[string]any
-	var proLoginCompleteSchema map[string]any
-	var proDevicesSchema map[string]any
-	var revokeProDeviceSchema map[string]any
-	var logoutProSchema map[string]any
-	var registerProSchemeSchema map[string]any
-	var refreshSchema map[string]any
-	var validateRegistrySchema map[string]any
-	var planOutputSchema map[string]any
-	var installSchema map[string]any
-	var installErrorSchema map[string]any
-	var upgradeSchema map[string]any
-	var rollbackSchema map[string]any
-	var uninstallSchema map[string]any
-	var verifyErrorSchema map[string]any
+	schemas := map[string]map[string]any{}
 	for _, tool := range response.Result.Tools {
-		switch tool.Name {
-		case "search_skills":
-			searchSchema = tool.OutputSchema
-		case "list_skills":
-			listSchema = tool.OutputSchema
-		case "list_capability_packs":
-			packListSchema = tool.OutputSchema
-		case "list_capability_scenarios":
-			scenarioListSchema = tool.OutputSchema
-		case "get_capability_scenario":
-			scenarioSchema = tool.OutputSchema
-		case "plan_capability_pack_install":
-			packPlanSchema = tool.OutputSchema
-		case "install_capability_pack":
-			packInstallSchema = tool.OutputSchema
-		case "plan_capability_scenario_install":
-			scenarioPlanSchema = tool.OutputSchema
-		case "install_capability_scenario":
-			scenarioInstallSchema = tool.OutputSchema
-		case "get_capability_scenario_ledger":
-			scenarioLedgerSchema = tool.OutputSchema
-		case "list_install_records":
-			installRecordsSchema = tool.OutputSchema
-		case "list_billing_records":
-			billingRecordsSchema = tool.OutputSchema
-		case "get_commerce_snapshot":
-			commerceSnapshotSchema = tool.OutputSchema
-		case "get_commerce_integrity":
-			commerceIntegritySchema = tool.OutputSchema
-		case "get_commerce_proof":
-			commerceProofSchema = tool.OutputSchema
-		case "list_config_keys":
-			configKeysSchema = tool.OutputSchema
-		case "list_registry_sources":
-			registrySourcesSchema = tool.OutputSchema
-		case "get_status":
-			statusSchema = tool.OutputSchema
-		case "get_pro_status":
-			proStatusSchema = tool.OutputSchema
-		case "get_pro_setup":
-			proSetupSchema = tool.OutputSchema
-		case "start_pro_login":
-			proLoginStartSchema = tool.OutputSchema
-		case "complete_pro_login":
-			proLoginCompleteSchema = tool.OutputSchema
-		case "list_pro_devices":
-			proDevicesSchema = tool.OutputSchema
-		case "revoke_pro_device":
-			revokeProDeviceSchema = tool.OutputSchema
-		case "logout_pro":
-			logoutProSchema = tool.OutputSchema
-		case "register_pro_scheme":
-			registerProSchemeSchema = tool.OutputSchema
-		case "refresh_registry":
-			refreshSchema = tool.OutputSchema
-		case "validate_registry":
-			validateRegistrySchema = tool.OutputSchema
-		case "run_skill":
-			runSchema = tool.InputSchema
-			runOutputSchema = tool.OutputSchema
-			runErrorSchema = tool.ErrorOutputSchema
-		case "plan_install":
-			planSchema = tool.InputSchema
-			planOutputSchema = tool.OutputSchema
-		case "install_skill":
-			installSchema = tool.OutputSchema
-			installErrorSchema = tool.ErrorOutputSchema
-		case "upgrade_skill":
-			upgradeSchema = tool.OutputSchema
-		case "rollback_skill":
-			rollbackSchema = tool.OutputSchema
-		case "uninstall_skill":
-			uninstallSchema = tool.OutputSchema
-		case "get_agent_target":
-			agentSchema = tool.OutputSchema
-		case "doctor":
-			doctorSchema = tool.OutputSchema
-		case "verify_skill":
-			verifySchema = tool.OutputSchema
-			verifyErrorSchema = tool.ErrorOutputSchema
+		schemas[tool.Name+".input"] = tool.InputSchema
+		schemas[tool.Name+".output"] = tool.OutputSchema
+		schemas[tool.Name+".error"] = tool.ErrorOutputSchema
+	}
+	schema := func(name string) map[string]any {
+		t.Helper()
+		if schemas[name] == nil {
+			t.Fatalf("expected %s schema in discovery metadata: %s", name, output)
 		}
+		return schemas[name]
 	}
-	if searchSchema == nil || listSchema == nil || packListSchema == nil || scenarioListSchema == nil || scenarioSchema == nil || packPlanSchema == nil || packInstallSchema == nil || scenarioPlanSchema == nil || scenarioInstallSchema == nil || scenarioLedgerSchema == nil || installRecordsSchema == nil || billingRecordsSchema == nil || commerceSnapshotSchema == nil || commerceIntegritySchema == nil || commerceProofSchema == nil || configKeysSchema == nil || registrySourcesSchema == nil || statusSchema == nil || proStatusSchema == nil || proSetupSchema == nil || proLoginStartSchema == nil || proLoginCompleteSchema == nil || proDevicesSchema == nil || revokeProDeviceSchema == nil || logoutProSchema == nil || registerProSchemeSchema == nil || refreshSchema == nil || validateRegistrySchema == nil || runSchema == nil || runOutputSchema == nil || runErrorSchema == nil || planSchema == nil || planOutputSchema == nil || installSchema == nil || installErrorSchema == nil || upgradeSchema == nil || rollbackSchema == nil || uninstallSchema == nil || agentSchema == nil || doctorSchema == nil || verifySchema == nil || verifyErrorSchema == nil {
-		t.Fatalf("expected schemas for discovery metadata: %s", stdout.String())
-	}
+	runSchema := schema("run_skill.input")
+	planSchema := schema("plan_install.input")
+	agentSchema := schema("get_agent_target.output")
+	doctorSchema := schema("doctor.output")
+	verifySchema := schema("verify_skill.output")
+	runOutputSchema := schema("run_skill.output")
+	runErrorSchema := schema("run_skill.error")
+	searchSchema := schema("search_skills.output")
+	listSchema := schema("list_skills.output")
+	packListSchema := schema("list_capability_packs.output")
+	scenarioListSchema := schema("list_capability_scenarios.output")
+	scenarioSchema := schema("get_capability_scenario.output")
+	packPlanSchema := schema("plan_capability_pack_install.output")
+	packInstallSchema := schema("install_capability_pack.output")
+	scenarioPlanSchema := schema("plan_capability_scenario_install.output")
+	scenarioInstallSchema := schema("install_capability_scenario.output")
+	scenarioLedgerSchema := schema("get_capability_scenario_ledger.output")
+	installRecordsSchema := schema("list_install_records.output")
+	billingRecordsSchema := schema("list_billing_records.output")
+	commerceSnapshotSchema := schema("get_commerce_snapshot.output")
+	commerceIntegritySchema := schema("get_commerce_integrity.output")
+	commerceProofSchema := schema("get_commerce_proof.output")
+	configKeysSchema := schema("list_config_keys.output")
+	registrySourcesSchema := schema("list_registry_sources.output")
+	statusSchema := schema("get_status.output")
+	proStatusSchema := schema("get_pro_status.output")
+	proSetupSchema := schema("get_pro_setup.output")
+	proLoginStartSchema := schema("start_pro_login.output")
+	proLoginCompleteSchema := schema("complete_pro_login.output")
+	proDevicesSchema := schema("list_pro_devices.output")
+	revokeProDeviceSchema := schema("revoke_pro_device.output")
+	logoutProSchema := schema("logout_pro.output")
+	registerProSchemeSchema := schema("register_pro_scheme.output")
+	refreshSchema := schema("refresh_registry.output")
+	validateRegistrySchema := schema("validate_registry.output")
+	planOutputSchema := schema("plan_install.output")
+	installSchema := schema("install_skill.output")
+	installErrorSchema := schema("install_skill.error")
+	upgradeSchema := schema("upgrade_skill.output")
+	rollbackSchema := schema("rollback_skill.output")
+	uninstallSchema := schema("uninstall_skill.output")
+	verifyErrorSchema := schema("verify_skill.error")
 	if runSchema["additionalProperties"] != false {
 		t.Fatalf("expected run_skill additionalProperties=false: %#v", runSchema)
 	}
@@ -647,21 +611,12 @@ func TestMCPToolsListIncludesStrictSchemas(t *testing.T) {
 }
 
 func TestMCPAgentTargetTools(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_agent_targets","arguments":{}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_agent_target","arguments":{"target":"cc"}}}` + "\n",
+	service := testMCPService(t)
+	lines := runMCPLines(t, service,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_agent_targets","arguments":{}}}`+"\n"+
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_agent_target","arguments":{"target":"cc"}}}`+"\n",
+		2,
 	)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
-	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected two MCP responses, got %d: %s", len(lines), stdout.String())
-	}
 
 	var listResponse struct {
 		Result struct {
@@ -756,14 +711,7 @@ func TestMCPAgentTargetTools(t *testing.T) {
 }
 
 func TestMCPProStatusToolUnauthenticated(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pro_status","arguments":{}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
+	service := testMCPService(t)
 	var response struct {
 		Result struct {
 			IsError           bool `json:"isError"`
@@ -773,23 +721,14 @@ func TestMCPProStatusToolUnauthenticated(t *testing.T) {
 			} `json:"structuredContent"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCPToolNoArgs(t, service, "get_pro_status", &response)
 	if response.Result.IsError || response.Result.StructuredContent.Authenticated || response.Result.StructuredContent.AuthPath == "" {
-		t.Fatalf("expected unauthenticated pro status: %s", stdout.String())
+		t.Fatalf("expected unauthenticated pro status: %s", output)
 	}
 }
 
 func TestMCPListConfigKeysTool(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_config_keys","arguments":{}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
+	service := testMCPService(t)
 	var response struct {
 		Result struct {
 			IsError           bool `json:"isError"`
@@ -800,11 +739,9 @@ func TestMCPListConfigKeysTool(t *testing.T) {
 			} `json:"structuredContent"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCPToolNoArgs(t, service, "list_config_keys", &response)
 	if response.Result.IsError || len(response.Result.StructuredContent) == 0 {
-		t.Fatalf("expected config keys result: %s", stdout.String())
+		t.Fatalf("expected config keys result: %s", output)
 	}
 	foundRegistryURL := false
 	for _, item := range response.Result.StructuredContent {
@@ -814,7 +751,7 @@ func TestMCPListConfigKeysTool(t *testing.T) {
 		}
 	}
 	if !foundRegistryURL {
-		t.Fatalf("expected registry_url key metadata: %s", stdout.String())
+		t.Fatalf("expected registry_url key metadata: %s", output)
 	}
 }
 
@@ -833,20 +770,11 @@ func TestMCPRegistrySourceAndValidateTools(t *testing.T) {
 	service.Config = config
 	service.Registry, service.RegistrySources = core.LoadRegistry(paths, config)
 
-	input := strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_registry_sources","arguments":{}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"validate_registry","arguments":{"path":"` + strings.ReplaceAll(registryPath, `\`, `\\`) + `"}}}` + "\n",
+	lines := runMCPLines(t, service,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_registry_sources","arguments":{}}}`+"\n"+
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"validate_registry","arguments":{"path":"`+strings.ReplaceAll(registryPath, `\`, `\\`)+`"}}}`+"\n",
+		2,
 	)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
-	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected two MCP responses, got %d: %s", len(lines), stdout.String())
-	}
 
 	var sourcesResponse struct {
 		Result struct {
@@ -891,15 +819,8 @@ func TestMCPRegistrySourceAndValidateTools(t *testing.T) {
 }
 
 func TestMCPProDeviceErrorIncludesRecoveryHints(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	service.Config.ProAPIURL = "https://pro.example.com"
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_pro_devices","arguments":{}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
 	var response struct {
 		Result struct {
 			IsError           bool `json:"isError"`
@@ -911,85 +832,60 @@ func TestMCPProDeviceErrorIncludesRecoveryHints(t *testing.T) {
 						ProSetup struct {
 							ProAPIURL string `json:"pro_api_url"`
 						} `json:"pro_setup"`
-						NextActions []struct {
-							ID      string `json:"id"`
-							MCPTool string `json:"mcp_tool"`
-						} `json:"next_actions"`
+						NextActions []core.ProSetupAction `json:"next_actions"`
 					} `json:"details"`
 				} `json:"error"`
 			} `json:"structuredContent"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCPToolNoArgs(t, service, "list_pro_devices", &response)
 	if !response.Result.IsError || response.Result.StructuredContent.OK || response.Result.StructuredContent.Error.Code != "unauthorized" {
-		t.Fatalf("expected unauthorized structured error: %s", stdout.String())
+		t.Fatalf("expected unauthorized structured error: %s", output)
 	}
 	if response.Result.StructuredContent.Error.Details.ProSetup.ProAPIURL != "https://pro.example.com" {
-		t.Fatalf("expected pro setup in details: %s", stdout.String())
+		t.Fatalf("expected pro setup in details: %s", output)
 	}
-	foundRestart := false
-	for _, action := range response.Result.StructuredContent.Error.Details.NextActions {
-		if action.ID == "restart_login" {
-			foundRestart = true
-			break
-		}
-	}
-	if !foundRestart {
-		t.Fatalf("expected restart_login in details: %s", stdout.String())
+	if !slices.ContainsFunc(response.Result.StructuredContent.Error.Details.NextActions, func(action core.ProSetupAction) bool { return action.ID == "restart_login" }) {
+		t.Fatalf("expected restart_login in details: %s", output)
 	}
 }
 
 func TestMCPGetProSetupTool(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	service.Config.ProAPIURL = "https://pro.example.com"
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pro_setup","arguments":{}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
 	var response struct {
 		Result struct {
 			IsError           bool `json:"isError"`
 			StructuredContent struct {
-				Authenticated      bool     `json:"authenticated"`
-				HasPendingLogin    bool     `json:"has_pending_login"`
-				CanRegisterScheme  bool     `json:"can_register_scheme"`
-				ProAPIURL          string   `json:"pro_api_url"`
-				CurrentStatus      []string `json:"current_status"`
-				RecommendedActions []struct {
-					ID      string `json:"id"`
-					Command string `json:"command"`
-					MCPTool string `json:"mcp_tool"`
-				} `json:"recommended_actions"`
+				Authenticated      bool                  `json:"authenticated"`
+				HasPendingLogin    bool                  `json:"has_pending_login"`
+				CanRegisterScheme  bool                  `json:"can_register_scheme"`
+				ProAPIURL          string                `json:"pro_api_url"`
+				CurrentStatus      []string              `json:"current_status"`
+				RecommendedActions []core.ProSetupAction `json:"recommended_actions"`
 			} `json:"structuredContent"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCPToolNoArgs(t, service, "get_pro_setup", &response)
 	if response.Result.IsError {
-		t.Fatalf("expected success result: %s", stdout.String())
+		t.Fatalf("expected success result: %s", output)
 	}
 	if response.Result.StructuredContent.Authenticated || response.Result.StructuredContent.HasPendingLogin {
-		t.Fatalf("expected setup preview before login: %s", stdout.String())
+		t.Fatalf("expected setup preview before login: %s", output)
 	}
 	if response.Result.StructuredContent.ProAPIURL != "https://pro.example.com" {
-		t.Fatalf("expected configured pro api url: %s", stdout.String())
+		t.Fatalf("expected configured pro api url: %s", output)
 	}
-	if !containsString(response.Result.StructuredContent.CurrentStatus, "pro_api_configured") || !containsString(response.Result.StructuredContent.CurrentStatus, "not_authenticated") {
-		t.Fatalf("expected setup statuses: %s", stdout.String())
+	if !slices.Contains(response.Result.StructuredContent.CurrentStatus, "pro_api_configured") || !slices.Contains(response.Result.StructuredContent.CurrentStatus, "not_authenticated") {
+		t.Fatalf("expected setup statuses: %s", output)
 	}
-	if !containsActionID(response.Result.StructuredContent.RecommendedActions, "start_login") {
-		t.Fatalf("expected start_login action: %s", stdout.String())
+	if !slices.ContainsFunc(response.Result.StructuredContent.RecommendedActions, func(action core.ProSetupAction) bool { return action.ID == "start_login" }) {
+		t.Fatalf("expected start_login action: %s", output)
 	}
 }
 
 func TestMCPGetProSetupToolInvalidAuthPreview(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	service.Config.ProAPIURL = "https://pro.example.com"
 	if err := os.MkdirAll(filepath.Dir(service.Paths.AuthFile), 0o755); err != nil {
 		t.Fatalf("mkdir config: %v", err)
@@ -998,58 +894,35 @@ func TestMCPGetProSetupToolInvalidAuthPreview(t *testing.T) {
 		t.Fatalf("write invalid auth: %v", err)
 	}
 
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pro_setup","arguments":{}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	var response mcpProPreviewResponse
+	output := runMCPToolNoArgs(t, service, "get_pro_setup", &response)
+	if response.Result.IsError || !slices.Contains(response.Result.StructuredContent.CurrentStatus, "auth_invalid") {
+		t.Fatalf("expected auth_invalid preview: %s", output)
 	}
-	var response struct {
-		Result struct {
-			IsError           bool `json:"isError"`
-			StructuredContent struct {
-				CurrentStatus      []string `json:"current_status"`
-				RecommendedActions []struct {
-					ID      string `json:"id"`
-					Command string `json:"command"`
-					MCPTool string `json:"mcp_tool"`
-				} `json:"recommended_actions"`
-			} `json:"structuredContent"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
-	if response.Result.IsError || !containsString(response.Result.StructuredContent.CurrentStatus, "auth_invalid") {
-		t.Fatalf("expected auth_invalid preview: %s", stdout.String())
-	}
-	if !containsActionID(response.Result.StructuredContent.RecommendedActions, "reset_local_auth") {
-		t.Fatalf("expected reset_local_auth action: %s", stdout.String())
+	if !slices.ContainsFunc(response.Result.StructuredContent.RecommendedActions, func(action core.ProSetupAction) bool { return action.ID == "reset_local_auth" }) {
+		t.Fatalf("expected reset_local_auth action: %s", output)
 	}
 }
 
 func TestMCPGetProStatusPendingLoginPreview(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	service.Config.ProAPIURL = "https://pro.example.com"
 	if _, err := service.ProLoginStart(context.Background()); err != nil {
 		t.Fatalf("pro login start: %v", err)
 	}
 
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pro_status","arguments":{}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	var response mcpProPreviewResponse
+	output := runMCPToolNoArgs(t, service, "get_pro_status", &response)
+	if response.Result.IsError || !slices.Contains(response.Result.StructuredContent.CurrentStatus, "pending_login") {
+		t.Fatalf("expected pending_login preview: %s", output)
 	}
-	if !bytes.Contains(stdout.Bytes(), []byte(`"pending_login"`)) {
-		t.Fatalf("expected pending_login status preview: %s", stdout.String())
+	if !slices.ContainsFunc(response.Result.StructuredContent.RecommendedActions, func(action core.ProSetupAction) bool { return action.ID == "complete_login" }) {
+		t.Fatalf("expected complete_login action: %s", output)
 	}
 }
 
 func TestMCPGetProStatusInvalidAuthPreview(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	if err := os.MkdirAll(filepath.Dir(service.Paths.AuthFile), 0o755); err != nil {
 		t.Fatalf("mkdir config: %v", err)
 	}
@@ -1057,28 +930,19 @@ func TestMCPGetProStatusInvalidAuthPreview(t *testing.T) {
 		t.Fatalf("write invalid auth: %v", err)
 	}
 
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pro_status","arguments":{}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	var response mcpProPreviewResponse
+	output := runMCPToolNoArgs(t, service, "get_pro_status", &response)
+	if response.Result.IsError || !slices.Contains(response.Result.StructuredContent.CurrentStatus, "auth_invalid") {
+		t.Fatalf("expected auth_invalid preview: %s", output)
 	}
-	if !bytes.Contains(stdout.Bytes(), []byte(`"auth_invalid"`)) {
-		t.Fatalf("expected auth_invalid status preview: %s", stdout.String())
+	if !slices.ContainsFunc(response.Result.StructuredContent.RecommendedActions, func(action core.ProSetupAction) bool { return action.ID == "reset_local_auth" }) {
+		t.Fatalf("expected reset_local_auth action: %s", output)
 	}
 }
 
 func TestMCPStartProLoginTool(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	service.Config.ProAPIURL = "https://pro.example.com"
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"start_pro_login","arguments":{}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
 	var response struct {
 		Result struct {
 			IsError           bool `json:"isError"`
@@ -1089,11 +953,9 @@ func TestMCPStartProLoginTool(t *testing.T) {
 			} `json:"structuredContent"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCPToolNoArgs(t, service, "start_pro_login", &response)
 	if response.Result.IsError || !strings.Contains(response.Result.StructuredContent.LoginURL, "https://pro.example.com/v1/cli/login/start?") || response.Result.StructuredContent.State == "" || response.Result.StructuredContent.AuthPath == "" {
-		t.Fatalf("expected login start result: %s", stdout.String())
+		t.Fatalf("expected login start result: %s", output)
 	}
 }
 
@@ -1110,20 +972,13 @@ func TestMCPCompleteProLoginTool(t *testing.T) {
 	}))
 	defer server.Close()
 
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	service.Config.ProAPIURL = server.URL
 	login, err := service.ProLoginStart(context.Background())
 	if err != nil {
 		t.Fatalf("login start: %v", err)
 	}
 
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"complete_pro_login","arguments":{"callback_uri":"agtx://pro/callback?code=abc&state=` + login.State + `"}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
 	var response struct {
 		Result struct {
 			IsError           bool `json:"isError"`
@@ -1135,11 +990,9 @@ func TestMCPCompleteProLoginTool(t *testing.T) {
 			} `json:"structuredContent"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCPTool(t, service, "complete_pro_login", `{"callback_uri":"agtx://pro/callback?code=abc&state=`+login.State+`"}`, &response)
 	if response.Result.IsError || !response.Result.StructuredContent.Authenticated || response.Result.StructuredContent.DeviceLimit != 3 || response.Result.StructuredContent.Subscription != "active" || response.Result.StructuredContent.RegistryURL == "" {
-		t.Fatalf("expected complete_pro_login result: %s", stdout.String())
+		t.Fatalf("expected complete_pro_login result: %s", output)
 	}
 	if tokenRequest != "" {
 		t.Fatalf("token exchange should not send bearer auth, got %q", tokenRequest)
@@ -1147,19 +1000,12 @@ func TestMCPCompleteProLoginTool(t *testing.T) {
 }
 
 func TestMCPLogoutProTool(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	service.Auth = core.AuthState{SchemaVersion: 1, AccessToken: "access", DeviceID: "device-1"}
 	if err := core.SaveAuth(service.Paths.AuthFile, service.Auth); err != nil {
 		t.Fatalf("save auth: %v", err)
 	}
 
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"logout_pro","arguments":{}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
 	var response struct {
 		Result struct {
 			IsError           bool `json:"isError"`
@@ -1169,11 +1015,9 @@ func TestMCPLogoutProTool(t *testing.T) {
 			} `json:"structuredContent"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCPToolNoArgs(t, service, "logout_pro", &response)
 	if response.Result.IsError || !response.Result.StructuredContent.LoggedOut || response.Result.StructuredContent.AuthPath == "" {
-		t.Fatalf("expected logout_pro result: %s", stdout.String())
+		t.Fatalf("expected logout_pro result: %s", output)
 	}
 	if _, err := os.Stat(service.Paths.AuthFile); !os.IsNotExist(err) {
 		t.Fatalf("expected auth file removed, got err=%v", err)
@@ -1181,18 +1025,11 @@ func TestMCPLogoutProTool(t *testing.T) {
 }
 
 func TestMCPRegisterProSchemeTool(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	restore := core.SwapProRegisterSchemeHookForTest(func() (core.ProSchemeResult, error) {
 		return core.ProSchemeResult{Scheme: "agtx", Command: `"C:\agtx.exe" pro callback "%1"`}, nil
 	})
 	defer restore()
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"register_pro_scheme","arguments":{}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
 	var response struct {
 		Result struct {
 			IsError           bool `json:"isError"`
@@ -1204,34 +1041,26 @@ func TestMCPRegisterProSchemeTool(t *testing.T) {
 			} `json:"structuredContent"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCPToolNoArgs(t, service, "register_pro_scheme", &response)
 	if response.Result.IsError {
-		t.Fatalf("expected success result: %s", stdout.String())
+		t.Fatalf("expected success result: %s", output)
 	}
 	if response.Result.StructuredContent.Scheme != "agtx" {
-		t.Fatalf("expected agtx scheme result: %s", stdout.String())
+		t.Fatalf("expected agtx scheme result: %s", output)
 	}
 }
 
 func TestMCPRevokeProDeviceRequiresYes(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"revoke_pro_device","arguments":{"device_id":"device-1"}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	service := testMCPService(t)
+	output := runMCPTool(t, service, "revoke_pro_device", `{"device_id":"device-1"}`, nil)
+	if !strings.Contains(output, "confirmation_required") {
+		t.Fatalf("expected confirmation error: %s", output)
 	}
-	if !strings.Contains(stdout.String(), "confirmation_required") {
-		t.Fatalf("expected confirmation error: %s", stdout.String())
-	}
-	assertMCPConfirmationDetails(t, stdout.Bytes(), "revoke_pro_device", "device_id")
+	assertMCPConfirmationDetails(t, []byte(output), "revoke_pro_device", "device_id")
 }
 
 func TestMCPGetAgentTargetRejectsUnknownTarget(t *testing.T) {
-	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	s := &server{service: testMCPService(t)}
 	_, err := s.callTool(json.RawMessage(`{"name":"get_agent_target","arguments":{"target":"unknown"}}`))
 	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
 		t.Fatalf("expected invalid argument, got %v", err)
@@ -1245,24 +1074,17 @@ func TestMCPGetAgentTargetRejectsUnknownTarget(t *testing.T) {
 		t.Fatalf("unexpected details: %#v", coreErr.Details)
 	}
 	targets, ok := details["supported_targets"].([]string)
-	if !ok || !containsString(targets, "codex") || !containsString(targets, "cursor") {
+	if !ok || !slices.Contains(targets, "codex") || !slices.Contains(targets, "cursor") {
 		t.Fatalf("expected supported targets: %#v", details["supported_targets"])
 	}
 	args, ok := details["supported_arguments"].([]string)
-	if !ok || !containsString(args, "target") {
+	if !ok || !slices.Contains(args, "target") {
 		t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
 	}
 }
 
 func TestMCPInstallRequiresYes(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"install_skill","arguments":{"skill":"pdf"}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
+	service := testMCPService(t)
 	var response struct {
 		Result struct {
 			IsError bool `json:"isError"`
@@ -1271,16 +1093,14 @@ func TestMCPInstallRequiresYes(t *testing.T) {
 			} `json:"content"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCPTool(t, service, "install_skill", `{"skill":"pdf"}`, &response)
 	if !response.Result.IsError || !strings.Contains(response.Result.Content[0].Text, "confirmation_required") {
-		t.Fatalf("expected confirmation error: %s", stdout.String())
+		t.Fatalf("expected confirmation error: %s", output)
 	}
 	if response.Result.Content[0].Text == "" {
 		t.Fatalf("expected text content")
 	}
-	assertMCPConfirmationDetails(t, stdout.Bytes(), "install_skill", "skill")
+	assertMCPConfirmationDetails(t, []byte(output), "install_skill", "skill")
 }
 
 func assertMCPConfirmationDetails(t *testing.T, output []byte, tool, supportedArgument string) {
@@ -1306,20 +1126,16 @@ func assertMCPConfirmationDetails(t *testing.T, output []byte, tool, supportedAr
 		t.Fatalf("expected retry_with yes=true: %#v", details["retry_with"])
 	}
 	args, ok := details["supported_arguments"].([]any)
-	if !ok || !containsAnyString(args, "yes") || !containsAnyString(args, supportedArgument) {
+	hasArg := func(want string) bool {
+		return slices.ContainsFunc(args, func(value any) bool { return value == want })
+	}
+	if !ok || !hasArg("yes") || !hasArg(supportedArgument) {
 		t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
 	}
 }
 
 func TestMCPToolErrorIncludesStructuredContent(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"install_skill","arguments":{"skill":"pdf"}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
+	service := testMCPService(t)
 	var response struct {
 		Result struct {
 			IsError           bool `json:"isError"`
@@ -1331,16 +1147,14 @@ func TestMCPToolErrorIncludesStructuredContent(t *testing.T) {
 			} `json:"structuredContent"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCPTool(t, service, "install_skill", `{"skill":"pdf"}`, &response)
 	if !response.Result.IsError || response.Result.StructuredContent.OK || response.Result.StructuredContent.Error.Code != "confirmation_required" {
-		t.Fatalf("expected structured confirmation error: %s", stdout.String())
+		t.Fatalf("expected structured confirmation error: %s", output)
 	}
 }
 
 func TestMCPContentLengthFraming(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_skills","arguments":{"query":"pdf","limit":1}}}`
 	input := strings.NewReader("Content-Length: " + strconv.Itoa(len(body)) + "\r\n\r\n" + body)
 	var stdout bytes.Buffer
@@ -1359,24 +1173,15 @@ func TestMCPContentLengthFraming(t *testing.T) {
 }
 
 func TestMCPLineModeAllowsBlankAndIndentedMessages(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader("\n  \t\n  {\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"search_skills\",\"arguments\":{\"query\":\"pdf\",\"limit\":1}}}\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("expected no stderr, got %s", stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "pdf") {
-		t.Fatalf("expected pdf response after blank and indented lines: %s", stdout.String())
+	service := testMCPService(t)
+	output := runMCP(t, service, "\n  \t\n  {\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"search_skills\",\"arguments\":{\"query\":\"pdf\",\"limit\":1}}}\n", nil)
+	if !strings.Contains(output, "pdf") {
+		t.Fatalf("expected pdf response after blank and indented lines: %s", output)
 	}
 }
 
 func TestMCPRejectsOversizedContentLength(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	input := strings.NewReader("Content-Length: " + strconv.Itoa(maxMCPMessageBytes+1) + "\r\n\r\n{}")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -1390,37 +1195,22 @@ func TestMCPRejectsOversizedContentLength(t *testing.T) {
 }
 
 func TestMCPPlanInstall(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"plan_install","arguments":{"skill":"pdf"}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), `\"action\": \"install\"`) {
-		t.Fatalf("expected install plan: %s", stdout.String())
+	service := testMCPService(t)
+	output := runMCPTool(t, service, "plan_install", `{"skill":"pdf"}`, nil)
+	if !strings.Contains(output, `\"action\": \"install\"`) {
+		t.Fatalf("expected install plan: %s", output)
 	}
 }
 
 func TestMCPCapabilityPackCommerceSnapshot(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"install_capability_pack","arguments":{"pack":"gaoji","yes":true}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_commerce_snapshot","arguments":{"pack_id":"advanced","type":"pack_install","currency":"USD","limit":10}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_commerce_integrity","arguments":{}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_commerce_proof","arguments":{"challenge":"mcp-nonce"}}}` + "\n",
+	service := testMCPService(t)
+	lines := runMCPLines(t, service,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"install_capability_pack","arguments":{"pack":"gaoji","yes":true}}}`+"\n"+
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_commerce_snapshot","arguments":{"pack_id":"advanced","type":"pack_install","currency":"USD","limit":10}}}`+"\n"+
+			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_commerce_integrity","arguments":{}}}`+"\n"+
+			`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_commerce_proof","arguments":{"challenge":"mcp-nonce"}}}`+"\n",
+		4,
 	)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
-	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("expected four MCP responses, got %d: %s", len(lines), stdout.String())
-	}
 	var install struct {
 		Result struct {
 			IsError           bool `json:"isError"`
@@ -1572,37 +1362,22 @@ func TestMCPSubmitProofStoresAndListsReceipt(t *testing.T) {
 		t.Fatalf("install standard pack: %v", err)
 	}
 
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"submit_commerce_proof","arguments":{"challenge":"mcp-submit-nonce"}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
+	output := runMCPTool(t, service, "submit_commerce_proof", `{"challenge":"mcp-submit-nonce"}`, nil)
 	if submitCalls != 0 {
 		t.Fatalf("submit without yes should not call Pro, got %d calls", submitCalls)
 	}
-	if !strings.Contains(stdout.String(), "confirmation_required") {
-		t.Fatalf("expected confirmation error: %s", stdout.String())
+	if !strings.Contains(output, "confirmation_required") {
+		t.Fatalf("expected confirmation error: %s", output)
 	}
-	assertMCPConfirmationDetails(t, stdout.Bytes(), "submit_commerce_proof", "challenge")
+	assertMCPConfirmationDetails(t, []byte(output), "submit_commerce_proof", "challenge")
 
-	stdout.Reset()
-	stderr.Reset()
-	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"submit_commerce_proof","arguments":{"challenge":"mcp-submit-nonce","yes":true}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_commerce_receipts","arguments":{"status":"server_received","limit":10}}}` + "\n",
+	lines := runMCPLines(t, service,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"submit_commerce_proof","arguments":{"challenge":"mcp-submit-nonce","yes":true}}}`+"\n"+
+			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_commerce_receipts","arguments":{"status":"server_received","limit":10}}}`+"\n",
+		2,
 	)
-	code = Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
 	if submitCalls != 1 || gotPath != "/v1/commerce/proofs" || gotAuth != "Bearer access" || gotDevice != "device-1" {
 		t.Fatalf("unexpected proof submit request: calls=%d path=%q auth=%q device=%q", submitCalls, gotPath, gotAuth, gotDevice)
-	}
-	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected two MCP responses, got %d: %s", len(lines), stdout.String())
 	}
 	var submit struct {
 		Result struct {
@@ -1637,14 +1412,7 @@ func TestMCPSubmitProofStoresAndListsReceipt(t *testing.T) {
 }
 
 func TestMCPPlanCapabilityPackInstall(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"plan_capability_pack_install","arguments":{"pack":"standard"}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
+	service := testMCPService(t)
 	var response struct {
 		Result struct {
 			IsError           bool `json:"isError"`
@@ -1666,30 +1434,19 @@ func TestMCPPlanCapabilityPackInstall(t *testing.T) {
 			} `json:"structuredContent"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid pack plan json: %v\n%s", err, stdout.String())
-	}
-	if response.Result.IsError || response.Result.StructuredContent.Action != "install_pack" || response.Result.StructuredContent.Pack.Pack.ID != "standard" || len(response.Result.StructuredContent.Changes) == 0 || len(response.Result.StructuredContent.BillingPreview) != 2 || !containsString(response.Result.StructuredContent.Requires, "confirmation") {
-		t.Fatalf("unexpected pack plan response: %s", stdout.String())
+	output := runMCPTool(t, service, "plan_capability_pack_install", `{"pack":"standard"}`, &response)
+	if response.Result.IsError || response.Result.StructuredContent.Action != "install_pack" || response.Result.StructuredContent.Pack.Pack.ID != "standard" || len(response.Result.StructuredContent.Changes) == 0 || len(response.Result.StructuredContent.BillingPreview) != 2 || !slices.Contains(response.Result.StructuredContent.Requires, "confirmation") {
+		t.Fatalf("unexpected pack plan response: %s", output)
 	}
 }
 
 func TestMCPWebsiteCapabilityPackPlan(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"plan_capability_pack_install","arguments":{"pack":"pdf"}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"plan_capability_pack_install","arguments":{"pack":"imagen"}}}` + "\n",
+	service := testMCPService(t)
+	lines := runMCPLines(t, service,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"plan_capability_pack_install","arguments":{"pack":"pdf"}}}`+"\n"+
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"plan_capability_pack_install","arguments":{"pack":"imagen"}}}`+"\n",
+		2,
 	)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
-	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected two MCP responses, got %d: %s", len(lines), stdout.String())
-	}
 	var pdf struct {
 		Result struct {
 			IsError           bool `json:"isError"`
@@ -1738,24 +1495,15 @@ func TestMCPWebsiteCapabilityPackPlan(t *testing.T) {
 }
 
 func TestMCPScenarioInstallPlanAndRecords(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"plan_capability_scenario_install","arguments":{"scenario":"invoice"}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"install_capability_scenario","arguments":{"scenario":"invoice","yes":true}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_install_records","arguments":{"scenario_id":"invoice_processing"}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_billing_records","arguments":{"scenario_id":"invoice_processing","type":"pack_install","limit":10}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_capability_scenario_ledger","arguments":{"scenario":"invoice","type":"pack_install","limit":10}}}` + "\n",
+	service := testMCPService(t)
+	lines := runMCPLines(t, service,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"plan_capability_scenario_install","arguments":{"scenario":"invoice"}}}`+"\n"+
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"install_capability_scenario","arguments":{"scenario":"invoice","yes":true}}}`+"\n"+
+			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_install_records","arguments":{"scenario_id":"invoice_processing"}}}`+"\n"+
+			`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_billing_records","arguments":{"scenario_id":"invoice_processing","type":"pack_install","limit":10}}}`+"\n"+
+			`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_capability_scenario_ledger","arguments":{"scenario":"invoice","type":"pack_install","limit":10}}}`+"\n",
+		5,
 	)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
-	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(lines) != 5 {
-		t.Fatalf("expected five MCP responses, got %d: %s", len(lines), stdout.String())
-	}
 
 	var plan struct {
 		Result struct {
@@ -1784,7 +1532,7 @@ func TestMCPScenarioInstallPlanAndRecords(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &plan); err != nil {
 		t.Fatalf("invalid scenario plan json: %v\n%s", err, lines[0])
 	}
-	if plan.Result.IsError || plan.Result.StructuredContent.Action != "install_scenario" || plan.Result.StructuredContent.Scenario.Scenario.ID != "invoice_processing" || plan.Result.StructuredContent.PackPlan.Pack.Pack.ID != "standard" || len(plan.Result.StructuredContent.PackPlan.BillingPreview) != 2 || plan.Result.StructuredContent.PackPlan.BillingPreview[0].ScenarioID != "invoice_processing" || !containsString(plan.Result.StructuredContent.PackPlan.Requires, "confirmation") {
+	if plan.Result.IsError || plan.Result.StructuredContent.Action != "install_scenario" || plan.Result.StructuredContent.Scenario.Scenario.ID != "invoice_processing" || plan.Result.StructuredContent.PackPlan.Pack.Pack.ID != "standard" || len(plan.Result.StructuredContent.PackPlan.BillingPreview) != 2 || plan.Result.StructuredContent.PackPlan.BillingPreview[0].ScenarioID != "invoice_processing" || !slices.Contains(plan.Result.StructuredContent.PackPlan.Requires, "confirmation") {
 		t.Fatalf("unexpected scenario plan response: %s", lines[0])
 	}
 
@@ -1902,21 +1650,12 @@ func TestMCPScenarioInstallPlanAndRecords(t *testing.T) {
 }
 
 func TestMCPCapabilityScenarios(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_capability_scenarios","arguments":{"pack_id":"advanced"}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_capability_scenario","arguments":{"scenario":"invoice"}}}` + "\n",
+	service := testMCPService(t)
+	lines := runMCPLines(t, service,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_capability_scenarios","arguments":{"pack_id":"advanced"}}}`+"\n"+
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_capability_scenario","arguments":{"scenario":"invoice"}}}`+"\n",
+		2,
 	)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
-	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected two MCP responses, got %d: %s", len(lines), stdout.String())
-	}
 	var list struct {
 		Result struct {
 			IsError           bool `json:"isError"`
@@ -1995,16 +1734,9 @@ func TestMCPCapabilityScenarios(t *testing.T) {
 }
 
 func TestMCPRunSkillAcceptsScenarioID(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	if _, err := service.InstallSkills(context.Background(), []string{"web_search"}); err != nil {
 		t.Fatalf("install fixture: %v", err)
-	}
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_skill","arguments":{"skill":"web_search","scenario_id":"invoice"}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
 	}
 	var response struct {
 		Result struct {
@@ -2021,19 +1753,17 @@ func TestMCPRunSkillAcceptsScenarioID(t *testing.T) {
 			} `json:"structuredContent"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid run response json: %v\n%s", err, stdout.String())
-	}
+	output := runMCPTool(t, service, "run_skill", `{"skill":"web_search","scenario_id":"invoice"}`, &response)
 	if !response.Result.IsError || response.Result.StructuredContent.OK || response.Result.StructuredContent.Error.Code != "invalid_argument" {
-		t.Fatalf("expected structured run error for missing search query: %s", stdout.String())
+		t.Fatalf("expected structured run error for missing search query: %s", output)
 	}
 	if response.Result.StructuredContent.Data.Name != "web_search" || response.Result.StructuredContent.Data.ScenarioID != "invoice_processing" {
-		t.Fatalf("expected canonical scenario id in partial run data: %s", stdout.String())
+		t.Fatalf("expected canonical scenario id in partial run data: %s", output)
 	}
 }
 
 func TestMCPRunSkillAcceptsStructuredRapidOCROptions(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	request := map[string]any{
 		"name": "run_skill",
 		"arguments": map[string]any{
@@ -2088,7 +1818,7 @@ func TestMCPRunSkillAcceptsStructuredRapidOCROptions(t *testing.T) {
 }
 
 func TestMCPRejectsOCROptionsForNonOCRSkill(t *testing.T) {
-	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	s := &server{service: testMCPService(t)}
 	_, err := s.callTool(json.RawMessage(`{"name":"run_skill","arguments":{"skill":"pdf","ocr":{"probe":true}}}`))
 	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
 		t.Fatalf("expected invalid argument, got %v", err)
@@ -2102,13 +1832,13 @@ func TestMCPRejectsOCROptionsForNonOCRSkill(t *testing.T) {
 		t.Fatalf("unexpected details: %#v", coreErr.Details)
 	}
 	skills, ok := details["supported_skills"].([]string)
-	if !ok || !containsString(skills, "rapidocr") || !containsString(skills, "ppocrv6") {
+	if !ok || !slices.Contains(skills, "rapidocr") || !slices.Contains(skills, "ppocrv6") {
 		t.Fatalf("expected supported OCR aliases: %#v", details["supported_skills"])
 	}
 }
 
 func TestMCPRejectsMutuallyExclusiveSkillInputs(t *testing.T) {
-	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	s := &server{service: testMCPService(t)}
 	_, err := s.callTool(json.RawMessage(`{"name":"run_skill","arguments":{"skill":"rapidocr","input":"text","input_base64":"dGV4dA=="}}`))
 	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
 		t.Fatalf("expected invalid argument, got %v", err)
@@ -2124,7 +1854,7 @@ func TestMCPRejectsMutuallyExclusiveSkillInputs(t *testing.T) {
 }
 
 func TestMCPRejectsInvalidBase64SkillInput(t *testing.T) {
-	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	s := &server{service: testMCPService(t)}
 	_, err := s.callTool(json.RawMessage(`{"name":"run_skill","arguments":{"skill":"rapidocr","input_base64":"not base64"}}`))
 	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
 		t.Fatalf("expected invalid argument, got %v", err)
@@ -2140,58 +1870,40 @@ func TestMCPRejectsInvalidBase64SkillInput(t *testing.T) {
 }
 
 func TestMCPUninstallRequiresYes(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	if _, err := service.InstallSkills(context.Background(), []string{"pdf"}); err != nil {
 		t.Fatalf("install fixture: %v", err)
 	}
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"uninstall_skill","arguments":{"skill":"pdf"}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	output := runMCPTool(t, service, "uninstall_skill", `{"skill":"pdf"}`, nil)
+	if !strings.Contains(output, "confirmation_required") {
+		t.Fatalf("expected confirmation error: %s", output)
 	}
-	if !strings.Contains(stdout.String(), "confirmation_required") {
-		t.Fatalf("expected confirmation error: %s", stdout.String())
-	}
-	assertMCPConfirmationDetails(t, stdout.Bytes(), "uninstall_skill", "skill")
+	assertMCPConfirmationDetails(t, []byte(output), "uninstall_skill", "skill")
 }
 
 func TestMCPDoctorAndVerifySkill(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	if _, err := service.InstallSkills(context.Background(), []string{"pdf"}); err != nil {
 		t.Fatalf("install fixture: %v", err)
 	}
-	input := strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"doctor","arguments":{}}}` + "\n" +
-			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"verify_skill","arguments":{"skill":"pdf"}}}` + "\n",
+	output := runMCP(t, service,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"doctor","arguments":{}}}`+"\n"+
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"verify_skill","arguments":{"skill":"pdf"}}}`+"\n",
+		nil,
 	)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), `\"checks\"`) || !strings.Contains(stdout.String(), `\"name\": \"pdf\"`) {
-		t.Fatalf("expected doctor and verify responses: %s", stdout.String())
+	if !strings.Contains(output, `\"checks\"`) || !strings.Contains(output, `\"name\": \"pdf\"`) {
+		t.Fatalf("expected doctor and verify responses: %s", output)
 	}
 }
 
 func TestMCPVerifyErrorPreservesPartialResult(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
+	service := testMCPService(t)
 	if _, err := service.InstallSkills(context.Background(), []string{"pdf"}); err != nil {
 		t.Fatalf("install fixture: %v", err)
 	}
 	manifestPath := filepath.Join(service.Paths.SkillsDir, "pdf", "0.2.0", "manifest.json")
 	if err := os.WriteFile(manifestPath, []byte("{"), 0o644); err != nil {
 		t.Fatalf("corrupt manifest: %v", err)
-	}
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"verify_skill","arguments":{"skill":"pdf"}}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
 	}
 	var response struct {
 		Result struct {
@@ -2210,19 +1922,17 @@ func TestMCPVerifyErrorPreservesPartialResult(t *testing.T) {
 			} `json:"structuredContent"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCPTool(t, service, "verify_skill", `{"skill":"pdf"}`, &response)
 	if !response.Result.IsError || response.Result.StructuredContent.OK || response.Result.StructuredContent.Error.Code != "integrity_failed" {
-		t.Fatalf("expected structured verify error: %s", stdout.String())
+		t.Fatalf("expected structured verify error: %s", output)
 	}
 	if response.Result.StructuredContent.Data.Name != "pdf" || len(response.Result.StructuredContent.Data.Checks) == 0 {
-		t.Fatalf("expected partial verify data: %s", stdout.String())
+		t.Fatalf("expected partial verify data: %s", output)
 	}
 }
 
 func TestMCPRejectsUnknownToolArgument(t *testing.T) {
-	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	s := &server{service: testMCPService(t)}
 	_, err := s.callTool(json.RawMessage(`{"name":"search_skills","arguments":{"query":"pdf","typo":true}}`))
 	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
 		t.Fatalf("expected invalid argument, got %v", err)
@@ -2236,13 +1946,13 @@ func TestMCPRejectsUnknownToolArgument(t *testing.T) {
 		t.Fatalf("unexpected details: %#v", coreErr.Details)
 	}
 	args, ok := details["supported_arguments"].([]string)
-	if !ok || !containsString(args, "query") || !containsString(args, "limit") {
+	if !ok || !slices.Contains(args, "query") || !slices.Contains(args, "limit") {
 		t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
 	}
 }
 
 func TestMCPRejectsNonObjectToolArguments(t *testing.T) {
-	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	s := &server{service: testMCPService(t)}
 	_, err := s.callTool(json.RawMessage(`{"name":"search_skills","arguments":["pdf"]}`))
 	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
 		t.Fatalf("expected invalid argument, got %v", err)
@@ -2256,7 +1966,7 @@ func TestMCPRejectsNonObjectToolArguments(t *testing.T) {
 		t.Fatalf("unexpected details: %#v", coreErr.Details)
 	}
 	args, ok := details["supported_arguments"].([]string)
-	if !ok || !containsString(args, "query") || !containsString(args, "limit") {
+	if !ok || !slices.Contains(args, "query") || !slices.Contains(args, "limit") {
 		t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
 	}
 }
@@ -2289,7 +1999,7 @@ func TestMCPRejectsMissingRequiredToolArgument(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+			s := &server{service: testMCPService(t)}
 			_, err := s.callTool(json.RawMessage(tt.request))
 			if !core.IsErrorCode(err, core.CodeInvalidArgument) {
 				t.Fatalf("expected invalid argument, got %v", err)
@@ -2303,7 +2013,7 @@ func TestMCPRejectsMissingRequiredToolArgument(t *testing.T) {
 				t.Fatalf("unexpected details: %#v", coreErr.Details)
 			}
 			args, ok := details["supported_arguments"].([]string)
-			if !ok || !containsString(args, tt.argument) || !containsString(args, tt.supportedArgument) {
+			if !ok || !slices.Contains(args, tt.argument) || !slices.Contains(args, tt.supportedArgument) {
 				t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
 			}
 		})
@@ -2311,7 +2021,7 @@ func TestMCPRejectsMissingRequiredToolArgument(t *testing.T) {
 }
 
 func TestMCPRejectsMissingPlanInstallSkillArguments(t *testing.T) {
-	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	s := &server{service: testMCPService(t)}
 	_, err := s.callTool(json.RawMessage(`{"name":"plan_install","arguments":{}}`))
 	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
 		t.Fatalf("expected invalid argument, got %v", err)
@@ -2325,17 +2035,17 @@ func TestMCPRejectsMissingPlanInstallSkillArguments(t *testing.T) {
 		t.Fatalf("unexpected details: %#v", coreErr.Details)
 	}
 	names, ok := details["arguments"].([]string)
-	if !ok || !containsString(names, "skill") || !containsString(names, "skills") {
+	if !ok || !slices.Contains(names, "skill") || !slices.Contains(names, "skills") {
 		t.Fatalf("expected argument alternatives: %#v", details["arguments"])
 	}
 	args, ok := details["supported_arguments"].([]string)
-	if !ok || !containsString(args, "skill") || !containsString(args, "skills") {
+	if !ok || !slices.Contains(args, "skill") || !slices.Contains(args, "skills") {
 		t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
 	}
 }
 
 func TestMCPRejectsMissingToolNameWithSupportedTools(t *testing.T) {
-	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	s := &server{service: testMCPService(t)}
 	_, err := s.callTool(json.RawMessage(`{"arguments":{}}`))
 	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
 		t.Fatalf("expected invalid argument, got %v", err)
@@ -2349,13 +2059,13 @@ func TestMCPRejectsMissingToolNameWithSupportedTools(t *testing.T) {
 		t.Fatalf("expected details map: %#v", coreErr.Details)
 	}
 	tools, ok := details["supported_tools"].([]string)
-	if !ok || !containsString(tools, "search_skills") || !containsString(tools, "run_skill") {
+	if !ok || !slices.Contains(tools, "search_skills") || !slices.Contains(tools, "run_skill") {
 		t.Fatalf("expected supported_tools details: %#v", details["supported_tools"])
 	}
 }
 
 func TestMCPRejectsUnknownToolWithSupportedTools(t *testing.T) {
-	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	s := &server{service: testMCPService(t)}
 	_, err := s.callTool(json.RawMessage(`{"name":"search_skillz","arguments":{"query":"pdf"}}`))
 	if !core.IsErrorCode(err, core.CodeNotFound) {
 		t.Fatalf("expected not found, got %v", err)
@@ -2369,7 +2079,7 @@ func TestMCPRejectsUnknownToolWithSupportedTools(t *testing.T) {
 		t.Fatalf("unexpected details: %#v", coreErr.Details)
 	}
 	tools, ok := details["supported_tools"].([]string)
-	if !ok || !containsString(tools, "search_skills") || !containsString(tools, "run_skill") {
+	if !ok || !slices.Contains(tools, "search_skills") || !slices.Contains(tools, "run_skill") {
 		t.Fatalf("expected supported_tools details: %#v", details["supported_tools"])
 	}
 }
@@ -2388,13 +2098,13 @@ func TestMCPToolErrorPreservesSupportedKeysDetails(t *testing.T) {
 		t.Fatalf("expected error details map: %#v", content.Error.Details)
 	}
 	keys, ok := details["supported_keys"].([]string)
-	if !ok || !containsString(keys, "registry_url") || !containsString(keys, "package_max_bytes") {
+	if !ok || !slices.Contains(keys, "registry_url") || !slices.Contains(keys, "package_max_bytes") {
 		t.Fatalf("expected supported_keys details: %#v", details["supported_keys"])
 	}
 }
 
 func TestMCPRejectsWrongArgumentType(t *testing.T) {
-	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	s := &server{service: testMCPService(t)}
 	_, err := s.callTool(json.RawMessage(`{"name":"install_skill","arguments":{"skill":["pdf"],"yes":true}}`))
 	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
 		t.Fatalf("expected invalid argument, got %v", err)
@@ -2408,13 +2118,13 @@ func TestMCPRejectsWrongArgumentType(t *testing.T) {
 		t.Fatalf("unexpected details: %#v", coreErr.Details)
 	}
 	args, ok := details["supported_arguments"].([]string)
-	if !ok || !containsString(args, "skill") || !containsString(args, "yes") {
+	if !ok || !slices.Contains(args, "skill") || !slices.Contains(args, "yes") {
 		t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
 	}
 }
 
 func TestMCPRejectsNonPositiveIntegerArgument(t *testing.T) {
-	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	s := &server{service: testMCPService(t)}
 	_, err := s.callTool(json.RawMessage(`{"name":"run_skill","arguments":{"skill":"pdf","timeout_ms":0}}`))
 	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
 		t.Fatalf("expected invalid argument, got %v", err)
@@ -2427,13 +2137,13 @@ func TestMCPRejectsNonPositiveIntegerArgument(t *testing.T) {
 		t.Fatalf("unexpected details: %#v", core.ErrorFrom(err).Details)
 	}
 	args, ok := details["supported_arguments"].([]string)
-	if !ok || !containsString(args, "timeout_ms") || !containsString(args, "output_limit_bytes") {
+	if !ok || !slices.Contains(args, "timeout_ms") || !slices.Contains(args, "output_limit_bytes") {
 		t.Fatalf("expected supported_arguments details: %#v", details["supported_arguments"])
 	}
 }
 
 func TestMCPRejectsTrailingArgumentJSONValue(t *testing.T) {
-	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	s := &server{service: testMCPService(t)}
 	_, err := s.callTool(json.RawMessage(`{"name":"search_skills","arguments":{"query":"pdf"} {"limit":1}}`))
 	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
 		t.Fatalf("expected invalid argument, got %v", err)
@@ -2446,13 +2156,13 @@ func TestMCPRejectsTrailingArgumentJSONValue(t *testing.T) {
 		t.Fatalf("unexpected details: %#v", core.ErrorFrom(err).Details)
 	}
 	params, ok := details["supported_params"].([]string)
-	if !ok || !containsString(params, "name") || !containsString(params, "arguments") {
+	if !ok || !slices.Contains(params, "name") || !slices.Contains(params, "arguments") {
 		t.Fatalf("expected supported_params details: %#v", details["supported_params"])
 	}
 }
 
 func TestMCPRejectsUnknownToolCallParamWithSupportedParams(t *testing.T) {
-	s := &server{service: core.NewService(core.PathsForRoot(t.TempDir()))}
+	s := &server{service: testMCPService(t)}
 	_, err := s.callTool(json.RawMessage(`{"name":"search_skills","arguments":{"query":"pdf"},"extra":true}`))
 	if !core.IsErrorCode(err, core.CodeInvalidArgument) {
 		t.Fatalf("expected invalid argument, got %v", err)
@@ -2466,35 +2176,22 @@ func TestMCPRejectsUnknownToolCallParamWithSupportedParams(t *testing.T) {
 		t.Fatalf("unexpected details: %#v", coreErr.Details)
 	}
 	params, ok := details["supported_params"].([]string)
-	if !ok || !containsString(params, "name") || !containsString(params, "arguments") {
+	if !ok || !slices.Contains(params, "name") || !slices.Contains(params, "arguments") {
 		t.Fatalf("expected supported_params details: %#v", details["supported_params"])
 	}
 }
 
 func TestMCPRejectsInvalidJSONRPCVersion(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"1.0","id":1,"method":"tools/list","params":{}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	service := testMCPService(t)
+	output := runMCP(t, service, `{"jsonrpc":"1.0","id":1,"method":"tools/list","params":{}}`+"\n", nil)
+	if !strings.Contains(output, `"message":"invalid request"`) || !strings.Contains(output, `jsonrpc must be 2.0`) {
+		t.Fatalf("expected invalid request response: %s", output)
 	}
-	if !strings.Contains(stdout.String(), `"message":"invalid request"`) || !strings.Contains(stdout.String(), `jsonrpc must be 2.0`) {
-		t.Fatalf("expected invalid request response: %s", stdout.String())
-	}
-	assertMCPInvalidRequestDetails(t, stdout.Bytes(), "jsonrpc", "jsonrpc must be 2.0")
+	assertMCPInvalidRequestDetails(t, []byte(output), "jsonrpc", "jsonrpc must be 2.0")
 }
 
 func TestMCPRejectsUnknownMethodWithSupportedMethods(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/lost","params":{}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
+	service := testMCPService(t)
 	var response struct {
 		Error struct {
 			Code int `json:"code"`
@@ -2504,26 +2201,17 @@ func TestMCPRejectsUnknownMethodWithSupportedMethods(t *testing.T) {
 			} `json:"data"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid unknown method response: %v\n%s", err, stdout.String())
-	}
+	output := runMCP(t, service, `{"jsonrpc":"2.0","id":1,"method":"tools/lost","params":{}}`+"\n", &response)
 	if response.Error.Code != -32601 || response.Error.Data.Method != "tools/lost" {
-		t.Fatalf("unexpected unknown method response: %s", stdout.String())
+		t.Fatalf("unexpected unknown method response: %s", output)
 	}
-	if !containsString(response.Error.Data.SupportedMethods, "tools/list") || !containsString(response.Error.Data.SupportedMethods, "tools/call") {
-		t.Fatalf("expected supported methods: %s", stdout.String())
+	if !slices.Contains(response.Error.Data.SupportedMethods, "tools/list") || !slices.Contains(response.Error.Data.SupportedMethods, "tools/call") {
+		t.Fatalf("expected supported methods: %s", output)
 	}
 }
 
 func TestMCPRejectsMissingMethodWithSupportedMethods(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"params":{}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
+	service := testMCPService(t)
 	var response struct {
 		Error struct {
 			Code int `json:"code"`
@@ -2533,14 +2221,12 @@ func TestMCPRejectsMissingMethodWithSupportedMethods(t *testing.T) {
 			} `json:"data"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid missing method response: %v\n%s", err, stdout.String())
-	}
+	output := runMCP(t, service, `{"jsonrpc":"2.0","id":1,"params":{}}`+"\n", &response)
 	if response.Error.Code != -32600 || response.Error.Data.Error != "missing method" {
-		t.Fatalf("unexpected missing method response: %s", stdout.String())
+		t.Fatalf("unexpected missing method response: %s", output)
 	}
-	if !containsString(response.Error.Data.SupportedMethods, "initialize") || !containsString(response.Error.Data.SupportedMethods, "tools/call") {
-		t.Fatalf("expected supported methods: %s", stdout.String())
+	if !slices.Contains(response.Error.Data.SupportedMethods, "initialize") || !slices.Contains(response.Error.Data.SupportedMethods, "tools/call") {
+		t.Fatalf("expected supported methods: %s", output)
 	}
 }
 
@@ -2563,44 +2249,25 @@ func TestMCPSupportedMethodsAreStable(t *testing.T) {
 }
 
 func TestMCPRejectsInvalidRequestIDType(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":{},"method":"tools/list","params":{}}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	service := testMCPService(t)
+	output := runMCP(t, service, `{"jsonrpc":"2.0","id":{},"method":"tools/list","params":{}}`+"\n", nil)
+	if !strings.Contains(output, `id must be string, number, or null`) {
+		t.Fatalf("expected invalid id response: %s", output)
 	}
-	if !strings.Contains(stdout.String(), `id must be string, number, or null`) {
-		t.Fatalf("expected invalid id response: %s", stdout.String())
-	}
-	assertMCPInvalidRequestDetails(t, stdout.Bytes(), "id", "id must be string, number, or null")
+	assertMCPInvalidRequestDetails(t, []byte(output), "id", "id must be string, number, or null")
 }
 
 func TestMCPRejectsNonObjectParams(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":[]}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
+	service := testMCPService(t)
+	output := runMCP(t, service, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":[]}`+"\n", nil)
+	if !strings.Contains(output, `params must be an object or null`) {
+		t.Fatalf("expected invalid params response: %s", output)
 	}
-	if !strings.Contains(stdout.String(), `params must be an object or null`) {
-		t.Fatalf("expected invalid params response: %s", stdout.String())
-	}
-	assertMCPInvalidRequestDetails(t, stdout.Bytes(), "params", "params must be an object or null")
+	assertMCPInvalidRequestDetails(t, []byte(output), "params", "params must be an object or null")
 }
 
 func TestMCPRejectsInvalidJSONWithStructuredParseError(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0"` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
+	service := testMCPService(t)
 	var response struct {
 		Error struct {
 			Code int `json:"code"`
@@ -2610,23 +2277,14 @@ func TestMCPRejectsInvalidJSONWithStructuredParseError(t *testing.T) {
 			} `json:"data"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCP(t, service, `{"jsonrpc":"2.0"`+"\n", &response)
 	if response.Error.Code != -32700 || response.Error.Data.Error != "invalid JSON" || response.Error.Data.Expected != "json_object" {
-		t.Fatalf("unexpected parse error details: %s", stdout.String())
+		t.Fatalf("unexpected parse error details: %s", output)
 	}
 }
 
 func TestMCPRejectsBatchWithSupportedEnvelopeFields(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`[{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}]` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
+	service := testMCPService(t)
 	var response struct {
 		Error struct {
 			Code int `json:"code"`
@@ -2637,28 +2295,20 @@ func TestMCPRejectsBatchWithSupportedEnvelopeFields(t *testing.T) {
 			} `json:"data"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
-	}
+	output := runMCP(t, service, `[{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}]`+"\n", &response)
 	if response.Error.Code != -32600 || response.Error.Data.Expected != "single_jsonrpc_request" {
-		t.Fatalf("unexpected batch error details: %s", stdout.String())
+		t.Fatalf("unexpected batch error details: %s", output)
 	}
-	if !containsString(response.Error.Data.SupportedFields, "jsonrpc") || !containsString(response.Error.Data.SupportedFields, "params") {
-		t.Fatalf("expected supported_fields details: %s", stdout.String())
+	if !slices.Contains(response.Error.Data.SupportedFields, "jsonrpc") || !slices.Contains(response.Error.Data.SupportedFields, "params") {
+		t.Fatalf("expected supported_fields details: %s", output)
 	}
 }
 
 func TestMCPRejectsUnknownTopLevelField(t *testing.T) {
-	service := core.NewService(core.PathsForRoot(t.TempDir()))
-	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{},"extra":true}` + "\n")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := Run(service, input, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("mcp failed: code=%d stderr=%s", code, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), `"message":"invalid request"`) || !strings.Contains(stdout.String(), `unknown field \"extra\"`) {
-		t.Fatalf("expected strict top-level decode failure: %s", stdout.String())
+	service := testMCPService(t)
+	output := runMCP(t, service, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{},"extra":true}`+"\n", nil)
+	if !strings.Contains(output, `"message":"invalid request"`) || !strings.Contains(output, `unknown field \"extra\"`) {
+		t.Fatalf("expected strict top-level decode failure: %s", output)
 	}
 	var response struct {
 		Error struct {
@@ -2669,14 +2319,14 @@ func TestMCPRejectsUnknownTopLevelField(t *testing.T) {
 			} `json:"data"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
-		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &response); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, output)
 	}
 	if response.Error.Data.Expected != "object" || !strings.Contains(response.Error.Data.Error, `unknown field "extra"`) {
-		t.Fatalf("unexpected top-level field details: %s", stdout.String())
+		t.Fatalf("unexpected top-level field details: %s", output)
 	}
-	if !containsString(response.Error.Data.SupportedFields, "jsonrpc") || !containsString(response.Error.Data.SupportedFields, "method") {
-		t.Fatalf("expected supported_fields details: %s", stdout.String())
+	if !slices.Contains(response.Error.Data.SupportedFields, "jsonrpc") || !slices.Contains(response.Error.Data.SupportedFields, "method") {
+		t.Fatalf("expected supported_fields details: %s", output)
 	}
 }
 
@@ -2760,35 +2410,4 @@ func testCommerceReceiptPayloadBytes(receipt core.CommerceReceipt) ([]byte, erro
 func testCommerceReceiptIDForProof(proof core.CommerceProof) string {
 	hash := sha256.Sum256([]byte(strings.TrimSpace(proof.PayloadHash) + "\n" + strings.TrimSpace(proof.Signature)))
 	return "receipt-" + hex.EncodeToString(hash[:12])
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}
-
-func containsAnyString(values []any, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}
-
-func containsActionID(actions []struct {
-	ID      string `json:"id"`
-	Command string `json:"command"`
-	MCPTool string `json:"mcp_tool"`
-}, want string) bool {
-	for _, action := range actions {
-		if action.ID == want {
-			return true
-		}
-	}
-	return false
 }

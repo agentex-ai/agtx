@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 )
@@ -173,22 +174,18 @@ func (s *Service) ProStatus(ctx context.Context) (ProStatusResult, error) {
 	authState, authErr := LoadAuth(s.Paths.AuthFile)
 	if authErr != nil {
 		if IsErrorCode(authErr, CodeInvalidArgument) {
-			setup := buildProSetupResult(s.Paths, s.Config, AuthState{SchemaVersion: 1}, runtime.GOOS, runtime.GOARCH)
+			authState := AuthState{SchemaVersion: 1}
+			setup := buildProSetupResult(s.Paths, s.Config, authState, runtime.GOOS, runtime.GOARCH)
 			setup.CurrentStatus = appendUniqueStrings(setup.CurrentStatus, "auth_invalid")
 			setup.RecommendedActions = buildProSetupActions(setup)
-			return ProStatusResult{
-				Authenticated:      false,
-				AuthPath:           s.Paths.AuthFile,
-				RecommendedActions: filterProStatusActions(setup.RecommendedActions),
-				CurrentStatus:      append([]string{}, setup.CurrentStatus...),
-			}, nil
+			return proStatusFromSetup(authState, setup), nil
 		}
 		return ProStatusResult{}, authErr
 	}
 	authState = normalizeAuth(authState)
 	if authState.Pending != nil {
 		setup := buildProSetupResult(s.Paths, s.Config, authState, runtime.GOOS, runtime.GOARCH)
-		return proStatusFromSetup(s.Paths, authState, setup), nil
+		return proStatusFromSetup(authState, setup), nil
 	}
 
 	auth, err := s.currentAuth(ctx)
@@ -196,7 +193,7 @@ func (s *Service) ProStatus(ctx context.Context) (ProStatusResult, error) {
 		return ProStatusResult{}, err
 	}
 	setup := buildProSetupResult(s.Paths, s.Config, auth, runtime.GOOS, runtime.GOARCH)
-	status := proStatusFromSetup(s.Paths, auth, setup)
+	status := proStatusFromSetup(auth, setup)
 	if auth.AccessToken == "" {
 		return status, nil
 	}
@@ -221,20 +218,20 @@ func (s *Service) ProStatus(ctx context.Context) (ProStatusResult, error) {
 		remote.RecommendedActions = status.RecommendedActions
 	}
 	if len(remote.CurrentStatus) == 0 {
-		remote.CurrentStatus = append([]string{}, status.CurrentStatus...)
+		remote.CurrentStatus = slices.Clone(status.CurrentStatus)
 	}
 	return remote, nil
 }
 
-func proStatusFromSetup(paths Paths, auth AuthState, setup ProSetupResult) ProStatusResult {
+func proStatusFromSetup(auth AuthState, setup ProSetupResult) ProStatusResult {
 	status := ProStatusResult{
 		Authenticated:      setup.Authenticated,
 		DeviceID:           auth.DeviceID,
 		DeviceName:         auth.DeviceName,
 		ExpiresAt:          auth.ExpiresAt,
-		AuthPath:           paths.AuthFile,
+		AuthPath:           setup.AuthPath,
 		RecommendedActions: filterProStatusActions(setup.RecommendedActions),
-		CurrentStatus:      append([]string{}, setup.CurrentStatus...),
+		CurrentStatus:      slices.Clone(setup.CurrentStatus),
 	}
 	if len(status.CurrentStatus) == 0 {
 		if status.Authenticated {

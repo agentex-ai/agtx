@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -48,7 +49,7 @@ func TestInstallRequiresConfirmationForJSONAgent(t *testing.T) {
 	if response.Error.Details.Action != "install" || response.Error.Details.Expected != "--yes" || response.Error.Details.RetryWith != "--yes" {
 		t.Fatalf("unexpected confirmation details: %s", stdout.String())
 	}
-	if !containsString(response.Error.Details.SupportedFlags, "--yes") || !containsString(response.Error.Details.SupportedFlags, "--plan") {
+	if !slices.Contains(response.Error.Details.SupportedFlags, "--yes") || !slices.Contains(response.Error.Details.SupportedFlags, "--plan") {
 		t.Fatalf("expected supported flags in confirmation details: %s", stdout.String())
 	}
 }
@@ -163,10 +164,10 @@ func TestRunRejectsJSONAndNDJSONTogether(t *testing.T) {
 	if event.Event != "failed" || event.Data.Error.Code != "invalid_argument" {
 		t.Fatalf("unexpected event: %s", stdout.String())
 	}
-	if !containsString(event.Data.Error.Details.Flags, "--json") || !containsString(event.Data.Error.Details.Flags, "--ndjson") {
+	if !slices.Contains(event.Data.Error.Details.Flags, "--json") || !slices.Contains(event.Data.Error.Details.Flags, "--ndjson") {
 		t.Fatalf("expected mutually exclusive flag details: %s", stdout.String())
 	}
-	if !containsString(event.Data.Error.Details.SupportedFlags, "--timeout-ms") {
+	if !slices.Contains(event.Data.Error.Details.SupportedFlags, "--timeout-ms") {
 		t.Fatalf("expected supported flags in event: %s", stdout.String())
 	}
 }
@@ -304,7 +305,7 @@ func TestSearchRejectsInvalidLimit(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid search error json: %v\n%s", err, stdout.String())
 	}
-	if response.Error.Details.Flag != "--limit" || response.Error.Details.Reason != "invalid_positive_integer" || !containsString(response.Error.Details.SupportedFlags, "--limit") {
+	if response.Error.Details.Flag != "--limit" || response.Error.Details.Reason != "invalid_positive_integer" || !slices.Contains(response.Error.Details.SupportedFlags, "--limit") {
 		t.Fatalf("expected invalid limit details: %s", stdout.String())
 	}
 }
@@ -332,7 +333,7 @@ func TestRunRejectsMissingInputValue(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid run error json: %v\n%s", err, stdout.String())
 	}
-	if response.Error.Details.Flag != "--input" || response.Error.Details.Reason != "missing_value" || !containsString(response.Error.Details.SupportedFlags, "--timeout-ms") {
+	if response.Error.Details.Flag != "--input" || response.Error.Details.Reason != "missing_value" || !slices.Contains(response.Error.Details.SupportedFlags, "--timeout-ms") {
 		t.Fatalf("expected missing input details: %s", stdout.String())
 	}
 }
@@ -386,7 +387,7 @@ func TestRollbackRejectsMissingToValue(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid rollback error json: %v\n%s", err, stdout.String())
 	}
-	if response.Error.Details.Flag != "--to" || response.Error.Details.Reason != "missing_value" || !containsString(response.Error.Details.SupportedFlags, "--plan") {
+	if response.Error.Details.Flag != "--to" || response.Error.Details.Reason != "missing_value" || !slices.Contains(response.Error.Details.SupportedFlags, "--plan") {
 		t.Fatalf("expected missing rollback details: %s", stdout.String())
 	}
 }
@@ -607,10 +608,10 @@ func TestArgumentCountErrorsIncludeExpectedArgs(t *testing.T) {
 			if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 				t.Fatalf("invalid argument count json: %v\n%s", err, stdout.String())
 			}
-			if response.Error.Code != "invalid_argument" || !containsString(response.Error.Details.ExpectedArgs, test.expectedArg) {
+			if response.Error.Code != "invalid_argument" || !slices.Contains(response.Error.Details.ExpectedArgs, test.expectedArg) {
 				t.Fatalf("expected argument metadata: %s", stdout.String())
 			}
-			if !containsString(response.Error.Details.SupportedFlags, test.supportedArg) {
+			if !slices.Contains(response.Error.Details.SupportedFlags, test.supportedArg) {
 				t.Fatalf("expected supported flags metadata: %s", stdout.String())
 			}
 		})
@@ -644,7 +645,7 @@ func TestConfigUnknownKeyJSONIncludesSupportedKeys(t *testing.T) {
 	if response.OK || response.Error.Code != "invalid_argument" || response.Error.Details.Key != "typo" {
 		t.Fatalf("unexpected unknown key response: %s", stdout.String())
 	}
-	if !containsString(response.Error.Details.SupportedKeys, "registry_url") || !containsString(response.Error.Details.SupportedKeys, "package_max_bytes") {
+	if !slices.Contains(response.Error.Details.SupportedKeys, "registry_url") || !slices.Contains(response.Error.Details.SupportedKeys, "package_max_bytes") {
 		t.Fatalf("expected supported keys in response: %s", stdout.String())
 	}
 }
@@ -694,7 +695,7 @@ func TestProLoginRejectsUnexpectedArgument(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid pro login error json: %v\n%s", err, stdout.String())
 	}
-	if !containsString(response.Error.Details.Args, "extra") || !containsString(response.Error.Details.SupportedFlags, "--open") {
+	if !slices.Contains(response.Error.Details.Args, "extra") || !slices.Contains(response.Error.Details.SupportedFlags, "--open") {
 		t.Fatalf("expected unexpected argument details: %s", stdout.String())
 	}
 }
@@ -719,10 +720,10 @@ func TestListRejectsUnexpectedArgumentWithSupportedFlags(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid list error json: %v\n%s", err, stdout.String())
 	}
-	if response.Error.Code != "invalid_argument" || !containsString(response.Error.Details.Args, "extra") {
+	if response.Error.Code != "invalid_argument" || !slices.Contains(response.Error.Details.Args, "extra") {
 		t.Fatalf("unexpected list error response: %s", stdout.String())
 	}
-	if !containsString(response.Error.Details.SupportedFlags, "--installed") || !containsString(response.Error.Details.SupportedFlags, "--available") {
+	if !slices.Contains(response.Error.Details.SupportedFlags, "--installed") || !slices.Contains(response.Error.Details.SupportedFlags, "--available") {
 		t.Fatalf("expected list supported flags: %s", stdout.String())
 	}
 }
@@ -745,14 +746,11 @@ func TestProSetupJSON(t *testing.T) {
 	var response struct {
 		OK   bool `json:"ok"`
 		Data struct {
-			Authenticated      bool     `json:"authenticated"`
-			HasPendingLogin    bool     `json:"has_pending_login"`
-			ProAPIURL          string   `json:"pro_api_url"`
-			CurrentStatus      []string `json:"current_status"`
-			RecommendedActions []struct {
-				ID      string `json:"id"`
-				MCPTool string `json:"mcp_tool"`
-			} `json:"recommended_actions"`
+			Authenticated      bool                  `json:"authenticated"`
+			HasPendingLogin    bool                  `json:"has_pending_login"`
+			ProAPIURL          string                `json:"pro_api_url"`
+			CurrentStatus      []string              `json:"current_status"`
+			RecommendedActions []core.ProSetupAction `json:"recommended_actions"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
@@ -764,7 +762,7 @@ func TestProSetupJSON(t *testing.T) {
 	if response.Data.ProAPIURL != "https://pro.example.com" {
 		t.Fatalf("expected pro api url in setup response: %s", stdout.String())
 	}
-	if !containsString(response.Data.CurrentStatus, "pro_api_configured") || !containsString(response.Data.CurrentStatus, "not_authenticated") {
+	if !slices.Contains(response.Data.CurrentStatus, "pro_api_configured") || !slices.Contains(response.Data.CurrentStatus, "not_authenticated") {
 		t.Fatalf("expected setup status markers: %s", stdout.String())
 	}
 	if !containsCLIAction(response.Data.RecommendedActions, "start_login") {
@@ -816,17 +814,14 @@ func TestProSetupJSONWithInvalidAuthPreview(t *testing.T) {
 	var response struct {
 		OK   bool `json:"ok"`
 		Data struct {
-			CurrentStatus      []string `json:"current_status"`
-			RecommendedActions []struct {
-				ID      string `json:"id"`
-				MCPTool string `json:"mcp_tool"`
-			} `json:"recommended_actions"`
+			CurrentStatus      []string              `json:"current_status"`
+			RecommendedActions []core.ProSetupAction `json:"recommended_actions"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid pro setup json: %v\n%s", err, stdout.String())
 	}
-	if !response.OK || !containsString(response.Data.CurrentStatus, "auth_invalid") {
+	if !response.OK || !slices.Contains(response.Data.CurrentStatus, "auth_invalid") {
 		t.Fatalf("expected auth_invalid preview: %s", stdout.String())
 	}
 	if !containsCLIAction(response.Data.RecommendedActions, "reset_local_auth") {
@@ -1005,7 +1000,7 @@ func TestCommerceInstallPackRequiresConfirmation(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid confirmation json: %v\n%s", err, stdout.String())
 	}
-	if response.Error.Code != "confirmation_required" || response.Error.Details.Action != "install-pack" || !containsString(response.Error.Details.SupportedFlags, "--yes") {
+	if response.Error.Code != "confirmation_required" || response.Error.Details.Action != "install-pack" || !slices.Contains(response.Error.Details.SupportedFlags, "--yes") {
 		t.Fatalf("unexpected confirmation response: %s", stdout.String())
 	}
 }
@@ -1041,7 +1036,7 @@ func TestCommerceInstallPackPlanJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid pack plan json: %v\n%s", err, stdout.String())
 	}
-	if !response.OK || response.Data.Action != "install_pack" || response.Data.Pack.Pack.ID != "standard" || len(response.Data.Changes) == 0 || len(response.Data.BillingPreview) != 2 || !containsString(response.Data.Requires, "confirmation") {
+	if !response.OK || response.Data.Action != "install_pack" || response.Data.Pack.Pack.ID != "standard" || len(response.Data.Changes) == 0 || len(response.Data.BillingPreview) != 2 || !slices.Contains(response.Data.Requires, "confirmation") {
 		t.Fatalf("unexpected pack plan response: %s", stdout.String())
 	}
 }
@@ -1079,7 +1074,7 @@ func TestCommerceInstallScenarioPlanAndRecordsJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
 		t.Fatalf("invalid scenario plan json: %v\n%s", err, stdout.String())
 	}
-	if !plan.OK || plan.Data.Action != "install_scenario" || plan.Data.Scenario.Scenario.ID != "invoice_processing" || plan.Data.PackPlan.Pack.Pack.ID != "standard" || len(plan.Data.PackPlan.BillingPreview) != 2 || plan.Data.PackPlan.BillingPreview[0].ScenarioID != "invoice_processing" || !containsString(plan.Data.Requires, "confirmation") {
+	if !plan.OK || plan.Data.Action != "install_scenario" || plan.Data.Scenario.Scenario.ID != "invoice_processing" || plan.Data.PackPlan.Pack.Pack.ID != "standard" || len(plan.Data.PackPlan.BillingPreview) != 2 || plan.Data.PackPlan.BillingPreview[0].ScenarioID != "invoice_processing" || !slices.Contains(plan.Data.Requires, "confirmation") {
 		t.Fatalf("unexpected scenario plan response: %s", stdout.String())
 	}
 
@@ -1507,7 +1502,7 @@ func TestCommerceRecordLimitValidation(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid commerce error json: %v\n%s", err, stdout.String())
 	}
-	if response.Error.Code != "invalid_argument" || response.Error.Details.Flag != "--limit" || !containsString(response.Error.Details.SupportedFlags, "--pack-id") {
+	if response.Error.Code != "invalid_argument" || response.Error.Details.Flag != "--limit" || !slices.Contains(response.Error.Details.SupportedFlags, "--pack-id") {
 		t.Fatalf("unexpected commerce limit error: %s", stdout.String())
 	}
 }
@@ -1751,7 +1746,7 @@ func TestProRevokeRequiresConfirmation(t *testing.T) {
 	if len(response.Error.Details.Targets) != 1 || response.Error.Details.Targets[0] != "device-1" {
 		t.Fatalf("unexpected confirmation targets: %s", stdout.String())
 	}
-	if !containsString(response.Error.Details.SupportedFlags, "--yes") || !containsString(response.Error.Details.SupportedFlags, "-y") {
+	if !slices.Contains(response.Error.Details.SupportedFlags, "--yes") || !slices.Contains(response.Error.Details.SupportedFlags, "-y") {
 		t.Fatalf("expected pro revoke yes flags: %s", stdout.String())
 	}
 }
@@ -2123,7 +2118,7 @@ func TestUnknownCommandErrorsIncludeSupportedCommands(t *testing.T) {
 				if err := json.Unmarshal(output, &event); err != nil {
 					t.Fatalf("invalid ndjson error: %v\n%s", err, stdout.String())
 				}
-				if event.Event != "failed" || event.Data.Error.Code != "invalid_argument" || !containsString(event.Data.Error.Details.SupportedCommands, "status") {
+				if event.Event != "failed" || event.Data.Error.Code != "invalid_argument" || !slices.Contains(event.Data.Error.Details.SupportedCommands, "status") {
 					t.Fatalf("unexpected ndjson error: %s", stdout.String())
 				}
 				return
@@ -2140,7 +2135,7 @@ func TestUnknownCommandErrorsIncludeSupportedCommands(t *testing.T) {
 			if err := json.Unmarshal(output, &response); err != nil {
 				t.Fatalf("invalid json error: %v\n%s", err, stdout.String())
 			}
-			if response.OK || response.Error.Code != "invalid_argument" || !containsString(response.Error.Details.SupportedCommands, "status") {
+			if response.OK || response.Error.Code != "invalid_argument" || !slices.Contains(response.Error.Details.SupportedCommands, "status") {
 				t.Fatalf("unexpected json error: %s", stdout.String())
 			}
 		})
@@ -2251,10 +2246,7 @@ func TestDiscoveryHelperListsAreStable(t *testing.T) {
 	}
 }
 
-func containsCLIAction(actions []struct {
-	ID      string `json:"id"`
-	MCPTool string `json:"mcp_tool"`
-}, want string) bool {
+func containsCLIAction(actions []core.ProSetupAction, want string) bool {
 	for _, action := range actions {
 		if action.ID == want {
 			return true
@@ -2320,13 +2312,4 @@ func testCommerceReceiptPayloadBytes(receipt core.CommerceReceipt) ([]byte, erro
 func testCommerceReceiptIDForProof(proof core.CommerceProof) string {
 	hash := sha256.Sum256([]byte(strings.TrimSpace(proof.PayloadHash) + "\n" + strings.TrimSpace(proof.Signature)))
 	return "receipt-" + hex.EncodeToString(hash[:12])
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }

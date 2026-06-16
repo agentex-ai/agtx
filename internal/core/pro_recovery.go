@@ -107,30 +107,10 @@ func buildProRecoveryActions(code string, setup ProSetupResult) []ProSetupAction
 			})
 		}
 	case CodeSubscriptionRequired:
-		actions = append(actions, ProSetupAction{
-			ID:       "check_status",
-			Title:    "Check Pro status",
-			Summary:  "Inspect subscription status before retrying a Pro-gated registry refresh or package download.",
-			Blocking: false,
-			Command:  "agtx pro status --json",
-			MCPTool:  "get_pro_status",
-			AppliesWhen: []string{
-				"authenticated",
-			},
-		})
+		actions = append(actions, checkProStatusAction("Inspect subscription status before retrying a Pro-gated registry refresh or package download."))
 	case CodeDeviceLimitExceeded:
 		actions = append(actions,
-			ProSetupAction{
-				ID:       "check_status",
-				Title:    "Check Pro status",
-				Summary:  "Inspect device-limit state before retrying a Pro-gated registry refresh or package download.",
-				Blocking: false,
-				Command:  "agtx pro status --json",
-				MCPTool:  "get_pro_status",
-				AppliesWhen: []string{
-					"authenticated",
-				},
-			},
+			checkProStatusAction("Inspect device-limit state before retrying a Pro-gated registry refresh or package download."),
 			ProSetupAction{
 				ID:       "list_devices",
 				Title:    "List Pro devices",
@@ -147,6 +127,20 @@ func buildProRecoveryActions(code string, setup ProSetupResult) []ProSetupAction
 
 	actions = append(actions, setup.RecommendedActions...)
 	return uniqueProActions(actions)
+}
+
+func checkProStatusAction(summary string) ProSetupAction {
+	return ProSetupAction{
+		ID:       "check_status",
+		Title:    "Check Pro status",
+		Summary:  summary,
+		Blocking: false,
+		Command:  "agtx pro status --json",
+		MCPTool:  "get_pro_status",
+		AppliesWhen: []string{
+			"authenticated",
+		},
+	}
 }
 
 func uniqueProActions(actions []ProSetupAction) []ProSetupAction {

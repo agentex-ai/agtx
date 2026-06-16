@@ -42,7 +42,7 @@ type rpcRequest struct {
 type toolArguments struct {
 	values  map[string]json.RawMessage
 	tool    string
-	allowed map[string]struct{}
+	allowed map[string]bool
 }
 
 func Run(service *core.Service, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -1272,7 +1272,7 @@ func objectSchema(properties map[string]any, required []string, extras map[strin
 		"additionalProperties": false,
 	}
 	if len(required) > 0 {
-		schema["required"] = append([]string{}, required...)
+		schema["required"] = slices.Clone(required)
 	}
 	for key, value := range extras {
 		schema[key] = value
@@ -1650,17 +1650,17 @@ func registryValidationSchema() map[string]any {
 func proStatusSchema() map[string]any {
 	return objectSchema(
 		map[string]any{
-			"authenticated":        booleanSchema("Whether local Pro auth is available."),
-			"subscription":         stringSchema("Subscription status reported by the Pro service."),
-			"plan":                 stringSchema("Plan name reported by the Pro service."),
-			"device_id":            stringSchema("Current local device identifier."),
-			"device_name":          stringSchema("Current local device name."),
-			"expires_at":           stringSchema("Access token expiry timestamp."),
-			"device_limit":         nonNegativeIntegerSchema("Maximum active devices allowed by the subscription."),
-			"auth_path":            stringSchema("Local auth.json path."),
-			"devices":              arraySchema(proDeviceSchema(), "Known devices for this subscription."),
+			"authenticated":       booleanSchema("Whether local Pro auth is available."),
+			"subscription":        stringSchema("Subscription status reported by the Pro service."),
+			"plan":                stringSchema("Plan name reported by the Pro service."),
+			"device_id":           stringSchema("Current local device identifier."),
+			"device_name":         stringSchema("Current local device name."),
+			"expires_at":          stringSchema("Access token expiry timestamp."),
+			"device_limit":        nonNegativeIntegerSchema("Maximum active devices allowed by the subscription."),
+			"auth_path":           stringSchema("Local auth.json path."),
+			"devices":             arraySchema(proDeviceSchema(), "Known devices for this subscription."),
 			"recommended_actions": arraySchema(proSetupActionSchema(), "Ordered recommended next actions for incomplete local Pro state."),
-			"current_status":       stringArraySchema("Current local Pro status markers such as authenticated, not_authenticated, pending_login, or auth_invalid.", false),
+			"current_status":      stringArraySchema("Current local Pro status markers such as authenticated, not_authenticated, pending_login, or auth_invalid.", false),
 		},
 		nil,
 		nil,
@@ -2633,7 +2633,7 @@ func schemaWithDescription(schema map[string]any, description string) map[string
 	return schema
 }
 
-func allowedToolArguments(name string) (map[string]struct{}, bool) {
+func allowedToolArguments(name string) (map[string]bool, bool) {
 	switch name {
 	case "search_skills":
 		return toolArgumentSet("query", "limit"), true
@@ -2692,15 +2692,15 @@ func allowedToolArguments(name string) (map[string]struct{}, bool) {
 	}
 }
 
-func toolArgumentSet(names ...string) map[string]struct{} {
-	allowed := make(map[string]struct{}, len(names))
+func toolArgumentSet(names ...string) map[string]bool {
+	allowed := make(map[string]bool, len(names))
 	for _, name := range names {
-		allowed[name] = struct{}{}
+		allowed[name] = true
 	}
 	return allowed
 }
 
-func parseToolArguments(tool string, raw json.RawMessage, allowed map[string]struct{}) (toolArguments, error) {
+func parseToolArguments(tool string, raw json.RawMessage, allowed map[string]bool) (toolArguments, error) {
 	args := toolArguments{values: map[string]json.RawMessage{}, tool: tool, allowed: allowed}
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
@@ -2715,7 +2715,7 @@ func parseToolArguments(tool string, raw json.RawMessage, allowed map[string]str
 		})
 	}
 	for name := range args.values {
-		if _, ok := allowed[name]; !ok {
+		if !allowed[name] {
 			return toolArguments{}, core.NewError(core.CodeInvalidArgument, "unknown tool argument", map[string]any{
 				"tool":                tool,
 				"argument":            name,
@@ -2726,7 +2726,7 @@ func parseToolArguments(tool string, raw json.RawMessage, allowed map[string]str
 	return args, nil
 }
 
-func toolArgumentNames(allowed map[string]struct{}) []string {
+func toolArgumentNames(allowed map[string]bool) []string {
 	names := make([]string, 0, len(allowed))
 	for name := range allowed {
 		names = append(names, name)
@@ -2987,7 +2987,7 @@ func (a toolArguments) invalidBase64Argument(name string, err error) error {
 func (a toolArguments) mutuallyExclusiveArguments(message string, names ...string) error {
 	return core.NewError(core.CodeInvalidArgument, message, map[string]any{
 		"tool":                a.tool,
-		"arguments":           append([]string{}, names...),
+		"arguments":           slices.Clone(names),
 		"expected":            "only_one_argument",
 		"supported_arguments": toolArgumentNames(a.allowed),
 	})
@@ -3025,7 +3025,7 @@ func (a toolArguments) missingRequiredArgument(name, expected string) error {
 func (a toolArguments) missingRequiredArguments(message string, names []string, expected string) error {
 	return core.NewError(core.CodeInvalidArgument, message, map[string]any{
 		"tool":                a.tool,
-		"arguments":           append([]string{}, names...),
+		"arguments":           slices.Clone(names),
 		"expected":            expected,
 		"supported_arguments": toolArgumentNames(a.allowed),
 	})
@@ -3046,7 +3046,7 @@ func (a toolArguments) unsupportedValue(message, name string, value any, support
 		"tool":                a.tool,
 		"argument":            name,
 		"value":               value,
-		supportedName:         append([]string{}, supported...),
+		supportedName:         slices.Clone(supported),
 		"supported_arguments": toolArgumentNames(a.allowed),
 	})
 }

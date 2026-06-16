@@ -127,6 +127,7 @@ After `get_pro_setup`:
 
 - If `current_status` includes `auth_invalid`, call `logout_pro` first so a corrupt local auth file does not confuse follow-up login UX.
 - If `get_pro_status` reports `pending_login`, skip `start_pro_login` and move directly to `complete_pro_login`.
+- If `get_pro_status` already includes `recommended_actions`, wrappers can follow them directly for retry guidance without making a separate `get_pro_setup` call.
 - If `recommended_actions` includes `configure_pro_api`, ask the user to configure `pro_api_url` before attempting login.
 - If it includes `register_callback_scheme` and the platform supports it, call `register_pro_scheme` before launching browser login so `agtx://` callbacks can return cleanly. In v1 this is automated on macOS and Windows.
 - If it includes `start_login`, call `start_pro_login` and show the returned `login_url` to the user.

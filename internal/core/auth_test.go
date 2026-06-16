@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -175,7 +176,7 @@ func TestProSetupUnauthenticated(t *testing.T) {
 	if result.CallbackScheme != "agtx" || result.AuthPath == "" || result.ConfigPath == "" || result.Platform == "" {
 		t.Fatalf("expected core setup metadata: %#v", result)
 	}
-	if !containsSetupStatus(result.CurrentStatus, "pro_api_not_configured") || !containsSetupStatus(result.CurrentStatus, "not_authenticated") {
+	if !slices.Contains(result.CurrentStatus, "pro_api_not_configured") || !slices.Contains(result.CurrentStatus, "not_authenticated") {
 		t.Fatalf("expected setup statuses: %#v", result.CurrentStatus)
 	}
 	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
@@ -183,7 +184,7 @@ func TestProSetupUnauthenticated(t *testing.T) {
 			t.Fatalf("expected automatic scheme registration hint on %s: %#v", runtime.GOOS, result)
 		}
 	} else {
-		if result.CanRegisterScheme || !containsSetupStatus(result.CurrentStatus, "scheme_registration_manual") {
+		if result.CanRegisterScheme || !slices.Contains(result.CurrentStatus, "scheme_registration_manual") {
 			t.Fatalf("expected manual registration status on %s: %#v", runtime.GOOS, result)
 		}
 	}
@@ -213,7 +214,7 @@ func TestProSetupPendingLogin(t *testing.T) {
 	if result.ProAPIURL != "https://pro.example.com" {
 		t.Fatalf("expected configured pro api url, got %#v", result)
 	}
-	if !containsSetupStatus(result.CurrentStatus, "pro_api_configured") || !containsSetupStatus(result.CurrentStatus, "pending_login") {
+	if !slices.Contains(result.CurrentStatus, "pro_api_configured") || !slices.Contains(result.CurrentStatus, "pending_login") {
 		t.Fatalf("expected pending statuses: %#v", result.CurrentStatus)
 	}
 	if !containsSetupAction(result.RecommendedActions, "complete_login") {
@@ -244,7 +245,7 @@ func TestProStatusPendingLoginPreview(t *testing.T) {
 	if status.AuthPath == "" || status.DeviceID == "" || status.DeviceID != login.DeviceID {
 		t.Fatalf("expected pending login device/auth details: %#v", status)
 	}
-	if !containsSetupStatus(status.CurrentStatus, "pending_login") {
+	if !slices.Contains(status.CurrentStatus, "pending_login") {
 		t.Fatalf("expected pending_login status marker: %#v", status.CurrentStatus)
 	}
 	if !containsSetupAction(status.RecommendedActions, "complete_login") {
@@ -259,7 +260,7 @@ func TestProStatusConfiguredStartLoginPreview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pro status: %v", err)
 	}
-	if status.Authenticated || !containsSetupStatus(status.CurrentStatus, "not_authenticated") {
+	if status.Authenticated || !slices.Contains(status.CurrentStatus, "not_authenticated") {
 		t.Fatalf("expected unauthenticated status preview: %#v", status)
 	}
 	if !containsSetupAction(status.RecommendedActions, "start_login") {
@@ -292,7 +293,7 @@ func TestProSetupAuthenticated(t *testing.T) {
 	if result.RegistryURL != "https://registry.example.com/v1/registry" || result.ProAPIURL != "https://registry.example.com" {
 		t.Fatalf("expected registry-derived pro api url: %#v", result)
 	}
-	if !containsSetupStatus(result.CurrentStatus, "authenticated") || !containsSetupStatus(result.CurrentStatus, "registry_configured") {
+	if !slices.Contains(result.CurrentStatus, "authenticated") || !slices.Contains(result.CurrentStatus, "registry_configured") {
 		t.Fatalf("expected authenticated statuses: %#v", result.CurrentStatus)
 	}
 	if !containsSetupAction(result.RecommendedActions, "check_status") {
@@ -317,7 +318,7 @@ func TestProStatusInvalidAuthPreview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pro status: %v", err)
 	}
-	if status.Authenticated || !containsSetupStatus(status.CurrentStatus, "auth_invalid") {
+	if status.Authenticated || !slices.Contains(status.CurrentStatus, "auth_invalid") {
 		t.Fatalf("expected auth_invalid status preview: %#v", status)
 	}
 	if !containsSetupAction(status.RecommendedActions, "reset_local_auth") {
@@ -344,7 +345,7 @@ func TestProSetupInvalidAuthPreview(t *testing.T) {
 	if result.Authenticated || result.HasPendingLogin {
 		t.Fatalf("expected invalid auth preview to remain unauthenticated: %#v", result)
 	}
-	if !containsSetupStatus(result.CurrentStatus, "auth_invalid") {
+	if !slices.Contains(result.CurrentStatus, "auth_invalid") {
 		t.Fatalf("expected auth_invalid status: %#v", result.CurrentStatus)
 	}
 	if !containsSetupAction(result.RecommendedActions, "reset_local_auth") {
@@ -402,15 +403,6 @@ func TestProAPIURLFromConfigValidatesRuntimeValues(t *testing.T) {
 	if got != "https://pro.example.com/base" {
 		t.Fatalf("unexpected normalized pro api url: %s", got)
 	}
-}
-
-func containsSetupStatus(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 func containsSetupAction(actions []ProSetupAction, want string) bool {

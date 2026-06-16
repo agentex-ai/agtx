@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -277,7 +278,7 @@ func TestRegistryImplementationStatusReportsPartialPlatformCoverage(t *testing.T
 	if status.Total != 1 || status.Implemented != 0 || status.Partial != 1 || status.Stub != 0 || len(status.Missing) != 1 || status.Missing[0] != "pdf" {
 		t.Fatalf("expected partial platform coverage: %#v", status)
 	}
-	if len(status.Skills) != 1 || status.Skills[0].Status != "partial" || !containsString(status.Skills[0].MissingPlatforms, "darwin/arm64") {
+	if len(status.Skills) != 1 || status.Skills[0].Status != "partial" || !slices.Contains(status.Skills[0].MissingPlatforms, "darwin/arm64") {
 		t.Fatalf("expected partial pdf status: %#v", status.Skills)
 	}
 }
@@ -1833,13 +1834,4 @@ func normalizeTestOutputLines(value string) string {
 	value = strings.ReplaceAll(value, "\r\n", "\n")
 	value = strings.ReplaceAll(value, "\r", "\n")
 	return strings.TrimSpace(value)
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
