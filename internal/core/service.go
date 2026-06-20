@@ -537,6 +537,7 @@ func (s *Service) RunSkillWithOptions(ctx context.Context, name string, options 
 	if err := validateAgentName(options.AgentName); err != nil {
 		return RunResult{}, err
 	}
+	options = normalizeBuiltinOCRAliasOptions(name, options)
 	version, err := s.currentVersion(name)
 	if err != nil {
 		if IsErrorCode(err, CodeNotInstalled) {

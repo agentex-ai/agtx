@@ -231,7 +231,7 @@ func validateBuiltinInfo(skill SkillManifest) error {
 	}
 	for _, profile := range skill.Builtin.ModelProfiles {
 		switch strings.TrimSpace(profile) {
-		case "ppocrv6", "ppocrv5", "ppocrv4", "readability_v1", "search_results_v1", "extractive_research_v1", "wav_inspect_v1", "meeting_notes_v1", "procedural_image_v1", "media_plan_v1", "docx_v1", "xlsx_v1", "pptx_v1", "pdf_text_v1", "security_audit_v1":
+		case "rapidocr", "ppocrv6", "ppocrv5", "ppocrv4", "readability_v1", "search_results_v1", "extractive_research_v1", "wav_inspect_v1", "meeting_notes_v1", "procedural_image_v1", "media_plan_v1", "docx_v1", "xlsx_v1", "pptx_v1", "pdf_text_v1", "security_audit_v1":
 		default:
 			return NewError(CodeInvalidArgument, "unsupported built-in model profile", map[string]any{"skill": skill.Name, "model_profile": profile})
 		}

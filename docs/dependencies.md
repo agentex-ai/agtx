@@ -6,11 +6,11 @@
 
 - No Python, NPM, Homebrew, dynamic plugin host, or external service is required to run the CLI.
 - Skills are installed as native executable packages described by a manifest.
-- RapidOCR/PP-OCRv6 support is exposed through the built-in `ocr` manifest and
+- RapidOCR support is exposed through the built-in `ocr` manifest and
   aliases (`rapidocr`, `ppocrv6`). The OCR runtime path is native-only: Python
   and NPM wrappers are not used. The default binary provides the built-in OCR
-  manifest and native probe path; optional adapter builds load ONNX Runtime or
-  ncnn model files from the configured built-in OCR model directory. OCR
+  manifest and native probe path; the current working adapter loads ONNX
+  Runtime model files from the configured built-in OCR model directory. OCR
   inference accepts raster image inputs or rendered PDF page images; raw PDFs
   should be handled by the built-in `pdf` skill or rendered before OCR.
 
@@ -68,19 +68,17 @@ destination first. The default runtime version is `1.26.0` to match the Go
 binding headers. Microsoft does not publish a macOS Intel CPU archive for ONNX
 Runtime 1.26.0, so Intel Mac users should point
 `AGTX_OCR_ONNXRUNTIME_LIBRARY` at a locally installed compatible library or
-explicitly select a compatible older runtime. Model files default to
-`ppocrv6-det.onnx`, `ppocrv6-rec.onnx`, and `keys.txt`, and can be overridden
+explicitly select a compatible older runtime. Model files default to RapidOCR
+3.8.x's PP-OCRv4 mobile ONNX profile: `ch_PP-OCRv4_det_mobile.onnx`,
+`ch_PP-OCRv4_rec_mobile.onnx`, and `ppocr_keys_v1.txt`; they can be overridden
 with `AGTX_OCR_DET_MODEL`, `AGTX_OCR_REC_MODEL`, and `AGTX_OCR_KEYS` or the
 matching `agtx run rapidocr --` arguments.
-For PP-OCRv6 ONNX exports from PaddlePaddle Hugging Face repositories, agtx
-recognizes `PP-OCRv6_tiny_det_onnx/inference.onnx`,
-`PP-OCRv6_tiny_rec_onnx/inference.onnx`, and the corresponding `small` and
-`medium` directories. A recognizer `inference.yml` with
-`PostProcess.character_dict` is accepted as the key dictionary, so no Python YAML
-loader is required.
-`agtx run rapidocr -- --download-models --model-size tiny|small|medium` downloads
-those ONNX assets directly with the Go standard library HTTP client; add
-`--dry-run` to inspect the asset plan without writing files.
+`agtx run rapidocr -- --download-models` downloads those ONNX assets directly
+with the Go standard library HTTP client; add `--dry-run` to inspect the asset
+plan without writing files. Each file has four candidate download sources and a
+SHA-256 check before it is written. `ppocrv6` remains an explicit compatibility
+profile for existing PaddlePaddle Hugging Face `tiny`, `small`, and `medium`
+exports, including recognizer `inference.yml` key dictionaries.
 
 The native OCR pipeline exposes RapidOCR/PaddleOCR-style tuning without adding
 a Python runtime: `AGTX_OCR_DET_LIMIT_SIDE_LEN` (default `736`),

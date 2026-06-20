@@ -282,7 +282,7 @@ func (s *Service) builtinOCRConfig(options RunOptions) builtinOCRConfig {
 		profile = strings.ToLower(strings.TrimSpace(ocrOptionValue(options.Args, "model_profile", "")))
 	}
 	if profile == "" || profile == "auto" {
-		profile = "ppocrv6"
+		profile = "rapidocr"
 	}
 	modelDir := strings.TrimSpace(ocrOptionValue(options.Args, "model-dir", os.Getenv("AGTX_OCR_MODEL_DIR")))
 	if modelDir == "" {
@@ -349,9 +349,9 @@ func builtinOCRNextActions(status builtinOCRStatus) []string {
 		actions = append(actions, "run agtx run rapidocr -- --download-runtime, place the native runtime library under AGTX_OCR_RUNTIME_DIR, or set AGTX_OCR_ONNXRUNTIME_LIBRARY/AGTX_OCR_NCNN_LIBRARY")
 	}
 	if len(status.MissingFiles) > 0 {
-		actions = append(actions, "place PP-OCR model files under AGTX_OCR_MODEL_DIR or set AGTX_OCR_DET_MODEL, AGTX_OCR_REC_MODEL, and AGTX_OCR_KEYS")
+		actions = append(actions, "run agtx run rapidocr -- --download-models, place RapidOCR ONNX model files under AGTX_OCR_MODEL_DIR, or set AGTX_OCR_DET_MODEL, AGTX_OCR_REC_MODEL, and AGTX_OCR_KEYS")
 	}
-	actions = append(actions, "set AGTX_OCR_BACKEND to onnxruntime, or use a build with a native ncnn adapter; Python and NPM runtimes are not used")
+	actions = append(actions, "set AGTX_OCR_BACKEND to onnxruntime; ncnn requires a separate native adapter build, and Python/NPM runtimes are not used")
 	return actions
 }
 
@@ -387,7 +387,7 @@ func builtinOCRKeysPath(args []string, modelDir string) string {
 			return path
 		}
 	}
-	return filepath.Join(modelDir, "keys.txt")
+	return filepath.Join(modelDir, "ppocr_keys_v1.txt")
 }
 
 func builtinOCRKeysCandidates() []string {
@@ -410,6 +410,25 @@ func builtinOCRModelFileCandidates(backend, profile, kind string) []string {
 	}
 	names := []string{profile + "-" + kind + ".onnx", kind + ".onnx"}
 	switch profile {
+	case "rapidocr":
+		if kind == "det" {
+			return []string{
+				"ch_PP-OCRv4_det_mobile.onnx",
+				"ch_PP-OCRv4_det_infer.onnx",
+				filepath.Join("PP-OCRv4", "det", "ch_PP-OCRv4_det_mobile.onnx"),
+				filepath.Join("onnx", "PP-OCRv4", "det", "ch_PP-OCRv4_det_infer.onnx"),
+				"rapidocr-det.onnx",
+				"det.onnx",
+			}
+		}
+		return []string{
+			"ch_PP-OCRv4_rec_mobile.onnx",
+			"ch_PP-OCRv4_rec_infer.onnx",
+			filepath.Join("PP-OCRv4", "rec", "ch_PP-OCRv4_rec_mobile.onnx"),
+			filepath.Join("onnx", "PP-OCRv4", "rec", "ch_PP-OCRv4_rec_infer.onnx"),
+			"rapidocr-rec.onnx",
+			"rec.onnx",
+		}
 	case "ppocrv6":
 		names = append(names,
 			"PP-OCRv6_tiny_"+kind+".onnx",
@@ -425,7 +444,11 @@ func builtinOCRModelFileCandidates(backend, profile, kind string) []string {
 	case "ppocrv5":
 		names = append(names, "ch_PP-OCRv5_"+kind+".onnx", "ch_PP-OCRv5_server_"+kind+".onnx", "ch_PP-OCRv5_mobile_"+kind+".onnx")
 	case "ppocrv4":
-		names = append(names, "ch_PP-OCRv4_"+kind+".onnx", "ch_PP-OCRv4_det_infer.onnx", "ch_PP-OCRv4_rec_infer.onnx")
+		if kind == "det" {
+			names = append(names, "ch_PP-OCRv4_det_mobile.onnx", "ch_PP-OCRv4_det.onnx", "ch_PP-OCRv4_det_infer.onnx")
+		} else {
+			names = append(names, "ch_PP-OCRv4_rec_mobile.onnx", "ch_PP-OCRv4_rec.onnx", "ch_PP-OCRv4_rec_infer.onnx")
+		}
 	}
 	return names
 }
@@ -622,4 +645,17 @@ func ocrOptionValue(args []string, name, fallback string) string {
 		}
 	}
 	return fallback
+}
+
+func normalizeBuiltinOCRAliasOptions(name string, options RunOptions) RunOptions {
+	if canonicalSkillName(name) != "ocr" || ocrOptionValue(options.Args, "model-profile", "") != "" || ocrOptionValue(options.Args, "model_profile", "") != "" {
+		return options
+	}
+	switch normalizeName(name) {
+	case "ppocrv6", "pp_ocrv6", "pp_ocr_v6", "ocr_v6":
+		options.Args = append([]string{"--model-profile", "ppocrv6"}, options.Args...)
+	case "rapidocr", "rapid_ocr", "rapidocr_v6", "rapid_ocr_v6", "paddleocr", "paddle_ocr", "ppocr", "pp_ocr", "ocr":
+		// default rapidocr profile
+	}
+	return options
 }

@@ -1771,7 +1771,6 @@ func TestMCPRunSkillAcceptsStructuredRapidOCROptions(t *testing.T) {
 			"ocr": map[string]any{
 				"download_models": true,
 				"dry_run":         true,
-				"model_size":      "small",
 				"model_dir":       t.TempDir(),
 			},
 		},
@@ -1807,7 +1806,7 @@ func TestMCPRunSkillAcceptsStructuredRapidOCROptions(t *testing.T) {
 	if err := json.Unmarshal([]byte(result.Stdout), &download); err != nil {
 		t.Fatalf("decode OCR download result: %v stdout=%s", err, result.Stdout)
 	}
-	if download.ModelProfile != "ppocrv6" || download.ModelSize != "small" || !download.NoPython || !download.DryRun || len(download.Assets) != 4 {
+	if download.ModelProfile != "rapidocr" || download.ModelSize != "mobile" || !download.NoPython || !download.DryRun || len(download.Assets) != 3 {
 		t.Fatalf("unexpected OCR dry-run payload: %#v", download)
 	}
 	for _, asset := range download.Assets {

@@ -29,7 +29,7 @@ func defaultOCRSkill() SkillManifest {
 		"ocr",
 		"0.6.0",
 		"RapidOCR OCR",
-		"Extract text, layout, coordinates, and confidence from screenshots, scans, images, and rendered PDF page images with RapidOCR-compatible PP-OCRv6 profiles.",
+		"Extract text, layout, coordinates, and confidence from screenshots, scans, images, and rendered PDF page images with RapidOCR latest ONNX profiles.",
 		[]string{"vision", "ocr", "image", "rapidocr", "ppocrv6", "documents"},
 		[]string{"ocr", "rapidocr", "rapid_ocr", "ppocr", "ppocrv6", "pp-ocrv6", "paddleocr", "paddle_ocr", "image", "screenshot", "scan", "text", "vision", "layout", "coordinates", "confidence", "图片", "截图", "扫描", "文字", "识别"},
 		[]string{"page"},
@@ -45,15 +45,15 @@ func defaultOCRSkill() SkillManifest {
 			},
 			"model_profile": map[string]any{
 				"type":        "string",
-				"description": "Preferred OCR model family. Native packages should prefer ppocrv6 when available and fall back explicitly when not.",
-				"enum":        []string{"auto", "ppocrv6", "ppocrv5", "ppocrv4"},
-				"default":     "ppocrv6",
+				"description": "Preferred OCR model family. The default rapidocr profile tracks RapidOCR latest defaults.",
+				"enum":        []string{"auto", "rapidocr", "ppocrv6", "ppocrv5", "ppocrv4"},
+				"default":     "rapidocr",
 			},
 			"model_size": map[string]any{
 				"type":        "string",
-				"description": "PP-OCRv6 ONNX asset size used by the built-in model downloader.",
-				"enum":        []string{"auto", "tiny", "small", "medium"},
-				"default":     "tiny",
+				"description": "ONNX asset size used by the built-in model downloader. RapidOCR latest uses mobile.",
+				"enum":        []string{"auto", "mobile", "tiny", "small", "medium"},
+				"default":     "mobile",
 			},
 			"backend": map[string]any{
 				"type":        "string",
@@ -75,7 +75,7 @@ func defaultOCRSkill() SkillManifest {
 			},
 			"download_models": map[string]any{
 				"type":        "boolean",
-				"description": "Download PP-OCRv6 ONNX detector and recognizer assets for the selected model size.",
+				"description": "Download RapidOCR ONNX detector, recognizer, and recognition keys.",
 			},
 			"keep_archive": map[string]any{
 				"type":        "boolean",
@@ -169,7 +169,7 @@ func defaultOCRSkill() SkillManifest {
 			},
 			"model_profile": map[string]any{
 				"type":        "string",
-				"description": "OCR model profile actually used, such as ppocrv6 or a documented fallback.",
+				"description": "OCR model profile actually used, such as rapidocr or a documented fallback.",
 			},
 			"engine": map[string]any{
 				"type":        "string",
@@ -216,7 +216,7 @@ func defaultOCRSkill() SkillManifest {
 	skill.Builtin = &BuiltinInfo{
 		Runtime:       "agtx-native-ocr-v1",
 		Backends:      []string{"onnxruntime", "ncnn"},
-		ModelProfiles: []string{"ppocrv6", "ppocrv5", "ppocrv4"},
+		ModelProfiles: []string{"rapidocr", "ppocrv6", "ppocrv5", "ppocrv4"},
 		NoPython:      true,
 	}
 	skill.Stub = false

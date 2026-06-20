@@ -65,14 +65,14 @@ func TestDefaultRegistrySkillsDeclareBillingMeters(t *testing.T) {
 	}
 }
 
-func TestDefaultOCRSkillDeclaresRapidOCRV6Contract(t *testing.T) {
+func TestDefaultOCRSkillDeclaresRapidOCRContract(t *testing.T) {
 	registry := DefaultRegistry()
 	skill, ok := registry.Find("rapidocr")
 	if !ok {
 		t.Fatal("expected rapidocr alias to resolve")
 	}
 	if skill.Name != "ocr" || skill.Version != "0.6.0" {
-		t.Fatalf("expected RapidOCR v6-ready OCR skill, got %#v", skill)
+		t.Fatalf("expected RapidOCR-ready OCR skill, got %#v", skill)
 	}
 	if skill.Stub || skill.Builtin == nil || !skill.Builtin.NoPython || !slices.Contains(skill.Builtin.Backends, "onnxruntime") || !slices.Contains(skill.Builtin.Backends, "ncnn") {
 		t.Fatalf("expected built-in native OCR without Python runtime: %#v", skill)
@@ -87,8 +87,8 @@ func TestDefaultOCRSkillDeclaresRapidOCRV6Contract(t *testing.T) {
 		t.Fatalf("expected OCR input schema properties: %#v", skill.InputSchema)
 	}
 	modelProfile, ok := inputProperties["model_profile"].(map[string]any)
-	if !ok || modelProfile["default"] != "ppocrv6" {
-		t.Fatalf("expected ppocrv6 default model profile: %#v", inputProperties["model_profile"])
+	if !ok || modelProfile["default"] != "rapidocr" {
+		t.Fatalf("expected rapidocr default model profile: %#v", inputProperties["model_profile"])
 	}
 	for _, name := range []string{"model_dir", "runtime_dir", "download_runtime", "download_models", "keep_archive", "dry_run", "rec_width", "rec_height", "rec_max_width"} {
 		if _, ok := inputProperties[name].(map[string]any); !ok {
@@ -179,8 +179,8 @@ func TestDefaultCapabilityPacksExposeWebsiteFirstWaveAndBundles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get rapidocr alias: %v", err)
 	}
-	if ocr.Pack.ID != "ocr" || !slices.Contains(ocr.Pack.Tags, "ppocrv6") || !slices.Contains(ocr.Pack.Inputs, "optional model profile such as ppocrv6") {
-		t.Fatalf("expected rapidocr alias and ppocrv6 pack metadata, got %#v", ocr.Pack)
+	if ocr.Pack.ID != "ocr" || !slices.Contains(ocr.Pack.Tags, "rapidocr") || !slices.Contains(ocr.Pack.Tags, "ppocrv6") || !slices.Contains(ocr.Pack.Inputs, "optional model profile such as rapidocr") {
+		t.Fatalf("expected rapidocr alias and compatibility pack metadata, got %#v", ocr.Pack)
 	}
 	security, err := service.GetCapabilityPack("security")
 	if err != nil {

@@ -3,8 +3,12 @@ package core
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,15 +43,15 @@ func TestRunRapidOCRWithoutInstallUsesBuiltinNativeProbe(t *testing.T) {
 		t.Fatalf("OCR probe must not bill usage events: %#v", result.UsageEvents)
 	}
 	var status struct {
-		Runtime       string `json:"runtime"`
-		NoPython      bool   `json:"no_python"`
-		AdapterLinked bool   `json:"adapter_linked"`
-		Available     bool   `json:"available"`
+		Runtime      string `json:"runtime"`
+		ModelProfile string `json:"model_profile"`
+		NoPython     bool   `json:"no_python"`
+		Available    bool   `json:"available"`
 	}
 	if err := json.Unmarshal([]byte(result.Stdout), &status); err != nil {
 		t.Fatalf("decode probe status: %v stdout=%s", err, result.Stdout)
 	}
-	if status.Runtime != "agtx-native-ocr-v1" || !status.NoPython || status.Available {
+	if status.Runtime != "agtx-native-ocr-v1" || status.ModelProfile != "rapidocr" || !status.NoPython || status.Available {
 		t.Fatalf("unexpected native OCR status: %#v", status)
 	}
 }
@@ -165,7 +169,7 @@ func TestRapidOCRProbeFindsRuntimeDirLibrary(t *testing.T) {
 func TestRapidOCRDownloadModelsDryRunPlansNativeAssets(t *testing.T) {
 	service := NewService(PathsForRoot(t.TempDir()))
 	modelDir := t.TempDir()
-	result, err := service.RunSkill(context.Background(), "rapidocr", []string{"--download-models", "--dry-run", "--model-dir", modelDir, "--model-size", "small"}, nil)
+	result, err := service.RunSkill(context.Background(), "rapidocr", []string{"--download-models", "--dry-run", "--model-dir", modelDir}, nil)
 	if err != nil {
 		t.Fatalf("run rapidocr download dry-run: %v result=%#v", err, result)
 	}
@@ -181,22 +185,61 @@ func TestRapidOCRDownloadModelsDryRunPlansNativeAssets(t *testing.T) {
 		NoPython     bool   `json:"no_python"`
 		DryRun       bool   `json:"dry_run"`
 		Assets       []struct {
-			Kind   string `json:"kind"`
-			URL    string `json:"url"`
-			Path   string `json:"path"`
-			Status string `json:"status"`
+			Kind    string   `json:"kind"`
+			URL     string   `json:"url"`
+			URLs    []string `json:"urls"`
+			Path    string   `json:"path"`
+			Status  string   `json:"status"`
+			SHA256  string   `json:"sha256"`
+			Sources int      `json:"sources"`
 		} `json:"assets"`
 	}
 	if err := json.Unmarshal([]byte(result.Stdout), &download); err != nil {
 		t.Fatalf("decode download result: %v stdout=%s", err, result.Stdout)
 	}
-	if download.ModelProfile != "ppocrv6" || download.ModelSize != "small" || !download.NoPython || !download.DryRun || len(download.Assets) != 4 {
+	if download.ModelProfile != "rapidocr" || download.ModelSize != "mobile" || !download.NoPython || !download.DryRun || len(download.Assets) != 3 {
 		t.Fatalf("unexpected download plan: %#v", download)
 	}
 	for _, asset := range download.Assets {
-		if asset.Status != "planned" || !strings.Contains(asset.URL, "huggingface.co/PaddlePaddle/PP-OCRv6_small_") || !strings.HasPrefix(asset.Path, modelDir) {
+		if asset.Status != "planned" || asset.Sources != 4 || len(asset.URLs) != 4 || asset.SHA256 == "" || !strings.Contains(asset.URL, "modelscope") || !strings.HasPrefix(asset.Path, modelDir) {
 			t.Fatalf("unexpected asset plan entry: %#v", asset)
 		}
+	}
+}
+
+func TestDownloadBuiltinOCRAssetTriesSourcesAndVerifiesSHA256(t *testing.T) {
+	good := []byte("rapidocr model")
+	sum := sha256.Sum256(good)
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		attempts++
+		switch request.URL.Path {
+		case "/down":
+			http.Error(writer, "down", http.StatusBadGateway)
+		case "/bad":
+			_, _ = writer.Write([]byte("wrong"))
+		default:
+			_, _ = writer.Write(good)
+		}
+	}))
+	defer server.Close()
+
+	path := filepath.Join(t.TempDir(), "model.onnx")
+	written, digest, err := downloadBuiltinOCRAsset(context.Background(), builtinOCRAssetSource{
+		Kind:   "detector_model",
+		URLs:   []string{server.URL + "/down", server.URL + "/bad", server.URL + "/good"},
+		Path:   path,
+		SHA256: hex.EncodeToString(sum[:]),
+	})
+	if err != nil {
+		t.Fatalf("download asset: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 3 || written != int64(len(good)) || digest != hex.EncodeToString(sum[:]) || string(data) != string(good) {
+		t.Fatalf("unexpected verified download: attempts=%d written=%d digest=%s data=%q", attempts, written, digest, data)
 	}
 }
 
@@ -328,5 +371,22 @@ func TestRunRapidOCRWithoutBackendDoesNotFallBackToStubOrPython(t *testing.T) {
 	}
 	if !status.NoPython || status.Available || status.Backend != "onnxruntime" {
 		t.Fatalf("unexpected backend status: %#v", status)
+	}
+}
+
+func TestPPOCRV6AliasDefaultsToPPOCRV6Profile(t *testing.T) {
+	service := NewService(PathsForRoot(t.TempDir()))
+	result, err := service.RunSkill(context.Background(), "ppocrv6", []string{"--probe"}, nil)
+	if err != nil {
+		t.Fatalf("run ppocrv6 probe: %v result=%#v", err, result)
+	}
+	var status struct {
+		ModelProfile string `json:"model_profile"`
+	}
+	if err := json.Unmarshal([]byte(result.Stdout), &status); err != nil {
+		t.Fatalf("decode probe status: %v stdout=%s", err, result.Stdout)
+	}
+	if status.ModelProfile != "ppocrv6" {
+		t.Fatalf("expected ppocrv6 alias to keep ppocrv6 profile, got %#v", status)
 	}
 }

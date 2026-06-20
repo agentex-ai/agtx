@@ -1352,12 +1352,12 @@ func ocrRunOptionsSchema() map[string]any {
 		map[string]any{
 			"probe":              booleanSchema("Return native OCR backend status without running inference."),
 			"download_runtime":   booleanSchema("Download and extract the native ONNX Runtime CPU shared library for this platform."),
-			"download_models":    booleanSchema("Download PP-OCRv6 ONNX detector and recognizer assets."),
+			"download_models":    booleanSchema("Download RapidOCR ONNX detector, recognizer, and recognition keys."),
 			"dry_run":            booleanSchema("Plan OCR runtime or model downloads without writing files."),
 			"keep_archive":       booleanSchema("Keep the downloaded ONNX Runtime archive after extracting the shared library."),
 			"backend":            stringEnumSchema("Native OCR backend.", "auto", "onnxruntime", "ncnn"),
-			"model_profile":      stringEnumSchema("OCR model family.", "auto", "ppocrv6", "ppocrv5", "ppocrv4"),
-			"model_size":         stringEnumSchema("PP-OCRv6 ONNX asset size used by the model downloader.", "auto", "tiny", "small", "medium"),
+			"model_profile":      stringEnumSchema("OCR model family.", "auto", "rapidocr", "ppocrv6", "ppocrv5", "ppocrv4"),
+			"model_size":         stringEnumSchema("OCR ONNX asset size used by the model downloader.", "auto", "mobile", "tiny", "small", "medium"),
 			"model_dir":          stringSchema("Local OCR model directory."),
 			"runtime_dir":        stringSchema("Local native inference runtime directory."),
 			"runtime_version":    stringSchema("ONNX Runtime version used by the runtime downloader."),
@@ -2875,10 +2875,10 @@ func (o ocrToolOptions) args() ([]string, error) {
 	if err := appendOCREnumOption(&args, "backend", o.Backend, []string{"auto", "onnxruntime", "ncnn"}); err != nil {
 		return nil, err
 	}
-	if err := appendOCREnumOption(&args, "model-profile", o.ModelProfile, []string{"auto", "ppocrv6", "ppocrv5", "ppocrv4"}); err != nil {
+	if err := appendOCREnumOption(&args, "model-profile", o.ModelProfile, []string{"auto", "rapidocr", "ppocrv6", "ppocrv5", "ppocrv4"}); err != nil {
 		return nil, err
 	}
-	if err := appendOCREnumOption(&args, "model-size", o.ModelSize, []string{"auto", "tiny", "small", "medium"}); err != nil {
+	if err := appendOCREnumOption(&args, "model-size", o.ModelSize, []string{"auto", "mobile", "tiny", "small", "medium"}); err != nil {
 		return nil, err
 	}
 	appendOCRStringOption(&args, "model-dir", o.ModelDir)

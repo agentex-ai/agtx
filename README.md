@@ -96,7 +96,7 @@ and the `ocr_onnxruntime` tag:
 CGO_ENABLED=1 go build -tags ocr_onnxruntime -o dist/agtx-ocr ./cmd/agtx
 ```
 
-Configure the native runtime and PP-OCR model files with environment variables
+Configure the native runtime and RapidOCR model files with environment variables
 or skill args:
 
 ```sh
@@ -106,9 +106,9 @@ agtx run rapidocr --json -- --probe
 agtx run rapidocr --json -- --download-runtime --dry-run
 agtx run rapidocr --json -- --download-runtime
 agtx run rapidocr --json -- --download-runtime --keep-archive
-agtx run rapidocr --json -- --download-models --dry-run --model-size tiny
-agtx run rapidocr --json -- --download-models --model-size tiny
-agtx run rapidocr --json -- --det-model ppocrv6-det.onnx --rec-model ppocrv6-rec.onnx --keys keys.txt sample.png
+agtx run rapidocr --json -- --download-models --dry-run
+agtx run rapidocr --json -- --download-models
+agtx run rapidocr --json -- --det-model ch_PP-OCRv4_det_mobile.onnx --rec-model ch_PP-OCRv4_rec_mobile.onnx --keys ppocr_keys_v1.txt sample.png
 agtx run rapidocr --json -- --det-limit-side-len 736 --det-threshold 0.3 --box-threshold 0.5 --unclip-ratio 1.6 --text-score 0.5 sample.png
 ```
 
@@ -125,14 +125,18 @@ into that runtime directory, and removes the archive unless `--keep-archive` is
 set. Microsoft no longer publishes macOS Intel CPU archives for ONNX Runtime
 1.26.0, so Intel Mac users should provide `AGTX_OCR_ONNXRUNTIME_LIBRARY` or
 explicitly select a compatible older runtime.
-agtx looks for `ppocrv6-det.onnx`, `ppocrv6-rec.onnx`, and `keys.txt` under
+
+The default model profile is `rapidocr`, matching RapidOCR 3.8.x defaults:
+ONNX Runtime, PP-OCRv4 mobile detector, PP-OCRv4 mobile recognizer, and
+`ppocr_keys_v1.txt`. agtx looks for `ch_PP-OCRv4_det_mobile.onnx`,
+`ch_PP-OCRv4_rec_mobile.onnx`, and `ppocr_keys_v1.txt` under
 `AGTX_OCR_MODEL_DIR` or the local agtx built-in OCR directory.
-For PaddlePaddle PP-OCRv6 Hugging Face exports, agtx can download `tiny`,
-`small`, or `medium` ONNX assets directly with Go's HTTP client. It also
-recognizes directories such as `PP-OCRv6_tiny_det_onnx/inference.onnx` and
-`PP-OCRv6_tiny_rec_onnx/inference.onnx`; the recognizer `inference.yml` can be
-used directly as the character dictionary source when it contains
-`PostProcess.character_dict`.
+`--download-models` downloads those assets with four candidate sources per
+file and verifies SHA-256 before writing: ModelScope `www.modelscope.cn`,
+ModelScope `modelscope.cn`, Hugging Face `SWHL/RapidOCR`, and Hugging Face
+`pitapo/rapidocr` for ONNX files; the keys file uses ModelScope, Gitee,
+GitHub raw, and jsDelivr. `ppocrv6` remains an explicit compatibility profile
+for existing PaddlePaddle Hugging Face `tiny`, `small`, and `medium` exports.
 The probe reports whether the adapter is linked, which native library is used,
 which files are missing, and the detector/recognizer ONNX input/output metadata
 when the models load. Runtime tuning follows the RapidOCR/PaddleOCR defaults:
@@ -354,7 +358,7 @@ Website first-wave packs:
 
 - `web_search`: web discovery and ranked source candidates.
 - `web_fetch`: known-URL reading, article extraction, metadata, and relay fallback.
-- `deep_research` (alias: `research`): multi-step evidence gathering, synthesis, analysis, and UI review.
+- `deep_research`: multi-step evidence gathering, synthesis, analysis, and UI review.
 - `ocr` (aliases: `rapidocr`, `ppocrv6`): RapidOCR-compatible screenshots,
   scans, rendered PDF page images, UI images, and photo text extraction with PP-OCRv6-ready metadata.
 - `audio`: ASR, TTS, meeting notes, and batch audio jobs.
