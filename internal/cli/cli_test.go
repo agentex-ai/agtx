@@ -408,6 +408,74 @@ func TestRunTreatsDoubleDashAsSkillArgSeparator(t *testing.T) {
 	}
 }
 
+func TestRunGoalUsesSemanticGoalInsteadOfSkillName(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGTX_HOME", filepath.Join(root, "home"))
+	photoRoot := filepath.Join(root, "photos")
+	nasRoot := filepath.Join(root, "nas")
+	if err := os.MkdirAll(photoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir photos: %v", err)
+	}
+	if err := os.MkdirAll(nasRoot, 0o755); err != nil {
+		t.Fatalf("mkdir nas: %v", err)
+	}
+	modTime, err := time.ParseInLocation("2006-01-02T15:04:05", "2026-06-21T12:00:00", time.Local)
+	if err != nil {
+		t.Fatalf("parse modtime: %v", err)
+	}
+	image := filepath.Join(photoRoot, "a.jpg")
+	if err := os.WriteFile(image, []byte("a"), 0o644); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+	if err := os.Chtimes(image, modTime, modTime); err != nil {
+		t.Fatalf("chtimes image: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Main([]string{"run", "--goal", "把昨天的照片备份到 NAS", "--json", "--", "--photo-root", photoRoot, "--nas-root", nasRoot, "--today", "2026-06-22"}, bytes.NewReader(nil), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run --goal failed code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var response struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			ParsedGoal struct {
+				Intent string `json:"intent"`
+				State  string `json:"state"`
+			} `json:"parsed_goal"`
+			IR struct {
+				Goal struct {
+					ObjectType string `json:"object_type"`
+				} `json:"goal"`
+				Policy struct {
+					DryRun    bool `json:"dry_run"`
+					Overwrite bool `json:"overwrite"`
+				} `json:"policy"`
+			} `json:"ir"`
+			Result struct {
+				Planned int `json:"planned"`
+				Copied  int `json:"copied"`
+			} `json:"result"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+	if !response.OK || response.Data.ParsedGoal.Intent != "ensure" || response.Data.ParsedGoal.State != "replicated" {
+		t.Fatalf("unexpected parsed goal: %s", stdout.String())
+	}
+	if response.Data.IR.Goal.ObjectType != "photo_collection" || !response.Data.IR.Policy.DryRun || response.Data.IR.Policy.Overwrite {
+		t.Fatalf("unexpected semantic IR: %s", stdout.String())
+	}
+	if response.Data.Result.Planned != 1 || response.Data.Result.Copied != 0 {
+		t.Fatalf("expected dry-run plan only: %s", stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(nasRoot, "a.jpg")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run should not copy, stat err=%v", err)
+	}
+}
+
 func TestMainConfigLoadFailureIgnoresJSONAfterDoubleDash(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGTX_HOME", root)

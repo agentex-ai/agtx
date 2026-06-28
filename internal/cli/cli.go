@@ -279,14 +279,40 @@ func runSkill(ctx context.Context, service *core.Service, args []string, stdin i
 	outputLimit := takeInt64Flag(&args, "--output-limit-bytes", service.Config.RunOutputLimitBytes, runKnownFlags)
 	scenarioID := takeStringFlag(&args, "--scenario-id", "", runKnownFlags)
 	agentName := takeStringFlag(&args, "--agent-name", "", runKnownFlags)
+	goalText := takeStringFlag(&args, "--goal", "", runKnownFlags)
 	if jsonOut && ndjsonOut {
 		return failRun(stdout, stderr, jsonOut, ndjsonOut, mutuallyExclusiveFlagsError("--json", "--ndjson", runFlags()), core.RunResult{})
 	}
-	if len(args) == 0 {
-		return failRun(stdout, stderr, jsonOut, ndjsonOut, argumentCountError("skill name is required", []string{"skill"}, runFlags()), core.RunResult{})
-	}
 	if hasInternalInvalidFlag(args) {
 		return failRun(stdout, stderr, jsonOut, ndjsonOut, internalFlagError(args, runFlags()), core.RunResult{})
+	}
+	if strings.TrimSpace(goalText) != "" {
+		if len(args) > 0 {
+			return failRun(stdout, stderr, jsonOut, ndjsonOut, unexpectedArgumentsError("run --goal does not accept a skill name", args, runFlags()), core.RunResult{})
+		}
+		if ndjsonOut {
+			writeEvent(stdout, "started", map[string]any{"goal": goalText, "args": passthrough})
+		}
+		result, err := service.RunGoal(ctx, goalText, core.GoalOptions{Args: passthrough})
+		if err != nil {
+			return failAgent(stdout, stderr, jsonOut, ndjsonOut, err)
+		}
+		if ndjsonOut {
+			writeEvent(stdout, "completed", result)
+			return 0
+		}
+		if jsonOut {
+			return writeJSON(stdout, core.NewResponse(result, nil), 0)
+		}
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(result); err != nil {
+			return 1
+		}
+		return 0
+	}
+	if len(args) == 0 {
+		return failRun(stdout, stderr, jsonOut, ndjsonOut, argumentCountError("skill name is required", []string{"skill"}, runFlags()), core.RunResult{})
 	}
 	name := args[0]
 	skillArgs := append([]string{}, args[1:]...)
@@ -329,7 +355,7 @@ func runSkill(ctx context.Context, service *core.Service, args []string, stdin i
 }
 
 func runFlags() []string {
-	return []string{"--json", "--ndjson", "--input", "--timeout-ms", "--output-limit-bytes", "--scenario-id", "--agent-name"}
+	return []string{"--json", "--ndjson", "--input", "--timeout-ms", "--output-limit-bytes", "--scenario-id", "--agent-name", "--goal"}
 }
 
 func uninstallFlags() []string {
@@ -2337,6 +2363,7 @@ Usage:
   agtx search <query> [--json] [--limit N]
   agtx install <skill...> [--plan] [--yes] [--json]
   agtx run <skill> [args...] [--input file|-] [--timeout-ms N] [--output-limit-bytes N] [--json|--ndjson]
+  agtx run --goal "..." [--json|--ndjson] -- [--photo-root dir] [--nas-root dir] [--apply]
   agtx uninstall <skill> [--all-versions] [--plan] [--yes] [--json]
   agtx list [--installed|--available] [--json]
   agtx upgrade [skill...] [--plan] [--yes] [--json]
